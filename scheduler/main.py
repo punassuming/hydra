@@ -1,5 +1,7 @@
+import os
 import threading
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from .api.jobs import router as jobs_router
 from .api.workers import router as workers_router
@@ -12,6 +14,14 @@ from .utils.logging import setup_logging
 log = setup_logging("scheduler.main")
 
 app = FastAPI(title="hydra-jobs scheduler")
+allow_origins = [origin.strip() for origin in os.getenv("CORS_ALLOW_ORIGINS", "http://localhost:5173,http://localhost:8000").split(",") if origin.strip()]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allow_origins or ["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 app.include_router(jobs_router)
 app.include_router(workers_router)
 app.include_router(health_router)
