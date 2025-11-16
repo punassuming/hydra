@@ -10,6 +10,8 @@ def main():
         "user": "rich",
         "affinity": {"os": ["linux"], "tags": [], "allowed_users": ["rich"]},
         "executor": {"type": "shell", "script": "echo 'hello world'", "shell": "bash"},
+        "schedule": {"mode": "interval", "interval_seconds": 60, "enabled": True},
+        "completion": {"exit_codes": [0], "stdout_contains": ["hello"], "stdout_not_contains": [], "stderr_contains": [], "stderr_not_contains": []},
         "timeout": 10,
         "retries": 0,
     }

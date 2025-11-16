@@ -9,7 +9,22 @@ const createDefaultPayload = (): JobPayload => ({
   executor: { type: "shell", script: "echo 'hello world'", shell: "bash" },
   retries: 0,
   timeout: 30,
-  schedule: "",
+  schedule: {
+    mode: "immediate",
+    enabled: true,
+    cron: "",
+    interval_seconds: 300,
+    start_at: null,
+    end_at: null,
+    next_run_at: null,
+  },
+  completion: {
+    exit_codes: [0],
+    stdout_contains: [],
+    stdout_not_contains: [],
+    stderr_contains: [],
+    stderr_not_contains: [],
+  },
 });
 
 interface Props {
@@ -34,7 +49,8 @@ export function JobForm({ selectedJob, onSubmit, onValidate, submitting, validat
         executor: selectedJob.executor,
         retries: selectedJob.retries,
         timeout: selectedJob.timeout,
-        schedule: selectedJob.schedule ?? "",
+        schedule: selectedJob.schedule ?? createDefaultPayload().schedule,
+        completion: selectedJob.completion ?? createDefaultPayload().completion,
       });
     } else {
       setPayload(createDefaultPayload());
@@ -43,6 +59,8 @@ export function JobForm({ selectedJob, onSubmit, onValidate, submitting, validat
 
   const executor = payload.executor;
   const executorType = executor.type;
+  const schedule = payload.schedule;
+  const completion = payload.completion;
 
   const updatePayload = (field: keyof JobPayload, value: any) => {
     setPayload((prev) => ({ ...prev, [field]: value }));
@@ -51,6 +69,27 @@ export function JobForm({ selectedJob, onSubmit, onValidate, submitting, validat
   const updateExecutor = (update: Record<string, unknown>) => {
     setPayload((prev) => ({ ...prev, executor: { ...prev.executor, ...update } as JobPayload["executor"] }));
   };
+
+  const updateSchedule = (update: Record<string, unknown>) => {
+    setPayload((prev) => ({ ...prev, schedule: { ...prev.schedule, ...update } }));
+  };
+
+  const updateCompletion = (update: Record<string, unknown>) => {
+    setPayload((prev) => ({ ...prev, completion: { ...prev.completion, ...update } }));
+  };
+
+  const parseList = (value: string) =>
+    value
+      .split(/\n|,/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+  const setCompletionList = (field: keyof JobPayload["completion"], value: string) => {
+    updateCompletion({ [field]: parseList(value) });
+  };
+
+  const toInputValue = (iso?: string | null) => (iso ? new Date(iso).toISOString().slice(0, 16) : "");
+  const fromInputValue = (value: string) => (value ? new Date(value).toISOString() : null);
 
   const handleSubmit = (evt: React.FormEvent) => {
     evt.preventDefault();
@@ -98,10 +137,6 @@ export function JobForm({ selectedJob, onSubmit, onValidate, submitting, validat
           <input value={payload.user} onChange={(e) => updatePayload("user", e.target.value)} required />
         </label>
         <label>
-          Schedule (cron)
-          <input value={payload.schedule ?? ""} onChange={(e) => updatePayload("schedule", e.target.value)} placeholder="*/5 * * * *" />
-        </label>
-        <label>
           Timeout (seconds)
           <input type="number" min={0} value={payload.timeout} onChange={(e) => updatePayload("timeout", Number(e.target.value))} />
         </label>
@@ -122,6 +157,92 @@ export function JobForm({ selectedJob, onSubmit, onValidate, submitting, validat
         <label>
           Allowed Users
           <input value={affinityDisplay.allowed_users} onChange={(e) => setAffinity("allowed_users", e.target.value)} />
+        </label>
+      </div>
+
+      <div style={{ marginTop: "1rem" }}>
+        <h3>Schedule</h3>
+        <label>
+          Mode
+          <select
+            value={schedule.mode}
+            onChange={(e) => {
+              const mode = e.target.value as JobPayload["schedule"]["mode"];
+              updateSchedule({ mode, next_run_at: null });
+            }}
+          >
+            <option value="immediate">Immediate</option>
+            <option value="interval">Interval</option>
+            <option value="cron">Cron</option>
+          </select>
+        </label>
+        <label>
+          Enabled
+          <input type="checkbox" checked={schedule.enabled} onChange={(e) => updateSchedule({ enabled: e.target.checked })} />
+        </label>
+        {schedule.mode === "interval" && (
+          <label>
+            Interval (seconds)
+            <input
+              type="number"
+              min={1}
+              value={schedule.interval_seconds ?? 300}
+              onChange={(e) => updateSchedule({ interval_seconds: Number(e.target.value) })}
+            />
+          </label>
+        )}
+        {schedule.mode === "cron" && (
+          <label>
+            Cron Expression
+            <input value={schedule.cron ?? ""} onChange={(e) => updateSchedule({ cron: e.target.value })} placeholder="*/5 * * * *" />
+          </label>
+        )}
+        {(schedule.mode === "interval" || schedule.mode === "cron") && (
+          <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))" }}>
+            <label>
+              Start At
+              <input type="datetime-local" value={toInputValue(schedule.start_at)} onChange={(e) => updateSchedule({ start_at: fromInputValue(e.target.value) })} />
+            </label>
+            <label>
+              End At
+              <input type="datetime-local" value={toInputValue(schedule.end_at)} onChange={(e) => updateSchedule({ end_at: fromInputValue(e.target.value) })} />
+            </label>
+          </div>
+        )}
+        <p style={{ fontSize: "0.85rem", color: "#475569" }}>
+          Next run: {!schedule.enabled ? "Disabled" : schedule.next_run_at ? new Date(schedule.next_run_at).toLocaleString() : schedule.mode === "immediate" ? "Immediately" : "pending"}
+        </p>
+      </div>
+
+      <div style={{ marginTop: "1rem" }}>
+        <h3>Completion Criteria</h3>
+        <label>
+          Exit Codes (comma separated)
+          <input
+            value={completion.exit_codes.join(", ")}
+            onChange={(e) => {
+              const values = parseList(e.target.value)
+                .map((c) => Number(c))
+                .filter((n) => !Number.isNaN(n));
+              updateCompletion({ exit_codes: values.length ? values : [] });
+            }}
+          />
+        </label>
+        <label>
+          Stdout must contain (one per line)
+          <textarea value={completion.stdout_contains.join("\n")} onChange={(e) => setCompletionList("stdout_contains", e.target.value)} />
+        </label>
+        <label>
+          Stdout must NOT contain
+          <textarea value={completion.stdout_not_contains.join("\n")} onChange={(e) => setCompletionList("stdout_not_contains", e.target.value)} />
+        </label>
+        <label>
+          Stderr must contain (one per line)
+          <textarea value={completion.stderr_contains.join("\n")} onChange={(e) => setCompletionList("stderr_contains", e.target.value)} />
+        </label>
+        <label>
+          Stderr must NOT contain
+          <textarea value={completion.stderr_not_contains.join("\n")} onChange={(e) => setCompletionList("stderr_not_contains", e.target.value)} />
         </label>
       </div>
       <div style={{ marginTop: "0.75rem" }}>

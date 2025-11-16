@@ -8,6 +8,7 @@ from .redis_client import get_redis
 from .config import get_worker_id, get_tags, get_allowed_users, get_max_concurrency
 from .utils.heartbeat import start_heartbeat
 from .utils.concurrency import incr_running, add_active_job, remove_active_job
+from .utils.completion import evaluate_completion
 from .executor import execute_job, record_run_start, record_run_end
 
 
@@ -65,13 +66,17 @@ def worker_main():
             stdout = ""
             stderr = ""
             attempts_used = 0
+            last_reason = ""
+            success = False
             for _ in range(max(1, attempts)):
                 rc, stdout, stderr = execute_job(job)
                 attempts_used += 1
-                if rc == 0:
+                success, last_reason = evaluate_completion(job, rc, stdout, stderr)
+                if success:
                     break
 
-            record_run_end(run_id, rc, stdout, stderr, attempts_used)
+            status = "success" if success else "failed"
+            record_run_end(run_id, status, rc, stdout, stderr, attempts_used, last_reason or "criteria not met")
         finally:
             r.delete(f"job_running:{job_id}")
             remove_active_job(worker_id, job_id)

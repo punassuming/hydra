@@ -19,8 +19,10 @@ class JobRun(BaseModel):
     attempt: Optional[int] = None
     retries_remaining: Optional[int] = None
     schedule_tick: Optional[str] = None
+    schedule_mode: Optional[str] = None
     executor_type: Optional[str] = None
     queue_latency_ms: Optional[float] = None
+    completion_reason: Optional[str] = None
 
     class Config:
         populate_by_name = True

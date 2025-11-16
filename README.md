@@ -4,7 +4,7 @@ A distributed job runner with a FastAPI scheduler, cross‑platform workers, Red
 
 ## Overview
 
-- Scheduler service (Python/FastAPI) exposes a REST API to submit jobs, validate definitions, update them, list workers, stream scheduler events (SSE), and expose health. The scheduler also dispatches jobs from the pending queue to eligible workers and performs failover.
+- Scheduler service (Python/FastAPI) exposes a REST API to submit jobs, validate definitions, update them, list workers, stream scheduler events (SSE), and expose health. The scheduler dispatches pending jobs to eligible workers, evaluates cron/interval schedules, and performs failover.
 - Worker service (Python) registers to Redis, heartbeats, consumes its queue, executes jobs (shell, batch, python, or external binaries) with configurable concurrency, and persists run results to MongoDB including slot/attempt metadata.
 - Redis coordinates: job queues, worker heartbeats, and in‑flight job markers.
 - MongoDB stores: job definitions, executor configs, job runs (history with slot/attempt/queue latency), and can be queried by API/UI.
@@ -43,7 +43,8 @@ A distributed job runner with a FastAPI scheduler, cross‑platform workers, Red
   - `max_concurrency > current_running`
   - OS, tags, and allowed_users affinity
 - Select best worker by lowest load and RPUSH the job ID to `job_queue:<worker_id>`.
-- Insert a pending `job_runs` document (worker updates on start/finish with concurrency slot + attempt metadata).
+- Workers record run documents when they start executing a job (including slot/attempt metadata and completion details).
+- A dedicated schedule loop evaluates cron/interval plans and enqueues due jobs (`schedule.next_run_at <= now`), advancing the next tick after each dispatch.
 - Periodically scan for stale heartbeats; for offline workers requeue their running jobs.
 
 ## How Workers Work
@@ -67,8 +68,8 @@ A distributed job runner with a FastAPI scheduler, cross‑platform workers, Red
 ## MongoDB Usage
 
 Collections:
-- `job_definitions` — job documents with `_id` (string), name, user, affinity, executor config (python/shell/batch/external), retries, timeout, schedule, timestamps
-- `job_runs` — run history with job_id, user, worker_id, timestamps, status, returncode, stdout, stderr, concurrency slot, attempt count, queue latency, executor type
+- `job_definitions` — job documents with `_id` (string), name, user, affinity, executor config (python/shell/batch/external), retries, timeout, schedule metadata (mode, cron/interval, next run), completion criteria, timestamps
+- `job_runs` — run history with job_id, user, worker_id, timestamps, status, returncode, stdout, stderr, concurrency slot, attempt count, queue latency, executor type, completion reason
 
 ## Quick Start
 
@@ -117,6 +118,18 @@ POST `http://localhost:8000/jobs/` with JSON body:
     "script": "echo 'hello world'",
     "shell": "bash"
   },
+  "schedule": {
+    "mode": "interval",
+    "interval_seconds": 300,
+    "enabled": true
+  },
+  "completion": {
+    "exit_codes": [0],
+    "stdout_contains": ["hello"],
+    "stdout_not_contains": [],
+    "stderr_contains": [],
+    "stderr_not_contains": []
+  },
   "retries": 0,
   "timeout": 10
 }
@@ -131,6 +144,21 @@ Then query:
 - `GET /workers/` — workers
 - `GET /events/stream` — real-time scheduler events (SSE)
 - `GET /health` — scheduler health
+
+### Scheduling
+
+- `schedule.mode="immediate"` (default) enqueues the job as soon as it is created.
+- `schedule.mode="interval"` runs every `interval_seconds`, starting at `start_at` (defaults to now); `end_at` stops future runs, and setting `enabled=false` pauses the schedule.
+- `schedule.mode="cron"` accepts standard cron expressions (UTC) plus optional `start_at`/`end_at`. Each enqueue emits a `job_scheduled` SSE event.
+- `POST /jobs/validate` returns `next_run_at` so you can preview when the next kick-off will occur.
+
+### Completion Criteria
+
+Every job can define pass/fail rules beyond exit codes:
+
+- `completion.exit_codes` (default `[0]`) lists the success return codes.
+- `stdout_contains` / `stderr_contains` require substrings to appear; `stdout_not_contains` / `stderr_not_contains` ensure substrings do **not** appear.
+- All configured rules must pass for a run to be marked `success`; failures capture the first unmet rule in `completion_reason` and, if retries remain, trigger another attempt.
 
 ### React Control Plane
 

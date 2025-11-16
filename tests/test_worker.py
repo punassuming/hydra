@@ -1,6 +1,7 @@
 import platform
 from worker.utils.os_exec import run_command, run_python
 from worker.executor import execute_job
+from worker.utils.completion import evaluate_completion
 
 
 def test_os_exec_echo():
@@ -40,3 +41,19 @@ def test_execute_job_external_executor():
     rc, out, _ = execute_job(job)
     assert rc == 0
     assert "external" in out.lower()
+
+
+def test_completion_exit_code_evaluation():
+    job = {"completion": {"exit_codes": [0]}}
+    ok, reason = evaluate_completion(job, 0, "", "")
+    assert ok
+    assert "criteria" in reason.lower()
+
+
+def test_completion_stdout_contains():
+    job = {"completion": {"exit_codes": [0], "stdout_contains": ["ready"]}}
+    ok, reason = evaluate_completion(job, 0, "system ready", "")
+    assert ok
+    ok, reason = evaluate_completion(job, 0, "no match", "")
+    assert not ok
+    assert "stdout" in reason.lower()

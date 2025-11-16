@@ -45,6 +45,7 @@ def record_run_start(job: dict, worker_id: str, slot: int, retries_remaining: in
             queue_latency_ms = max(0.0, (datetime.utcnow() - created_at).total_seconds() * 1000)
         except Exception:
             queue_latency_ms = None
+    schedule_info = job.get("schedule") or {}
     run_doc = {
         "job_id": job_id,
         "user": user,
@@ -59,17 +60,18 @@ def record_run_start(job: dict, worker_id: str, slot: int, retries_remaining: in
         "slot": slot,
         "attempt": 1,
         "retries_remaining": retries_remaining,
-        "schedule_tick": job.get("schedule"),
+        "schedule_tick": schedule_info.get("next_run_at"),
+        "schedule_mode": schedule_info.get("mode", "immediate"),
         "executor_type": executor_type,
         "queue_latency_ms": queue_latency_ms,
+        "completion_reason": None,
     }
     res = db.job_runs.insert_one(run_doc)
     return str(res.inserted_id)
 
 
-def record_run_end(run_id: str, returncode: int, stdout: str, stderr: str, attempts: int):
+def record_run_end(run_id: str, status: str, returncode: int, stdout: str, stderr: str, attempts: int, completion_reason: str):
     db = get_db()
-    status = "success" if returncode == 0 else "failed"
     db.job_runs.update_one(
         {"_id": ObjectId(run_id)},
         {
@@ -80,6 +82,7 @@ def record_run_end(run_id: str, returncode: int, stdout: str, stderr: str, attem
                 "stdout": stdout,
                 "stderr": stderr,
                 "attempt": attempts,
+                "completion_reason": completion_reason,
             }
         },
     )

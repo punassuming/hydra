@@ -18,6 +18,7 @@ export function JobList({ jobs, onSelect, selectedId, loading }: Props) {
             <th>Name</th>
             <th>User</th>
             <th>Executor</th>
+            <th>Schedule</th>
             <th>Retries</th>
             <th>Updated</th>
             <th />
@@ -30,6 +31,19 @@ export function JobList({ jobs, onSelect, selectedId, loading }: Props) {
               <td>{job.user}</td>
               <td>
                 <span className="pill">{job.executor.type}</span>
+              </td>
+              <td>
+                {job.schedule.mode}
+                <br />
+                <small>
+                  {!job.schedule.enabled
+                    ? "disabled"
+                    : job.schedule.next_run_at
+                      ? new Date(job.schedule.next_run_at).toLocaleString()
+                      : job.schedule.mode === "immediate"
+                        ? "immediate"
+                        : "pending"}
+                </small>
               </td>
               <td>{job.retries}</td>
               <td>{new Date(job.updated_at).toLocaleString()}</td>

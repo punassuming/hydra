@@ -31,6 +31,7 @@ export function JobRuns({ jobId }: Props) {
               <th>Queued At</th>
               <th>Started</th>
               <th>Finished</th>
+              <th>Reason</th>
             </tr>
           </thead>
           <tbody>
@@ -44,6 +45,7 @@ export function JobRuns({ jobId }: Props) {
                 <td>{run.scheduled_ts ? new Date(run.scheduled_ts).toLocaleTimeString() : "-"}</td>
                 <td>{run.start_ts ? new Date(run.start_ts).toLocaleTimeString() : "-"}</td>
                 <td>{run.end_ts ? new Date(run.end_ts).toLocaleTimeString() : "-"}</td>
+                <td>{run.completion_reason ?? "-"}</td>
               </tr>
             ))}
           </tbody>

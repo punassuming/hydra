@@ -5,3 +5,4 @@ pymongo==4.10.1
 pydantic==2.9.2
 python-dotenv==1.0.1
 sse-starlette==2.0.0
+croniter==2.0.5

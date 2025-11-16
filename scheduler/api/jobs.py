@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import List
 
 from fastapi import APIRouter, HTTPException
+
 from ..mongo_client import get_db
 from ..redis_client import get_redis
 from ..models.job_definition import (
@@ -12,6 +13,7 @@ from ..models.job_definition import (
 )
 from ..models.job_run import JobRun
 from ..event_bus import event_bus
+from ..utils.schedule import initialize_schedule
 
 
 router = APIRouter()
@@ -19,6 +21,7 @@ router = APIRouter()
 
 def _validate_job_definition(job: JobDefinition) -> JobValidationResult:
     errors = []
+    next_run_at = None
     executor = job.executor
     exec_type = getattr(executor, "type", None)
     if exec_type == "python":
@@ -41,7 +44,24 @@ def _validate_job_definition(job: JobDefinition) -> JobValidationResult:
     else:
         errors.append("executor.type must be one of python|shell|batch|external")
 
-    return JobValidationResult(valid=not errors, errors=errors)
+    try:
+        next_run_at = initialize_schedule(job.schedule, datetime.utcnow()).next_run_at
+    except ValueError as exc:
+        errors.append(str(exc))
+
+    return JobValidationResult(valid=not errors, errors=errors, next_run_at=next_run_at)
+
+
+def _attach_schedule(job_def: JobDefinition, force: bool = False) -> JobDefinition:
+    schedule = job_def.schedule
+    needs_init = force or (schedule.mode != "immediate" and schedule.enabled and schedule.next_run_at is None)
+    if not needs_init:
+        return job_def
+    try:
+        new_schedule = initialize_schedule(schedule, datetime.utcnow())
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=[str(exc)])
+    return job_def.copy(update={"schedule": new_schedule})
 
 
 @router.get("/jobs/", response_model=List[JobDefinition])
@@ -59,17 +79,20 @@ def submit_job(job: JobCreate):
     validation = _validate_job_definition(job_def)
     if not validation.valid:
         raise HTTPException(status_code=422, detail=validation.errors)
+    job_def = _attach_schedule(job_def, force=True)
     db.job_definitions.insert_one(job_def.to_mongo())
-    r.rpush("job_queue:pending", job_def.id)
-    run = JobRun(
-        job_id=job_def.id,
-        user=job_def.user,
-        status="pending",
-        start_ts=None,
-        end_ts=None,
-    ).model_dump(by_alias=True)
-    db.job_runs.insert_one(run)
-    event_bus.publish("job_submitted", {"job_id": job_def.id, "name": job_def.name, "user": job_def.user})
+    if job_def.schedule.mode == "immediate":
+        r.rpush("job_queue:pending", job_def.id)
+    event_bus.publish(
+        "job_submitted",
+        {
+            "job_id": job_def.id,
+            "name": job_def.name,
+            "user": job_def.user,
+            "schedule_mode": job_def.schedule.mode,
+            "next_run_at": job_def.schedule.next_run_at.isoformat() if job_def.schedule.next_run_at else None,
+        },
+    )
     return job_def
 
 
@@ -104,6 +127,7 @@ def update_job(job_id: str, updates: JobUpdate):
     validation = _validate_job_definition(job_def)
     if not validation.valid:
         raise HTTPException(status_code=422, detail=validation.errors)
+    job_def = _attach_schedule(job_def, force="schedule" in update_doc)
     db.job_definitions.replace_one({"_id": job_id}, job_def.to_mongo())
     event_bus.publish("job_updated", {"job_id": job_id})
     return job_def

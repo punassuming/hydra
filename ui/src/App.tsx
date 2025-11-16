@@ -57,7 +57,12 @@ function App() {
     setStatusMessage("Validating…");
     try {
       const result = await validateJob(payload);
-      setStatusMessage(result.valid ? "Validation passed" : result.errors.join(", "));
+      if (result.valid) {
+        const next = result.next_run_at ? ` – next run ${new Date(result.next_run_at).toLocaleString()}` : "";
+        setStatusMessage(`Validation passed${next}`);
+      } else {
+        setStatusMessage(result.errors.join(", "));
+      }
     } catch (err) {
       setStatusMessage((err as Error).message);
     } finally {

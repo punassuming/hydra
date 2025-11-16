@@ -1,5 +1,5 @@
 import { apiClient } from "./client";
-import { JobDefinition, JobRun, WorkerInfo } from "../types";
+import { JobDefinition, JobRun, WorkerInfo, ScheduleConfig, CompletionCriteria } from "../types";
 
 export interface JobPayload {
   name: string;
@@ -8,7 +8,14 @@ export interface JobPayload {
   executor: JobDefinition["executor"];
   retries: number;
   timeout: number;
-  schedule?: string | null;
+  schedule: ScheduleConfig;
+  completion: CompletionCriteria;
+}
+
+export interface ValidationResult {
+  valid: boolean;
+  errors: string[];
+  next_run_at?: string | null;
 }
 
 export const fetchJobs = () => apiClient.get<JobDefinition[]>("/jobs/");
@@ -17,6 +24,5 @@ export const fetchJobRuns = (jobId: string) => apiClient.get<JobRun[]>(`/jobs/${
 export const createJob = (payload: JobPayload) => apiClient.post<JobDefinition>("/jobs/", payload);
 export const updateJob = (jobId: string, payload: Partial<JobPayload>) =>
   apiClient.put<JobDefinition>(`/jobs/${jobId}`, payload);
-export const validateJob = (payload: JobPayload) => apiClient.post<{ valid: boolean; errors: string[] }>("/jobs/validate", payload);
-export const validateJobById = (jobId: string) =>
-  apiClient.post<{ valid: boolean; errors: string[] }>(`/jobs/${jobId}/validate`, {});
+export const validateJob = (payload: JobPayload) => apiClient.post<ValidationResult>("/jobs/validate", payload);
+export const validateJobById = (jobId: string) => apiClient.post<ValidationResult>(`/jobs/${jobId}/validate`, {});

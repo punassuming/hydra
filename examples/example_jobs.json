@@ -7,6 +7,18 @@
     "script": "echo 'hello world'",
     "shell": "bash"
   },
+  "schedule": {
+    "mode": "cron",
+    "cron": "*/2 * * * *",
+    "enabled": true
+  },
+  "completion": {
+    "exit_codes": [0],
+    "stdout_contains": ["hello"],
+    "stdout_not_contains": [],
+    "stderr_contains": [],
+    "stderr_not_contains": []
+  },
   "retries": 0,
   "timeout": 10
 }

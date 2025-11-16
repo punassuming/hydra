@@ -37,6 +37,24 @@ export type Executor =
       workdir?: string | null;
     };
 
+export interface ScheduleConfig {
+  mode: "immediate" | "cron" | "interval";
+  cron?: string | null;
+  interval_seconds?: number | null;
+  start_at?: string | null;
+  end_at?: string | null;
+  next_run_at?: string | null;
+  enabled: boolean;
+}
+
+export interface CompletionCriteria {
+  exit_codes: number[];
+  stdout_contains: string[];
+  stdout_not_contains: string[];
+  stderr_contains: string[];
+  stderr_not_contains: string[];
+}
+
 export interface JobDefinition {
   _id: string;
   name: string;
@@ -45,7 +63,8 @@ export interface JobDefinition {
   executor: Executor;
   retries: number;
   timeout: number;
-  schedule?: string | null;
+  schedule: ScheduleConfig;
+  completion: CompletionCriteria;
   created_at: string;
   updated_at: string;
 }
@@ -68,6 +87,7 @@ export interface JobRun {
   schedule_tick?: string;
   executor_type?: string;
   queue_latency_ms?: number;
+  completion_reason?: string;
 }
 
 export interface WorkerInfo {
