@@ -26,3 +26,5 @@ export const updateJob = (jobId: string, payload: Partial<JobPayload>) =>
   apiClient.put<JobDefinition>(`/jobs/${jobId}`, payload);
 export const validateJob = (payload: JobPayload) => apiClient.post<ValidationResult>("/jobs/validate", payload);
 export const validateJobById = (jobId: string) => apiClient.post<ValidationResult>(`/jobs/${jobId}/validate`, {});
+export const runJobNow = (jobId: string) => apiClient.post<{ job_id: string; queued: boolean }>(`/jobs/${jobId}/run`, {});
+export const runAdhocJob = (payload: JobPayload) => apiClient.post<JobDefinition>("/jobs/adhoc", payload);

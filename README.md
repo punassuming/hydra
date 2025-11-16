@@ -141,6 +141,8 @@ Then query:
 - `GET /jobs/{job_id}/runs` — run history
 - `PUT /jobs/{job_id}` — update job configuration/executor
 - `POST /jobs/{job_id}/validate` or `/jobs/validate` — dry-run validation
+- `POST /jobs/{job_id}/run` — enqueue a manual run immediately, regardless of schedule
+- `POST /jobs/adhoc` — create + run a one-off job (schedule forced to immediate, disabled after dispatch)
 - `GET /workers/` — workers
 - `GET /events/stream` — real-time scheduler events (SSE)
 - `GET /health` — scheduler health
@@ -151,6 +153,12 @@ Then query:
 - `schedule.mode="interval"` runs every `interval_seconds`, starting at `start_at` (defaults to now); `end_at` stops future runs, and setting `enabled=false` pauses the schedule.
 - `schedule.mode="cron"` accepts standard cron expressions (UTC) plus optional `start_at`/`end_at`. Each enqueue emits a `job_scheduled` SSE event.
 - `POST /jobs/validate` returns `next_run_at` so you can preview when the next kick-off will occur.
+- Use `POST /jobs/{job_id}/run` to force a run immediately, even if the schedule is paused/not due.
+
+### Adhoc & Manual Jobs
+
+- `POST /jobs/adhoc` accepts the same payload as `/jobs/` but forces the schedule to `immediate` + `enabled=false`, ensuring the definition runs exactly once (still recorded in Mongo for history).
+- `POST /jobs/{job_id}/run` is useful for re-running a scheduled job on demand (e.g., after a fix) without altering its cadence.
 
 ### Completion Criteria
 

@@ -10,6 +10,7 @@ from ..models.job_definition import (
     JobDefinition,
     JobUpdate,
     JobValidationResult,
+    ScheduleConfig,
 )
 from ..models.job_run import JobRun
 from ..event_bus import event_bus
@@ -17,6 +18,15 @@ from ..utils.schedule import initialize_schedule
 
 
 router = APIRouter()
+
+
+def _enqueue_job(job_id: str, reason: str, extra_payload: dict | None = None):
+    r = get_redis()
+    r.rpush("job_queue:pending", job_id)
+    payload = {"job_id": job_id, "reason": reason}
+    if extra_payload:
+        payload.update(extra_payload)
+    event_bus.publish("job_enqueued", payload)
 
 
 def _validate_job_definition(job: JobDefinition) -> JobValidationResult:
@@ -74,7 +84,6 @@ def list_jobs():
 @router.post("/jobs/", response_model=JobDefinition)
 def submit_job(job: JobCreate):
     db = get_db()
-    r = get_redis()
     job_def = JobDefinition(**job.model_dump())
     validation = _validate_job_definition(job_def)
     if not validation.valid:
@@ -82,7 +91,7 @@ def submit_job(job: JobCreate):
     job_def = _attach_schedule(job_def, force=True)
     db.job_definitions.insert_one(job_def.to_mongo())
     if job_def.schedule.mode == "immediate":
-        r.rpush("job_queue:pending", job_def.id)
+        _enqueue_job(job_def.id, reason="immediate_submit")
     event_bus.publish(
         "job_submitted",
         {
@@ -147,3 +156,29 @@ def validate_job(job_id: str):
 def validate_payload(job: JobCreate):
     job_def = JobDefinition(**job.model_dump())
     return _validate_job_definition(job_def)
+
+
+@router.post("/jobs/{job_id}/run")
+def run_job_now(job_id: str):
+    db = get_db()
+    doc = db.job_definitions.find_one({"_id": job_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="job not found")
+    _enqueue_job(job_id, reason="manual_run")
+    return {"job_id": job_id, "queued": True}
+
+
+@router.post("/jobs/adhoc", response_model=JobDefinition)
+def run_adhoc_job(job: JobCreate):
+    db = get_db()
+    adhoc_schedule = ScheduleConfig(mode="immediate", enabled=False)
+    job_dict = job.model_dump()
+    job_dict["schedule"] = adhoc_schedule.model_dump()
+    job_def = JobDefinition(**job_dict)
+    validation = _validate_job_definition(job_def)
+    if not validation.valid:
+        raise HTTPException(status_code=422, detail=validation.errors)
+    job_def = _attach_schedule(job_def, force=True)
+    db.job_definitions.insert_one(job_def.to_mongo())
+    _enqueue_job(job_def.id, reason="adhoc_run")
+    return job_def

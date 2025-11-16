@@ -5,7 +5,7 @@ import { JobList } from "./components/JobList";
 import { JobRuns } from "./components/JobRuns";
 import { WorkersPanel } from "./components/WorkersPanel";
 import { EventsFeed } from "./components/EventsFeed";
-import { createJob, fetchJobs, JobPayload, updateJob, validateJob } from "./api/jobs";
+import { createJob, fetchJobs, JobPayload, runJobNow, runAdhocJob, updateJob, validateJob } from "./api/jobs";
 import { useSchedulerEvents } from "./hooks/useEvents";
 
 function App() {
@@ -70,6 +70,17 @@ function App() {
     }
   };
 
+  const handleManualRun = () => {
+    if (selectedJobId) {
+      manualRunMutation.mutate(selectedJobId);
+    }
+  };
+
+  const handleAdhocRun = (payload: JobPayload) => {
+    setStatusMessage(undefined);
+    adhocMutation.mutate(payload);
+  };
+
   return (
     <div className="app-shell">
       <h1>Hydra Scheduler</h1>
@@ -78,6 +89,8 @@ function App() {
           selectedJob={selectedJob}
           onSubmit={handleSubmit}
           onValidate={handleValidate}
+          onManualRun={handleManualRun}
+          onAdhocRun={handleAdhocRun}
           submitting={createMutation.isPending || updateMutation.isPending}
           validating={validating}
           statusMessage={statusMessage}
@@ -98,3 +111,20 @@ function App() {
 }
 
 export default App;
+  const manualRunMutation = useMutation({
+    mutationFn: (jobId: string) => runJobNow(jobId),
+    onSuccess: () => {
+      setStatusMessage("Manual run queued");
+    },
+    onError: (err: Error) => setStatusMessage(err.message),
+  });
+
+  const adhocMutation = useMutation({
+    mutationFn: runAdhocJob,
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["jobs"] });
+      setSelectedJobId(data._id);
+      setStatusMessage("Adhoc job queued");
+    },
+    onError: (err: Error) => setStatusMessage(err.message),
+  });

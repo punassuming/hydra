@@ -31,13 +31,15 @@ interface Props {
   selectedJob?: JobDefinition | null;
   onSubmit: (payload: JobPayload) => void;
   onValidate: (payload: JobPayload) => void;
+  onManualRun: () => void;
+  onAdhocRun: (payload: JobPayload) => void;
   submitting: boolean;
   validating: boolean;
   statusMessage?: string;
   onReset: () => void;
 }
 
-export function JobForm({ selectedJob, onSubmit, onValidate, submitting, validating, statusMessage, onReset }: Props) {
+export function JobForm({ selectedJob, onSubmit, onValidate, onManualRun, onAdhocRun, submitting, validating, statusMessage, onReset }: Props) {
   const [payload, setPayload] = useState<JobPayload>(() => createDefaultPayload());
 
   useEffect(() => {
@@ -122,9 +124,14 @@ export function JobForm({ selectedJob, onSubmit, onValidate, submitting, validat
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <h2>{selectedJob ? "Update Job" : "Create Job"}</h2>
         {selectedJob && (
-          <button type="button" onClick={onReset} style={{ backgroundColor: "#475569" }}>
-            New Job
-          </button>
+          <div style={{ display: "flex", gap: "0.5rem" }}>
+            <button type="button" onClick={onManualRun} style={{ backgroundColor: "#0d9488" }}>
+              Run Now
+            </button>
+            <button type="button" onClick={onReset} style={{ backgroundColor: "#475569" }}>
+              New Job
+            </button>
+          </div>
         )}
       </div>
       <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
@@ -347,6 +354,16 @@ export function JobForm({ selectedJob, onSubmit, onValidate, submitting, validat
         <button type="button" onClick={handleValidate} disabled={validating} style={{ backgroundColor: "#0d9488" }}>
           Validate
         </button>
+        {!selectedJob && (
+          <button
+            type="button"
+            onClick={() => onAdhocRun(payload)}
+            disabled={submitting}
+            style={{ backgroundColor: "#6d28d9" }}
+          >
+            Run Adhoc
+          </button>
+        )}
         {statusMessage && <span style={{ fontSize: "0.85rem", color: "#0f766e" }}>{statusMessage}</span>}
       </div>
     </form>
