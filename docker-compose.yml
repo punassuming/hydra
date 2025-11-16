@@ -1,0 +1,60 @@
+version: "3.9"
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  mongo:
+    image: mongo:6
+    ports:
+      - "27017:27017"
+
+  scheduler:
+    build:
+      context: ./scheduler
+      dockerfile: Dockerfile
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - MONGO_URL=mongodb://mongo:27017
+      - MONGO_DB=hydra_jobs
+      - SCHEDULER_HEARTBEAT_TTL=10
+    depends_on:
+      - redis
+      - mongo
+    ports:
+      - "8000:8000"
+
+  worker1:
+    build:
+      context: ./worker
+      dockerfile: Dockerfile
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - MONGO_URL=mongodb://mongo:27017
+      - MONGO_DB=hydra_jobs
+      - WORKER_ID=worker1
+      - WORKER_TAGS=
+      - ALLOWED_USERS=
+      - MAX_CONCURRENCY=2
+    depends_on:
+      - redis
+      - mongo
+
+  worker2:
+    build:
+      context: ./worker
+      dockerfile: Dockerfile
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - MONGO_URL=mongodb://mongo:27017
+      - MONGO_DB=hydra_jobs
+      - WORKER_ID=worker2
+      - WORKER_TAGS=
+      - ALLOWED_USERS=
+      - MAX_CONCURRENCY=2
+    depends_on:
+      - redis
+      - mongo
+
