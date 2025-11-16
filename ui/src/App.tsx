@@ -43,6 +43,24 @@ function App() {
     onError: (err: Error) => setStatusMessage(err.message),
   });
 
+  const manualRunMutation = useMutation({
+    mutationFn: (jobId: string) => runJobNow(jobId),
+    onSuccess: () => {
+      setStatusMessage("Manual run queued");
+    },
+    onError: (err: Error) => setStatusMessage(err.message),
+  });
+
+  const adhocMutation = useMutation({
+    mutationFn: runAdhocJob,
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["jobs"] });
+      setSelectedJobId(data._id);
+      setStatusMessage("Adhoc job queued");
+    },
+    onError: (err: Error) => setStatusMessage(err.message),
+  });
+
   const handleSubmit = (payload: JobPayload) => {
     setStatusMessage(undefined);
     if (selectedJobId) {
@@ -111,20 +129,3 @@ function App() {
 }
 
 export default App;
-  const manualRunMutation = useMutation({
-    mutationFn: (jobId: string) => runJobNow(jobId),
-    onSuccess: () => {
-      setStatusMessage("Manual run queued");
-    },
-    onError: (err: Error) => setStatusMessage(err.message),
-  });
-
-  const adhocMutation = useMutation({
-    mutationFn: runAdhocJob,
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ["jobs"] });
-      setSelectedJobId(data._id);
-      setStatusMessage("Adhoc job queued");
-    },
-    onError: (err: Error) => setStatusMessage(err.message),
-  });

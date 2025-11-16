@@ -8,24 +8,25 @@ async function handleResponse<T>(res: Response): Promise<T> {
   return res.json();
 }
 
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, init);
+  return handleResponse<T>(res);
+}
+
 export const apiClient = {
-  get: <T>(path: string) => handleResponse<T>(fetch(`${API_BASE}${path}`)),
+  get: <T>(path: string) => request<T>(path),
   post: <T>(path: string, body: unknown) =>
-    handleResponse<T>(
-      fetch(`${API_BASE}${path}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      }),
-    ),
+    request<T>(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
   put: <T>(path: string, body: unknown) =>
-    handleResponse<T>(
-      fetch(`${API_BASE}${path}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      }),
-    ),
+    request<T>(path, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
 };
 
 export const streamUrl = `${API_BASE}/events/stream`;
