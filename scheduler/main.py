@@ -14,11 +14,13 @@ from .utils.logging import setup_logging
 log = setup_logging("scheduler.main")
 
 app = FastAPI(title="hydra-jobs scheduler")
-allow_origins = [origin.strip() for origin in os.getenv("CORS_ALLOW_ORIGINS", "http://localhost:5173,http://localhost:8000").split(",") if origin.strip()]
+cors_env = os.getenv("CORS_ALLOW_ORIGINS", "*")
+allow_origins = [origin.strip() for origin in cors_env.split(",") if origin.strip() and origin.strip() != "*"]
+allow_all = "*" in [o.strip() for o in cors_env.split(",")]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allow_origins or ["*"],
-    allow_credentials=True,
+    allow_origins=["*"] if allow_all else (allow_origins or ["http://localhost:5173", "http://localhost:8000"]),
+    allow_credentials=not allow_all,
     allow_methods=["*"],
     allow_headers=["*"],
 )

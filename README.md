@@ -103,7 +103,7 @@ curl http://localhost:8000/events/stream   # SSE stream
 ```
 Access the React UI at `http://localhost:5173` (served by Docker Compose via the `ui` service). If you run the API elsewhere, adjust `docker-compose.yml`’s `VITE_API_BASE_URL` build arg or run the UI locally via `npm run dev`.
 
-**CORS note:** The scheduler enables CORS for `http://localhost:5173` and `http://localhost:8000` by default so the bundled UI can talk to the API. Override `CORS_ALLOW_ORIGINS` (comma-separated) if you host the UI/API on different domains.
+**CORS note:** The scheduler enables CORS for `http://localhost:5173` and `http://localhost:8000` by default so the bundled UI can talk to the API. Override `CORS_ALLOW_ORIGINS` (comma-separated or `*`) if you host the UI/API on different domains.
 
 ## Write Your Own Worker
 

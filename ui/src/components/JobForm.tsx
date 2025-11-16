@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Form, Input, InputNumber, Select, Switch, Button, Divider, Space, Typography, Row, Col, Alert } from "antd";
 import { JobDefinition, PythonEnvironment } from "../types";
 import { JobPayload } from "../api/jobs";
 
@@ -135,8 +136,7 @@ export function JobForm({ selectedJob, onSubmit, onValidate, onManualRun, onAdho
   const toInputValue = (iso?: string | null) => (iso ? new Date(iso).toISOString().slice(0, 16) : "");
   const fromInputValue = (value: string) => (value ? new Date(value).toISOString() : null);
 
-  const handleSubmit = (evt: React.FormEvent) => {
-    evt.preventDefault();
+  const handleSubmit = () => {
     onSubmit(payload);
   };
 
@@ -162,262 +162,280 @@ export function JobForm({ selectedJob, onSubmit, onValidate, onManualRun, onAdho
   };
 
   return (
-    <form className="panel" onSubmit={handleSubmit}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <h2>{selectedJob ? "Update Job" : "Create Job"}</h2>
-        {selectedJob && (
-          <div style={{ display: "flex", gap: "0.5rem" }}>
-            <button type="button" onClick={onManualRun} style={{ backgroundColor: "#0d9488" }}>
-              Run Now
-            </button>
-            <button type="button" onClick={onReset} style={{ backgroundColor: "#475569" }}>
-              New Job
-            </button>
-          </div>
-        )}
-      </div>
-      <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
-        <label>
-          Name
-          <input value={payload.name} onChange={(e) => updatePayload("name", e.target.value)} required />
-        </label>
-        <label>
-          User
-          <input value={payload.user} onChange={(e) => updatePayload("user", e.target.value)} required />
-        </label>
-        <label>
-          Timeout (seconds)
-          <input type="number" min={0} value={payload.timeout} onChange={(e) => updatePayload("timeout", Number(e.target.value))} />
-        </label>
-        <label>
-          Retries
-          <input type="number" min={0} value={payload.retries} onChange={(e) => updatePayload("retries", Number(e.target.value))} />
-        </label>
-      </div>
-      <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))" }}>
-        <label>
-          Target OS (comma separated)
-          <input value={affinityDisplay.os} onChange={(e) => setAffinity("os", e.target.value)} />
-        </label>
-        <label>
-          Tags
-          <input value={affinityDisplay.tags} onChange={(e) => setAffinity("tags", e.target.value)} />
-        </label>
-        <label>
-          Allowed Users
-          <input value={affinityDisplay.allowed_users} onChange={(e) => setAffinity("allowed_users", e.target.value)} />
-        </label>
-      </div>
+    <Form layout="vertical" onFinish={handleSubmit}>
+      <Row gutter={16}>
+        <Col xs={24} md={12}>
+          <Form.Item label="Name">
+            <Input value={payload.name} onChange={(e) => updatePayload("name", e.target.value)} required />
+          </Form.Item>
+        </Col>
+        <Col xs={24} md={12}>
+          <Form.Item label="User">
+            <Input value={payload.user} onChange={(e) => updatePayload("user", e.target.value)} required />
+          </Form.Item>
+        </Col>
+      </Row>
+      <Row gutter={16}>
+        <Col xs={24} md={12}>
+          <Form.Item label="Timeout (seconds)">
+            <InputNumber min={0} style={{ width: "100%" }} value={payload.timeout} onChange={(value) => updatePayload("timeout", Number(value))} />
+          </Form.Item>
+        </Col>
+        <Col xs={24} md={12}>
+          <Form.Item label="Retries">
+            <InputNumber min={0} style={{ width: "100%" }} value={payload.retries} onChange={(value) => updatePayload("retries", Number(value))} />
+          </Form.Item>
+        </Col>
+      </Row>
 
-      <div style={{ marginTop: "1rem" }}>
-        <h3>Schedule</h3>
-        <label>
-          Mode
-          <select
-            value={schedule.mode}
-            onChange={(e) => {
-              const mode = e.target.value as JobPayload["schedule"]["mode"];
-              updateSchedule({ mode, next_run_at: null });
-            }}
-          >
-            <option value="immediate">Immediate</option>
-            <option value="interval">Interval</option>
-            <option value="cron">Cron</option>
-          </select>
-        </label>
-        <label>
-          Enabled
-          <input type="checkbox" checked={schedule.enabled} onChange={(e) => updateSchedule({ enabled: e.target.checked })} />
-        </label>
-        {schedule.mode === "interval" && (
-          <label>
-            Interval (seconds)
-            <input
-              type="number"
-              min={1}
-              value={schedule.interval_seconds ?? 300}
-              onChange={(e) => updateSchedule({ interval_seconds: Number(e.target.value) })}
+      <Divider orientation="left">Affinity</Divider>
+      <Row gutter={16}>
+        <Col xs={24} md={8}>
+          <Form.Item label="Target OS (comma separated)">
+            <Input value={affinityDisplay.os} onChange={(e) => setAffinity("os", e.target.value)} placeholder="linux,windows" />
+          </Form.Item>
+        </Col>
+        <Col xs={24} md={8}>
+          <Form.Item label="Tags">
+            <Input value={affinityDisplay.tags} onChange={(e) => setAffinity("tags", e.target.value)} placeholder="gpu,python" />
+          </Form.Item>
+        </Col>
+        <Col xs={24} md={8}>
+          <Form.Item label="Allowed Users">
+            <Input value={affinityDisplay.allowed_users} onChange={(e) => setAffinity("allowed_users", e.target.value)} placeholder="alice,bob" />
+          </Form.Item>
+        </Col>
+      </Row>
+
+      <Divider orientation="left">Schedule</Divider>
+      <Row gutter={16} align="middle">
+        <Col xs={24} md={8}>
+          <Form.Item label="Mode">
+            <Select
+              value={schedule.mode}
+              onChange={(mode) => updateSchedule({ mode, next_run_at: null })}
+              options={[
+                { label: "Immediate", value: "immediate" },
+                { label: "Interval", value: "interval" },
+                { label: "Cron", value: "cron" },
+              ]}
             />
-          </label>
-        )}
-        {schedule.mode === "cron" && (
-          <label>
-            Cron Expression
-            <input value={schedule.cron ?? ""} onChange={(e) => updateSchedule({ cron: e.target.value })} placeholder="*/5 * * * *" />
-          </label>
-        )}
-        {(schedule.mode === "interval" || schedule.mode === "cron") && (
-          <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))" }}>
-            <label>
-              Start At
-              <input type="datetime-local" value={toInputValue(schedule.start_at)} onChange={(e) => updateSchedule({ start_at: fromInputValue(e.target.value) })} />
-            </label>
-            <label>
-              End At
-              <input type="datetime-local" value={toInputValue(schedule.end_at)} onChange={(e) => updateSchedule({ end_at: fromInputValue(e.target.value) })} />
-            </label>
-          </div>
-        )}
-        <p style={{ fontSize: "0.85rem", color: "#475569" }}>
-          Next run: {!schedule.enabled ? "Disabled" : schedule.next_run_at ? new Date(schedule.next_run_at).toLocaleString() : schedule.mode === "immediate" ? "Immediately" : "pending"}
-        </p>
-      </div>
+          </Form.Item>
+        </Col>
+        <Col xs={24} md={8}>
+          <Form.Item label="Enabled">
+            <Switch checked={schedule.enabled} onChange={(checked) => updateSchedule({ enabled: checked })} />
+          </Form.Item>
+        </Col>
+        <Col xs={24} md={8}>
+          <Typography.Text type="secondary">
+            Next run:{" "}
+            {!schedule.enabled
+              ? "Disabled"
+              : schedule.next_run_at
+                ? new Date(schedule.next_run_at).toLocaleString()
+                : schedule.mode === "immediate"
+                  ? "Immediately"
+                  : "Pending"}
+          </Typography.Text>
+        </Col>
+      </Row>
+      {schedule.mode === "interval" && (
+        <Row gutter={16}>
+          <Col xs={24} md={12}>
+            <Form.Item label="Interval (seconds)">
+              <InputNumber
+                min={1}
+                style={{ width: "100%" }}
+                value={schedule.interval_seconds ?? 300}
+                onChange={(value) => updateSchedule({ interval_seconds: Number(value) })}
+              />
+            </Form.Item>
+          </Col>
+        </Row>
+      )}
+      {schedule.mode === "cron" && (
+        <Row gutter={16}>
+          <Col span={24}>
+            <Form.Item label="Cron Expression">
+              <Input value={schedule.cron ?? ""} onChange={(e) => updateSchedule({ cron: e.target.value })} placeholder="*/5 * * * *" />
+            </Form.Item>
+          </Col>
+        </Row>
+      )}
+      {(schedule.mode === "interval" || schedule.mode === "cron") && (
+        <Row gutter={16}>
+          <Col xs={24} md={12}>
+            <Form.Item label="Start At">
+              <Input type="datetime-local" value={toInputValue(schedule.start_at)} onChange={(e) => updateSchedule({ start_at: fromInputValue(e.target.value) })} />
+            </Form.Item>
+          </Col>
+          <Col xs={24} md={12}>
+            <Form.Item label="End At">
+              <Input type="datetime-local" value={toInputValue(schedule.end_at)} onChange={(e) => updateSchedule({ end_at: fromInputValue(e.target.value) })} />
+            </Form.Item>
+          </Col>
+        </Row>
+      )}
 
-      <div style={{ marginTop: "1rem" }}>
-        <h3>Completion Criteria</h3>
-        <label>
-          Exit Codes (comma separated)
-          <input
-            value={completion.exit_codes.join(", ")}
-            onChange={(e) => {
-              const values = parseList(e.target.value)
-                .map((c) => Number(c))
-                .filter((n) => !Number.isNaN(n));
-              updateCompletion({ exit_codes: values.length ? values : [] });
-            }}
-          />
-        </label>
-        <label>
-          Stdout must contain (one per line)
-          <textarea value={completion.stdout_contains.join("\n")} onChange={(e) => setCompletionList("stdout_contains", e.target.value)} />
-        </label>
-        <label>
-          Stdout must NOT contain
-          <textarea value={completion.stdout_not_contains.join("\n")} onChange={(e) => setCompletionList("stdout_not_contains", e.target.value)} />
-        </label>
-        <label>
-          Stderr must contain (one per line)
-          <textarea value={completion.stderr_contains.join("\n")} onChange={(e) => setCompletionList("stderr_contains", e.target.value)} />
-        </label>
-        <label>
-          Stderr must NOT contain
-          <textarea value={completion.stderr_not_contains.join("\n")} onChange={(e) => setCompletionList("stderr_not_contains", e.target.value)} />
-        </label>
-      </div>
-      <div style={{ marginTop: "0.75rem" }}>
-        <label>
-          Executor Type
-          <select
-            value={executorType}
-            onChange={(e) => {
-              const nextType = e.target.value as JobPayload["executor"]["type"];
-              const defaults: Record<string, any> = {
-                python: createDefaultPythonExecutor(),
-                shell: { type: "shell", script: "echo 'hello world'", shell: "bash" },
-                batch: { type: "batch", script: "echo hello", shell: "cmd" },
-                external: { type: "external", command: "/usr/bin/env" },
-              };
-              updateExecutor(defaults[nextType]);
-            }}
-          >
-            <option value="shell">Shell</option>
-            <option value="batch">Batch</option>
-            <option value="python">Python</option>
-            <option value="external">External Binary</option>
-          </select>
-        </label>
-      </div>
+      <Divider orientation="left">Completion Criteria</Divider>
+      <Row gutter={16}>
+        <Col span={24}>
+          <Form.Item label="Exit Codes">
+            <Input
+              value={completion.exit_codes.join(", ")}
+              onChange={(e) => {
+                const values = parseList(e.target.value)
+                  .map((c) => Number(c))
+                  .filter((n) => !Number.isNaN(n));
+                updateCompletion({ exit_codes: values.length ? values : [] });
+              }}
+              placeholder="0, 2"
+            />
+          </Form.Item>
+        </Col>
+      </Row>
+      <Row gutter={16}>
+        <Col xs={24} md={12}>
+          <Form.Item label="Stdout must contain">
+            <Input.TextArea value={completion.stdout_contains.join("\n")} onChange={(e) => setCompletionList("stdout_contains", e.target.value)} placeholder="ready" autoSize />
+          </Form.Item>
+        </Col>
+        <Col xs={24} md={12}>
+          <Form.Item label="Stdout must NOT contain">
+            <Input.TextArea value={completion.stdout_not_contains.join("\n")} onChange={(e) => setCompletionList("stdout_not_contains", e.target.value)} placeholder="error" autoSize />
+          </Form.Item>
+        </Col>
+      </Row>
+      <Row gutter={16}>
+        <Col xs={24} md={12}>
+          <Form.Item label="Stderr must contain">
+            <Input.TextArea value={completion.stderr_contains.join("\n")} onChange={(e) => setCompletionList("stderr_contains", e.target.value)} autoSize />
+          </Form.Item>
+        </Col>
+        <Col xs={24} md={12}>
+          <Form.Item label="Stderr must NOT contain">
+            <Input.TextArea value={completion.stderr_not_contains.join("\n")} onChange={(e) => setCompletionList("stderr_not_contains", e.target.value)} autoSize />
+          </Form.Item>
+        </Col>
+      </Row>
+
+      <Divider orientation="left">Executor</Divider>
+      <Row gutter={16}>
+        <Col xs={24} md={12}>
+          <Form.Item label="Executor Type">
+            <Select
+              value={executorType}
+              onChange={(nextType) => {
+                const defaults: Record<string, any> = {
+                  python: createDefaultPythonExecutor(),
+                  shell: { type: "shell", script: "echo 'hello world'", shell: "bash" },
+                  batch: { type: "batch", script: "echo hello", shell: "cmd" },
+                  external: { type: "external", command: "/usr/bin/env" },
+                };
+                updateExecutor(defaults[nextType]);
+              }}
+              options={[
+                { label: "Shell", value: "shell" },
+                { label: "Batch", value: "batch" },
+                { label: "Python", value: "python" },
+                { label: "External Binary", value: "external" },
+              ]}
+            />
+          </Form.Item>
+        </Col>
+        <Col xs={24} md={12}>
+          <Form.Item label="Arguments">
+            <Input value={(executor.args ?? []).join(" ")} onChange={(e) => updateExecutor({ args: e.target.value.split(" ").filter(Boolean) })} placeholder="--flag value" />
+          </Form.Item>
+        </Col>
+      </Row>
 
       {executor.type === "python" && (
         <>
-          <label>
-            Interpreter
-            <input value={executor.interpreter ?? "python3"} onChange={(e) => updateExecutor({ interpreter: e.target.value })} />
-          </label>
-          <label>
-            Python Code
-            <textarea value={executor.code ?? ""} onChange={(e) => updateExecutor({ code: e.target.value })} required />
-          </label>
+          <Form.Item label="Interpreter">
+            <Input value={executor.interpreter ?? "python3"} onChange={(e) => updateExecutor({ interpreter: e.target.value })} />
+          </Form.Item>
+          <Form.Item label="Python Code">
+            <Input.TextArea value={executor.code ?? ""} onChange={(e) => updateExecutor({ code: e.target.value })} autoSize />
+          </Form.Item>
           {pythonEnv && (
-            <div style={{ marginTop: "0.5rem" }}>
-              <h3>Python Environment</h3>
-              <label>
-                Environment Type
-                <select value={pythonEnv.type} onChange={(e) => updatePythonEnv({ type: e.target.value as PythonEnvironment["type"] })}>
-                  <option value="system">System</option>
-                  <option value="venv">Virtualenv</option>
-                  <option value="uv">uv (isolated)</option>
-                </select>
-              </label>
-              <label>
-                Python Version
-                <input
-                  value={pythonEnv.python_version ?? ""}
-                  onChange={(e) => updatePythonEnv({ python_version: e.target.value || null })}
-                  placeholder="3.11 or python3.11"
-                />
-              </label>
-              {pythonEnv.type === "venv" && (
-                <label>
-                  Virtualenv Path
-                  <input
-                    value={pythonEnv.venv_path ?? ""}
-                    onChange={(e) => updatePythonEnv({ venv_path: e.target.value || null })}
-                    placeholder="Existing venv path or leave blank"
+            <Row gutter={16}>
+              <Col span={24}>
+                <Typography.Title level={5}>Python Environment</Typography.Title>
+              </Col>
+              <Col xs={24} md={8}>
+                <Form.Item label="Environment Type">
+                  <Select
+                    value={pythonEnv.type}
+                    onChange={(value) => updatePythonEnv({ type: value as PythonEnvironment["type"] })}
+                    options={[
+                      { label: "System", value: "system" },
+                      { label: "Virtualenv", value: "venv" },
+                      { label: "uv", value: "uv" },
+                    ]}
                   />
-                </label>
+                </Form.Item>
+              </Col>
+              <Col xs={24} md={8}>
+                <Form.Item label="Python Version">
+                  <Input value={pythonEnv.python_version ?? ""} onChange={(e) => updatePythonEnv({ python_version: e.target.value || null })} placeholder="3.11" />
+                </Form.Item>
+              </Col>
+              {pythonEnv.type === "venv" && (
+                <Col xs={24} md={8}>
+                  <Form.Item label="Virtualenv Path">
+                    <Input value={pythonEnv.venv_path ?? ""} onChange={(e) => updatePythonEnv({ venv_path: e.target.value || null })} placeholder="/opt/venvs/job" />
+                  </Form.Item>
+                </Col>
               )}
-              <label>
-                Requirements (one per line)
-                <textarea
-                  value={(pythonEnv.requirements ?? []).join("\n")}
-                  onChange={(e) => updatePythonEnv({ requirements: parseList(e.target.value) })}
-                  placeholder="requests==2.32.0"
-                />
-              </label>
-              <label>
-                Requirements File
-                <input
-                  value={pythonEnv.requirements_file ?? ""}
-                  onChange={(e) => updatePythonEnv({ requirements_file: e.target.value || null })}
-                  placeholder="/workspace/requirements.txt"
-                />
-              </label>
+              <Col xs={24} md={12}>
+                <Form.Item label="Requirements (one per line)">
+                  <Input.TextArea value={(pythonEnv.requirements ?? []).join("\n")} onChange={(e) => updatePythonEnv({ requirements: parseList(e.target.value) })} autoSize />
+                </Form.Item>
+              </Col>
+              <Col xs={24} md={12}>
+                <Form.Item label="Requirements File">
+                  <Input value={pythonEnv.requirements_file ?? ""} onChange={(e) => updatePythonEnv({ requirements_file: e.target.value || null })} placeholder="/workspace/requirements.txt" />
+                </Form.Item>
+              </Col>
               {pythonEnv.type === "uv" && (
-                <p style={{ fontSize: "0.85rem", color: "#475569" }}>Requires the uv CLI on the worker image.</p>
+                <Col span={24}>
+                  <Alert type="info" showIcon message="Workers must have the uv CLI installed to run this job." />
+                </Col>
               )}
-            </div>
+            </Row>
           )}
         </>
       )}
 
       {(executor.type === "shell" || executor.type === "batch") && (
-        <>
-          <label>
-            Shell
-            <input value={executor.shell ?? (executor.type === "batch" ? "cmd" : "bash")} onChange={(e) => updateExecutor({ shell: e.target.value })} />
-          </label>
-          <label>
-            Script
-            <textarea value={executor.script ?? ""} onChange={(e) => updateExecutor({ script: e.target.value })} required />
-          </label>
-        </>
+        <Row gutter={16}>
+          <Col xs={24} md={12}>
+            <Form.Item label="Shell">
+              <Input value={executor.shell ?? (executor.type === "batch" ? "cmd" : "bash")} onChange={(e) => updateExecutor({ shell: e.target.value })} />
+            </Form.Item>
+          </Col>
+          <Col span={24}>
+            <Form.Item label="Script">
+              <Input.TextArea value={executor.script ?? ""} onChange={(e) => updateExecutor({ script: e.target.value })} autoSize />
+            </Form.Item>
+          </Col>
+        </Row>
       )}
 
       {executor.type === "external" && (
-        <label>
-          Command / Binary Path
-          <input value={executor.command ?? ""} onChange={(e) => updateExecutor({ command: e.target.value })} required />
-        </label>
+        <Form.Item label="Command / Binary Path">
+          <Input value={executor.command ?? ""} onChange={(e) => updateExecutor({ command: e.target.value })} />
+        </Form.Item>
       )}
 
-      <label>
-        Arguments (space separated)
-        <input
-          value={(executor.args ?? []).join(" ")}
-          onChange={(e) => updateExecutor({ args: e.target.value.split(" ").filter(Boolean) })}
-          placeholder="--flag value"
-        />
-      </label>
+      <Form.Item label="Working Directory">
+        <Input value={executor.workdir ?? ""} onChange={(e) => updateExecutor({ workdir: e.target.value || null })} placeholder="/opt/jobs" />
+      </Form.Item>
 
-      <label>
-        Working Directory (optional)
-        <input value={executor.workdir ?? ""} onChange={(e) => updateExecutor({ workdir: e.target.value || null })} placeholder="/opt/jobs" />
-      </label>
-
-      <label>
-        Environment Variables (KEY=VALUE per line)
-        <textarea
+      <Form.Item label="Environment Variables (KEY=VALUE per line)">
+        <Input.TextArea
           value={
             executor.env
               ? Object.entries(executor.env)
@@ -436,28 +454,35 @@ export function JobForm({ selectedJob, onSubmit, onValidate, onManualRun, onAdho
             });
             updateExecutor({ env });
           }}
+          autoSize
         />
-      </label>
+      </Form.Item>
 
-      <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", marginTop: "0.5rem" }}>
-        <button type="submit" disabled={submitting}>
+      <Divider />
+      <Space wrap>
+        <Button type="primary" htmlType="submit" loading={submitting}>
           {selectedJob ? "Update Job" : "Submit Job"}
-        </button>
-        <button type="button" onClick={handleValidate} disabled={validating} style={{ backgroundColor: "#0d9488" }}>
+        </Button>
+        <Button onClick={handleValidate} loading={validating}>
           Validate
-        </button>
+        </Button>
         {!selectedJob && (
-          <button
-            type="button"
-            onClick={() => onAdhocRun(payload)}
-            disabled={submitting}
-            style={{ backgroundColor: "#6d28d9" }}
-          >
+          <Button onClick={() => onAdhocRun(payload)} disabled={submitting} type="dashed">
             Run Adhoc
-          </button>
+          </Button>
         )}
-        {statusMessage && <span style={{ fontSize: "0.85rem", color: "#0f766e" }}>{statusMessage}</span>}
-      </div>
-    </form>
+        {selectedJob && (
+          <Button onClick={onManualRun} type="default">
+            Run Now
+          </Button>
+        )}
+        {selectedJob && (
+          <Button onClick={onReset} danger>
+            New Job
+          </Button>
+        )}
+      </Space>
+      {statusMessage && <Typography.Paragraph style={{ marginTop: "0.5rem" }}>{statusMessage}</Typography.Paragraph>}
+    </Form>
   );
 }

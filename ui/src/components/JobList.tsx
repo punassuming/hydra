@@ -1,3 +1,4 @@
+import { Button, Card, Table, Tag } from "antd";
 import { JobDefinition } from "../types";
 
 interface Props {
@@ -8,59 +9,55 @@ interface Props {
 }
 
 export function JobList({ jobs, onSelect, selectedId, loading }: Props) {
+  const dataSource = (jobs ?? []).map((job) => ({ ...job, key: job._id }));
+  const columns = [
+    { title: "Name", dataIndex: "name", key: "name" },
+    { title: "User", dataIndex: "user", key: "user" },
+    {
+      title: "Executor",
+      key: "executor",
+      render: (_: unknown, record: JobDefinition) => <Tag color="geekblue">{record.executor.type}</Tag>,
+    },
+    {
+      title: "Schedule",
+      key: "schedule",
+      render: (_: unknown, record: JobDefinition) => (
+        <div>
+          <strong>{record.schedule.mode}</strong>
+          <br />
+          <small>
+            {!record.schedule.enabled
+              ? "disabled"
+              : record.schedule.next_run_at
+                ? new Date(record.schedule.next_run_at).toLocaleString()
+                : record.schedule.mode === "immediate"
+                  ? "immediate"
+                  : "pending"}
+          </small>
+        </div>
+      ),
+    },
+    { title: "Retries", dataIndex: "retries", key: "retries" },
+    {
+      title: "Updated",
+      dataIndex: "updated_at",
+      key: "updated_at",
+      render: (value: string) => new Date(value).toLocaleString(),
+    },
+    {
+      title: "",
+      key: "actions",
+      render: (_: unknown, record: JobDefinition) => (
+        <Button type={record._id === selectedId ? "primary" : "default"} onClick={() => onSelect(record)}>
+          {record._id === selectedId ? "Selected" : "Edit"}
+        </Button>
+      ),
+    },
+  ];
+
   return (
-    <div className="panel">
-      <h2>Jobs</h2>
-      {loading && <p>Loading jobs…</p>}
-      <table className="table">
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>User</th>
-            <th>Executor</th>
-            <th>Schedule</th>
-            <th>Retries</th>
-            <th>Updated</th>
-            <th />
-          </tr>
-        </thead>
-        <tbody>
-          {(jobs ?? []).map((job) => (
-            <tr key={job._id} style={{ background: job._id === selectedId ? "#e0f2fe" : "transparent" }}>
-              <td>{job.name}</td>
-              <td>{job.user}</td>
-              <td>
-                <span className="pill">{job.executor.type}</span>
-              </td>
-              <td>
-                {job.schedule.mode}
-                <br />
-                <small>
-                  {!job.schedule.enabled
-                    ? "disabled"
-                    : job.schedule.next_run_at
-                      ? new Date(job.schedule.next_run_at).toLocaleString()
-                      : job.schedule.mode === "immediate"
-                        ? "immediate"
-                        : "pending"}
-                </small>
-              </td>
-              <td>{job.retries}</td>
-              <td>{new Date(job.updated_at).toLocaleString()}</td>
-              <td>
-                <button type="button" onClick={() => onSelect(job)} style={{ backgroundColor: "#1d4ed8" }}>
-                  Edit
-                </button>
-              </td>
-            </tr>
-          ))}
-          {!loading && (jobs?.length ?? 0) === 0 && (
-            <tr>
-              <td colSpan={6}>No jobs yet.</td>
-            </tr>
-          )}
-        </tbody>
-      </table>
-    </div>
+    <Card title="Jobs" bordered={false}>
+      <Table dataSource={dataSource} columns={columns} loading={loading} pagination={{ pageSize: 6 }} size="small" />
+    </Card>
   );
 }

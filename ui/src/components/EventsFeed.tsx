@@ -1,3 +1,4 @@
+import { Card, List, Tag, Typography, Space } from "antd";
 import { SchedulerEvent } from "../types";
 
 interface Props {
@@ -6,17 +7,23 @@ interface Props {
 
 export function EventsFeed({ events }: Props) {
   return (
-    <div className="panel">
-      <h2>Scheduler Events</h2>
-      <div className="events-feed">
-        {events.map((evt) => (
-          <div key={`${evt.ts}-${evt.type}`}>
-            <strong>{evt.type}</strong> · {new Date(evt.ts * 1000).toLocaleTimeString()} ·{" "}
-            <code>{JSON.stringify(evt.payload)}</code>
-          </div>
-        ))}
-        {events.length === 0 && <p>No recent events.</p>}
-      </div>
-    </div>
+    <Card title="Scheduler Events" bordered={false}>
+      {events.length === 0 ? (
+        <Typography.Text type="secondary">No recent events.</Typography.Text>
+      ) : (
+        <List
+          dataSource={events}
+          renderItem={(evt) => (
+            <List.Item key={`${evt.ts}-${evt.type}`}>
+              <Space direction="vertical" size={0}>
+                <Tag>{evt.type}</Tag>
+                <Typography.Text type="secondary">{new Date(evt.ts * 1000).toLocaleTimeString()}</Typography.Text>
+                <Typography.Text code>{JSON.stringify(evt.payload)}</Typography.Text>
+              </Space>
+            </List.Item>
+          )}
+        />
+      )}
+    </Card>
   );
 }
