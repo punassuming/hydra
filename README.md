@@ -92,8 +92,6 @@ python examples/submit_job.py
 # or
 bash examples/submit_job.sh
 
-# optional: React UI (requires Node 18+)
-cd ui && npm install && npm run dev
 ```
 
 Check status:
@@ -103,7 +101,7 @@ curl http://localhost:8000/health
 curl http://localhost:8000/workers/
 curl http://localhost:8000/events/stream   # SSE stream
 ```
-Access the React UI at `http://localhost:5173` (update `VITE_API_BASE_URL` if the API runs elsewhere).
+Access the React UI at `http://localhost:5173` (served by Docker Compose via the `ui` service). If you run the API elsewhere, adjust `docker-compose.yml`’s `VITE_API_BASE_URL` build arg or run the UI locally via `npm run dev`.
 
 ## Write Your Own Worker
 
@@ -177,7 +175,7 @@ Every job can define pass/fail rules beyond exit codes:
 
 ### React Control Plane
 
-The `ui/` directory hosts a Vite + React frontend for building/validating jobs, running them on demand, viewing job history & worker health, and tailing scheduler events via SSE. Run `npm install && npm run dev` inside `ui/`, then open `http://localhost:5173`. Configure the API base URL with `VITE_API_BASE_URL`.
+The `ui/` directory hosts a Vite + React frontend for building/validating jobs, running them on demand, viewing job history & worker health, and tailing scheduler events via SSE. Docker Compose builds and serves this UI automatically at `http://localhost:5173`. For local development, run `npm install && npm run dev` inside `ui/` and set `VITE_API_BASE_URL` to the scheduler URL.
 
 ## Kubernetes Deployment
 
