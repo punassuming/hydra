@@ -1,6 +1,21 @@
 import { useEffect, useMemo, useState } from "react";
-import { JobDefinition } from "../types";
+import { JobDefinition, PythonEnvironment } from "../types";
 import { JobPayload } from "../api/jobs";
+
+const createDefaultPythonEnvironment = (): PythonEnvironment => ({
+  type: "system",
+  python_version: "python3",
+  requirements: [],
+  requirements_file: null,
+  venv_path: null,
+});
+
+const createDefaultPythonExecutor = () => ({
+  type: "python" as const,
+  code: "print('hello')",
+  interpreter: "python3",
+  environment: createDefaultPythonEnvironment(),
+});
 
 const createDefaultPayload = (): JobPayload => ({
   name: "",
@@ -42,13 +57,28 @@ interface Props {
 export function JobForm({ selectedJob, onSubmit, onValidate, onManualRun, onAdhocRun, submitting, validating, statusMessage, onReset }: Props) {
   const [payload, setPayload] = useState<JobPayload>(() => createDefaultPayload());
 
+  const normalizeExecutor = (exec: JobDefinition["executor"]): JobPayload["executor"] => {
+    if (exec.type !== "python") {
+      return exec as JobPayload["executor"];
+    }
+    return {
+      ...exec,
+      environment: {
+        ...createDefaultPythonEnvironment(),
+        python_version: exec.environment?.python_version ?? exec.interpreter ?? "python3",
+        ...exec.environment,
+        requirements: exec.environment?.requirements ?? [],
+      },
+    } as JobPayload["executor"];
+  };
+
   useEffect(() => {
     if (selectedJob) {
       setPayload({
         name: selectedJob.name,
         user: selectedJob.user,
         affinity: selectedJob.affinity,
-        executor: selectedJob.executor,
+        executor: normalizeExecutor(selectedJob.executor),
         retries: selectedJob.retries,
         timeout: selectedJob.timeout,
         schedule: selectedJob.schedule ?? createDefaultPayload().schedule,
@@ -63,6 +93,10 @@ export function JobForm({ selectedJob, onSubmit, onValidate, onManualRun, onAdho
   const executorType = executor.type;
   const schedule = payload.schedule;
   const completion = payload.completion;
+  const pythonEnv =
+    executor.type === "python"
+      ? { ...createDefaultPythonEnvironment(), ...(executor.environment as PythonEnvironment | undefined) }
+      : null;
 
   const updatePayload = (field: keyof JobPayload, value: any) => {
     setPayload((prev) => ({ ...prev, [field]: value }));
@@ -78,6 +112,14 @@ export function JobForm({ selectedJob, onSubmit, onValidate, onManualRun, onAdho
 
   const updateCompletion = (update: Record<string, unknown>) => {
     setPayload((prev) => ({ ...prev, completion: { ...prev.completion, ...update } }));
+  };
+
+  const updatePythonEnv = (update: Partial<PythonEnvironment>) => {
+    if (executor.type !== "python") {
+      return;
+    }
+    const merged = { ...createDefaultPythonEnvironment(), ...(executor.environment as PythonEnvironment | undefined), ...update };
+    updateExecutor({ environment: merged });
   };
 
   const parseList = (value: string) =>
@@ -260,7 +302,7 @@ export function JobForm({ selectedJob, onSubmit, onValidate, onManualRun, onAdho
             onChange={(e) => {
               const nextType = e.target.value as JobPayload["executor"]["type"];
               const defaults: Record<string, any> = {
-                python: { type: "python", code: "print('hello')", interpreter: "python3" },
+                python: createDefaultPythonExecutor(),
                 shell: { type: "shell", script: "echo 'hello world'", shell: "bash" },
                 batch: { type: "batch", script: "echo hello", shell: "cmd" },
                 external: { type: "external", command: "/usr/bin/env" },
@@ -286,6 +328,56 @@ export function JobForm({ selectedJob, onSubmit, onValidate, onManualRun, onAdho
             Python Code
             <textarea value={executor.code ?? ""} onChange={(e) => updateExecutor({ code: e.target.value })} required />
           </label>
+          {pythonEnv && (
+            <div style={{ marginTop: "0.5rem" }}>
+              <h3>Python Environment</h3>
+              <label>
+                Environment Type
+                <select value={pythonEnv.type} onChange={(e) => updatePythonEnv({ type: e.target.value as PythonEnvironment["type"] })}>
+                  <option value="system">System</option>
+                  <option value="venv">Virtualenv</option>
+                  <option value="uv">uv (isolated)</option>
+                </select>
+              </label>
+              <label>
+                Python Version
+                <input
+                  value={pythonEnv.python_version ?? ""}
+                  onChange={(e) => updatePythonEnv({ python_version: e.target.value || null })}
+                  placeholder="3.11 or python3.11"
+                />
+              </label>
+              {pythonEnv.type === "venv" && (
+                <label>
+                  Virtualenv Path
+                  <input
+                    value={pythonEnv.venv_path ?? ""}
+                    onChange={(e) => updatePythonEnv({ venv_path: e.target.value || null })}
+                    placeholder="Existing venv path or leave blank"
+                  />
+                </label>
+              )}
+              <label>
+                Requirements (one per line)
+                <textarea
+                  value={(pythonEnv.requirements ?? []).join("\n")}
+                  onChange={(e) => updatePythonEnv({ requirements: parseList(e.target.value) })}
+                  placeholder="requests==2.32.0"
+                />
+              </label>
+              <label>
+                Requirements File
+                <input
+                  value={pythonEnv.requirements_file ?? ""}
+                  onChange={(e) => updatePythonEnv({ requirements_file: e.target.value || null })}
+                  placeholder="/workspace/requirements.txt"
+                />
+              </label>
+              {pythonEnv.type === "uv" && (
+                <p style={{ fontSize: "0.85rem", color: "#475569" }}>Requires the uv CLI on the worker image.</p>
+              )}
+            </div>
+          )}
         </>
       )}
 

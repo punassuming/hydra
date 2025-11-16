@@ -2,6 +2,7 @@ import platform
 from worker.utils.os_exec import run_command, run_python
 from worker.executor import execute_job
 from worker.utils.completion import evaluate_completion
+from worker.utils.python_env import prepare_python_command
 
 
 def test_os_exec_echo():
@@ -57,3 +58,18 @@ def test_completion_stdout_contains():
     ok, reason = evaluate_completion(job, 0, "no match", "")
     assert not ok
     assert "stdout" in reason.lower()
+
+
+def test_prepare_python_uv_command():
+    executor = {
+        "type": "python",
+        "interpreter": "python3",
+        "environment": {"type": "uv", "python_version": "3.11", "requirements": ["requests"]},
+    }
+    cmd, cleanup = prepare_python_command(executor, "job-123")
+    assert cmd[0:2] == ["uv", "run"]
+    assert "--python" in cmd
+    assert "--with" in cmd
+    assert "requests" in cmd
+    assert cmd[-1] == "python3"
+    assert cleanup is None

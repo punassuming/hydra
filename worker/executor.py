@@ -4,7 +4,8 @@ from typing import Tuple
 from bson import ObjectId
 
 from .mongo_client import get_db
-from .utils.os_exec import run_command, run_python, run_external
+from .utils.os_exec import run_command, run_external
+from .utils.python_env import prepare_python_command
 
 
 def execute_job(job: dict) -> Tuple[int, str, str]:
@@ -14,11 +15,20 @@ def execute_job(job: dict) -> Tuple[int, str, str]:
     workdir = executor.get("workdir")
     args = executor.get("args") or []
     exec_type = (executor.get("type") or job.get("shell") or "shell").lower()
+    job_identifier = job.get("_id") or job.get("id") or "job"
 
     if exec_type == "python":
         code = executor.get("code") or job.get("command", "")
-        interpreter = executor.get("interpreter", "python3")
-        return run_python(code=code, interpreter=interpreter, args=args, timeout=timeout, env=env, workdir=workdir)
+        try:
+            command, cleanup = prepare_python_command(executor, job_identifier)
+        except Exception as prep_err:
+            return 1, "", str(prep_err)
+        try:
+            cmd_with_code = command + ["-c", code] + args
+            return run_external(binary=cmd_with_code[0], args=cmd_with_code[1:], timeout=timeout, env=env, workdir=workdir)
+        finally:
+            if cleanup:
+                cleanup()
     if exec_type == "external":
         binary = executor.get("command") or job.get("command", "")
         return run_external(binary=binary, args=args, timeout=timeout, env=env, workdir=workdir)

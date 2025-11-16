@@ -175,6 +175,15 @@ Every job can define pass/fail rules beyond exit codes:
 - `stdout_contains` / `stderr_contains` require substrings to appear; `stdout_not_contains` / `stderr_not_contains` ensure substrings do **not** appear.
 - All configured rules must pass for a run to be marked `success`; failures capture the first unmet rule in `completion_reason` and, if retries remain, trigger another attempt.
 
+### Python Runtimes & Dependencies
+
+When using the `python` executor, you can control the runtime per job:
+
+- **Environment types:** `system` (default), `venv`, or `uv`. Pick `uv` to run via [uv](https://github.com/astral-sh/uv) with an explicit Python version and per-job dependencies. Use `venv` to point at an existing virtualenv (via `environment.venv_path`) or let Hydra create a temporary one automatically.
+- **Python versions:** Set `environment.python_version` (e.g., `3.10` or `python3.10`) and the worker runs the script with that interpreter (or `uv --python` when using uv).
+- **Dependencies:** Provide packages in `environment.requirements` (one per line in the UI) and/or a `requirements_file`. Hydra installs them into the selected environment before executing your code.
+- Ensure the worker image contains the required tooling (`uv`, alternate Python binaries, pip) for the environments you enable. When Hydra creates a temporary venv, it cleans it up after the job finishes.
+
 ### React Control Plane
 
 The `ui/` directory hosts a Vite + React frontend for building/validating jobs, running them on demand, viewing job history & worker health, and tailing scheduler events via SSE. Docker Compose builds and serves this UI automatically at `http://localhost:5173`. For local development, run `npm install && npm run dev` inside `ui/` and set `VITE_API_BASE_URL` to the scheduler URL.

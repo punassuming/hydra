@@ -43,6 +43,9 @@ def _validate_job_definition(job: JobDefinition) -> JobValidationResult:
                 compile(code, "<job>", "exec")
             except SyntaxError as exc:
                 errors.append(f"python code syntax error: {exc.msg} (line {exc.lineno})")
+        env_cfg = getattr(executor, "environment", None)
+        if env_cfg and env_cfg.type != "venv" and env_cfg.venv_path:
+            errors.append("environment.venv_path can only be set when environment.type == 'venv'")
     elif exec_type in {"shell", "batch"}:
         script = getattr(executor, "script", "")
         if not script.strip():

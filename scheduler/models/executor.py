@@ -9,10 +9,19 @@ class ExecutorBase(BaseModel):
     workdir: Optional[str] = None
 
 
+class PythonEnvironment(BaseModel):
+    type: Literal["system", "venv", "uv"] = "system"
+    python_version: Optional[str] = None
+    venv_path: Optional[str] = None
+    requirements: List[str] = Field(default_factory=list)
+    requirements_file: Optional[str] = None
+
+
 class PythonExecutor(ExecutorBase):
     type: Literal["python"] = "python"
     code: str
     interpreter: str = "python3"
+    environment: PythonEnvironment = Field(default_factory=PythonEnvironment)
 
 
 class ShellExecutor(ExecutorBase):

@@ -9,6 +9,7 @@ export type Executor =
       type: "python";
       code: string;
       interpreter?: string;
+      environment?: PythonEnvironment;
       args?: string[];
       env?: Record<string, string>;
       workdir?: string | null;
@@ -36,6 +37,14 @@ export type Executor =
       env?: Record<string, string>;
       workdir?: string | null;
     };
+
+export interface PythonEnvironment {
+  type: "system" | "venv" | "uv";
+  python_version?: string | null;
+  venv_path?: string | null;
+  requirements?: string[];
+  requirements_file?: string | null;
+}
 
 export interface ScheduleConfig {
   mode: "immediate" | "cron" | "interval";
