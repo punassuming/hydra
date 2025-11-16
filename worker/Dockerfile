@@ -8,5 +8,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 ENV PYTHONUNBUFFERED=1
-CMD ["python", "worker.py"]
-
+CMD ["python", "-m", "worker.worker"]
