@@ -2,9 +2,11 @@
   "name": "test-echo",
   "user": "rich",
   "affinity": { "os": ["linux"], "tags": [], "allowed_users": ["rich"] },
-  "command": "echo 'hello world'",
-  "shell": "bash",
+  "executor": {
+    "type": "shell",
+    "script": "echo 'hello world'",
+    "shell": "bash"
+  },
   "retries": 0,
   "timeout": 10
 }
-

@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from .api.jobs import router as jobs_router
 from .api.workers import router as workers_router
 from .api.health import router as health_router
+from .api.events import router as events_router
 from .scheduler import scheduling_loop, failover_loop
 from .utils.logging import setup_logging
 
@@ -14,6 +15,7 @@ app = FastAPI(title="hydra-jobs scheduler")
 app.include_router(jobs_router)
 app.include_router(workers_router)
 app.include_router(health_router)
+app.include_router(events_router)
 
 
 stop_event = threading.Event()
@@ -38,4 +40,3 @@ def on_shutdown():
         th1.join(timeout=2)
     if th2:
         th2.join(timeout=2)
-

@@ -2,8 +2,8 @@ import time
 from typing import List
 
 from ..redis_client import get_redis
-from ..mongo_client import get_db
 from .logging import setup_logging
+from ..event_bus import event_bus
 
 
 log = setup_logging("scheduler.failover")
@@ -23,7 +23,6 @@ def find_offline_workers(ttl_seconds: int) -> List[str]:
 
 def requeue_jobs_for_worker(worker_id: str):
     r = get_redis()
-    db = get_db()
     set_key = f"worker_running_set:{worker_id}"
     job_ids = r.smembers(set_key) or []
     if job_ids:
@@ -33,6 +32,7 @@ def requeue_jobs_for_worker(worker_id: str):
         r.delete(f"job_running:{job_id}")
         r.rpush("job_queue:pending", job_id)
         r.srem(set_key, job_id)
+        event_bus.publish("job_requeued", {"job_id": job_id, "worker_id": worker_id})
         # Optionally update last run doc to pending again (leave as is; worker will update when rerun)
     # Reset current_running counter to 0
     r.hset(f"workers:{worker_id}", mapping={"current_running": 0, "status": "offline"})
@@ -42,4 +42,3 @@ def failover_once(ttl_seconds: int):
     offline_workers = find_offline_workers(ttl_seconds)
     for wid in offline_workers:
         requeue_jobs_for_worker(wid)
-

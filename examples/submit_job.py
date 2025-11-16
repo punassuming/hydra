@@ -9,8 +9,9 @@ def main():
         "name": "test-echo",
         "user": "rich",
         "affinity": {"os": ["linux"], "tags": [], "allowed_users": ["rich"]},
-        "command": "echo 'hello world'",
-        "shell": "bash",
+        "executor": {"type": "shell", "script": "echo 'hello world'", "shell": "bash"},
+        "timeout": 10,
+        "retries": 0,
     }
     if len(sys.argv) > 1:
         # Load from file if provided
@@ -24,4 +25,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

@@ -3,6 +3,8 @@ from typing import List, Optional
 from pydantic import BaseModel, Field
 import uuid
 
+from .executor import ExecutorConfig, ShellExecutor
+
 
 class Affinity(BaseModel):
     os: List[str] = Field(default_factory=list)
@@ -15,8 +17,7 @@ class JobDefinition(BaseModel):
     name: str
     user: str
     affinity: Affinity
-    shell: str = "bash"  # "bash" | "powershell" | "cmd"
-    command: str
+    executor: ExecutorConfig = Field(default_factory=lambda: ShellExecutor(script=""))
     retries: int = 0
     timeout: int = 0
     schedule: Optional[str] = None
@@ -37,9 +38,22 @@ class JobCreate(BaseModel):
     name: str
     user: str
     affinity: Affinity
-    shell: str = "bash"
-    command: str
+    executor: ExecutorConfig = Field(default_factory=lambda: ShellExecutor(script=""))
     retries: int = 0
     timeout: int = 0
     schedule: Optional[str] = None
 
+
+class JobUpdate(BaseModel):
+    name: Optional[str] = None
+    user: Optional[str] = None
+    affinity: Optional[Affinity] = None
+    executor: Optional[ExecutorConfig] = None
+    retries: Optional[int] = None
+    timeout: Optional[int] = None
+    schedule: Optional[str] = None
+
+
+class JobValidationResult(BaseModel):
+    valid: bool
+    errors: List[str] = Field(default_factory=list)

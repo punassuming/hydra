@@ -1,13 +1,13 @@
 # hydra-jobs
 
-A distributed job runner with a FastAPI scheduler, cross‑platform workers, Redis for coordination, and MongoDB for job definitions and run history. Comes with Docker Compose for a one‑command local stack.
+A distributed job runner with a FastAPI scheduler, cross‑platform workers, Redis for coordination, MongoDB for job definitions/run history, and a React UI for submission + monitoring. Comes with Docker Compose for a one‑command local stack.
 
 ## Overview
 
-- Scheduler service (Python/FastAPI) exposes a REST API to submit jobs, query job and run metadata, list workers, and exposes a health endpoint. The scheduler also dispatches jobs from the pending queue to eligible workers and performs failover.
-- Worker service (Python) registers to Redis, heartbeats, consumes its queue, executes jobs with configurable concurrency, and persists run results to MongoDB.
+- Scheduler service (Python/FastAPI) exposes a REST API to submit jobs, validate definitions, update them, list workers, stream scheduler events (SSE), and expose health. The scheduler also dispatches jobs from the pending queue to eligible workers and performs failover.
+- Worker service (Python) registers to Redis, heartbeats, consumes its queue, executes jobs (shell, batch, python, or external binaries) with configurable concurrency, and persists run results to MongoDB including slot/attempt metadata.
 - Redis coordinates: job queues, worker heartbeats, and in‑flight job markers.
-- MongoDB stores: job definitions, job runs (history), and can be queried by API.
+- MongoDB stores: job definitions, executor configs, job runs (history with slot/attempt/queue latency), and can be queried by API/UI.
 
 ## Architecture Diagram
 
@@ -43,7 +43,7 @@ A distributed job runner with a FastAPI scheduler, cross‑platform workers, Red
   - `max_concurrency > current_running`
   - OS, tags, and allowed_users affinity
 - Select best worker by lowest load and RPUSH the job ID to `job_queue:<worker_id>`.
-- Insert a pending `job_runs` document (worker updates it on start/finish).
+- Insert a pending `job_runs` document (worker updates on start/finish with concurrency slot + attempt metadata).
 - Periodically scan for stale heartbeats; for offline workers requeue their running jobs.
 
 ## How Workers Work
@@ -67,8 +67,8 @@ A distributed job runner with a FastAPI scheduler, cross‑platform workers, Red
 ## MongoDB Usage
 
 Collections:
-- `job_definitions` — job documents with `_id` (string), name, user, affinity, shell, command, retries, timeout, schedule, timestamps
-- `job_runs` — run history with job_id, user, worker_id, timestamps, status, returncode, stdout, stderr
+- `job_definitions` — job documents with `_id` (string), name, user, affinity, executor config (python/shell/batch/external), retries, timeout, schedule, timestamps
+- `job_runs` — run history with job_id, user, worker_id, timestamps, status, returncode, stdout, stderr, concurrency slot, attempt count, queue latency, executor type
 
 ## Quick Start
 
@@ -84,6 +84,9 @@ Once running:
 python examples/submit_job.py
 # or
 bash examples/submit_job.sh
+
+# optional: React UI (requires Node 18+)
+cd ui && npm install && npm run dev
 ```
 
 Check status:
@@ -91,6 +94,7 @@ Check status:
 ```
 curl http://localhost:8000/health
 curl http://localhost:8000/workers/
+curl http://localhost:8000/events/stream   # SSE stream
 ```
 
 ## Write Your Own Worker
@@ -108,8 +112,11 @@ POST `http://localhost:8000/jobs/` with JSON body:
   "name": "test-echo",
   "user": "rich",
   "affinity": { "os": ["linux"], "tags": [], "allowed_users": ["rich"] },
-  "command": "echo 'hello world'",
-  "shell": "bash",
+  "executor": {
+    "type": "shell",
+    "script": "echo 'hello world'",
+    "shell": "bash"
+  },
   "retries": 0,
   "timeout": 10
 }
@@ -119,8 +126,15 @@ Then query:
 
 - `GET /jobs/{job_id}` — job metadata
 - `GET /jobs/{job_id}/runs` — run history
+- `PUT /jobs/{job_id}` — update job configuration/executor
+- `POST /jobs/{job_id}/validate` or `/jobs/validate` — dry-run validation
 - `GET /workers/` — workers
+- `GET /events/stream` — real-time scheduler events (SSE)
 - `GET /health` — scheduler health
+
+### React Control Plane
+
+The `ui/` directory hosts a Vite + React frontend for building/validating jobs, viewing job history & worker health, and tailing scheduler events via SSE. Run `npm install && npm run dev` inside `ui/`, then open `http://localhost:5173`. Configure the API base URL with `VITE_API_BASE_URL`.
 
 ## Debugging Tips
 
@@ -135,5 +149,3 @@ Then query:
 - Backoff with dead‑letter queues.
 - Job scheduling / cron support.
 - Authentication and multi‑tenant namespaces.
-- UI for monitoring and job submission.
-

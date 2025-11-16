@@ -51,24 +51,27 @@ def worker_main():
                 return
             with active_jobs_lock:
                 active_jobs.add(job_id)
-            incr_running(worker_id, +1)
+            slot_position = incr_running(worker_id, +1) - 1
             add_active_job(worker_id, job_id)
             r.hset(f"job_running:{job_id}", mapping={"worker_id": worker_id, "heartbeat": time.time(), "user": job.get("user", "")})
 
             # Create/mark run start
-            run_id = record_run_start(job_id, job.get("user", ""), worker_id)
+            retries_remaining = int(job.get("retries", 0))
+            run_id = record_run_start(job, worker_id, slot_position, retries_remaining)
 
             # Execute with retries
             attempts = int(job.get("retries", 0)) + 1
             rc = 1
             stdout = ""
             stderr = ""
+            attempts_used = 0
             for _ in range(max(1, attempts)):
                 rc, stdout, stderr = execute_job(job)
+                attempts_used += 1
                 if rc == 0:
                     break
 
-            record_run_end(run_id, rc, stdout, stderr)
+            record_run_end(run_id, rc, stdout, stderr, attempts_used)
         finally:
             r.delete(f"job_running:{job_id}")
             remove_active_job(worker_id, job_id)
@@ -87,4 +90,3 @@ def worker_main():
 
 if __name__ == "__main__":
     worker_main()
-

@@ -9,6 +9,7 @@ from .utils.affinity import passes_affinity
 from .utils.selectors import select_best_worker
 from .utils.failover import failover_once
 from .utils.logging import setup_logging
+from .event_bus import event_bus
 
 
 log = setup_logging("scheduler")
@@ -61,6 +62,7 @@ def scheduling_loop(stop_event: threading.Event):
                 # No worker matches; requeue and backoff
                 log.warning("No eligible worker for job %s; requeuing", job_id)
                 r.rpush("job_queue:pending", job_id)
+                event_bus.publish("job_pending", {"job_id": job_id, "reason": "no_worker"})
                 time.sleep(1)
                 continue
             wid = worker["worker_id"]
@@ -77,6 +79,7 @@ def scheduling_loop(stop_event: threading.Event):
                 "stdout": "",
                 "stderr": "",
             })
+            event_bus.publish("job_dispatched", {"job_id": job_id, "worker_id": wid})
             log.info("Dispatched job %s to worker %s", job_id, wid)
         except Exception as e:
             log.exception("Error in scheduling loop: %s", e)
