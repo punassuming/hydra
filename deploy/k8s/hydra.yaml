@@ -1,0 +1,169 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: hydra-jobs
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hydra-config
+  namespace: hydra-jobs
+data:
+  REDIS_URL: redis://redis:6379/0
+  MONGO_URL: mongodb://mongo:27017
+  MONGO_DB: hydra_jobs
+  SCHEDULER_HEARTBEAT_TTL: "10"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: hydra-jobs
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          ports:
+            - containerPort: 6379
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: hydra-jobs
+spec:
+  selector:
+    app: redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: 6379
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mongo
+  namespace: hydra-jobs
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mongo
+  template:
+    metadata:
+      labels:
+        app: mongo
+    spec:
+      containers:
+        - name: mongo
+          image: mongo:6
+          ports:
+            - containerPort: 27017
+          args: ["--replSet", "rs0"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongo
+  namespace: hydra-jobs
+spec:
+  selector:
+    app: mongo
+  ports:
+    - name: mongo
+      port: 27017
+      targetPort: 27017
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: scheduler
+  namespace: hydra-jobs
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: scheduler
+  template:
+    metadata:
+      labels:
+        app: scheduler
+    spec:
+      containers:
+        - name: scheduler
+          image: hydra-scheduler:latest
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: hydra-config
+          ports:
+            - containerPort: 8000
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: scheduler
+  namespace: hydra-jobs
+spec:
+  selector:
+    app: scheduler
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker-default
+  namespace: hydra-jobs
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: worker-default
+  template:
+    metadata:
+      labels:
+        app: worker-default
+    spec:
+      containers:
+        - name: worker
+          image: hydra-worker:latest
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: hydra-config
+          env:
+            - name: WORKER_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: WORKER_TAGS
+              value: ""
+            - name: ALLOWED_USERS
+              value: ""
+            - name: MAX_CONCURRENCY
+              value: "2"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: worker-default
+  namespace: hydra-jobs
+spec:
+  selector:
+    app: worker-default
+  ports:
+    - name: metrics
+      port: 9000
+      targetPort: 9000

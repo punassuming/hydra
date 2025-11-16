@@ -74,6 +74,12 @@ Collections:
 ## Quick Start
 
 - Prereqs: Docker + Docker Compose
+- Build the service images (from repo root):
+
+```
+docker build -t hydra-scheduler:latest scheduler
+docker build -t hydra-worker:latest worker
+```
 
 ```
 docker-compose up --build
@@ -97,6 +103,7 @@ curl http://localhost:8000/health
 curl http://localhost:8000/workers/
 curl http://localhost:8000/events/stream   # SSE stream
 ```
+Access the React UI at `http://localhost:5173` (update `VITE_API_BASE_URL` if the API runs elsewhere).
 
 ## Write Your Own Worker
 
@@ -170,7 +177,43 @@ Every job can define pass/fail rules beyond exit codes:
 
 ### React Control Plane
 
-The `ui/` directory hosts a Vite + React frontend for building/validating jobs, viewing job history & worker health, and tailing scheduler events via SSE. Run `npm install && npm run dev` inside `ui/`, then open `http://localhost:5173`. Configure the API base URL with `VITE_API_BASE_URL`.
+The `ui/` directory hosts a Vite + React frontend for building/validating jobs, running them on demand, viewing job history & worker health, and tailing scheduler events via SSE. Run `npm install && npm run dev` inside `ui/`, then open `http://localhost:5173`. Configure the API base URL with `VITE_API_BASE_URL`.
+
+## Kubernetes Deployment
+
+You can deploy the same stack to a cluster using the manifests under `deploy/k8s`:
+
+1. Build/push your images (or load them into the cluster):
+   ```
+   docker build -t hydra-scheduler:latest scheduler
+   docker build -t hydra-worker:latest worker
+   ```
+   Customize `deploy/k8s/hydra.yaml` if you host the images in a registry (e.g., set `image: ghcr.io/you/hydra-scheduler:TAG`).
+2. Apply the manifests:
+   ```
+   kubectl apply -f deploy/k8s/hydra.yaml
+   ```
+   This creates:
+   - `redis` and `mongo` Deployments/Services
+   - A scheduler Deployment + Service on port 8000
+   - A default worker Deployment scaled to 2 replicas
+3. Port-forward the scheduler to reach the API/UI locally:
+   ```
+   kubectl -n hydra-jobs port-forward svc/scheduler 8000:8000
+   ```
+4. Run the React UI locally (pointing `VITE_API_BASE_URL=http://localhost:8000`) or expose the scheduler through your preferred ingress.
+
+### Multiple Execution Environments in Kubernetes
+
+Workers are the execution boundary, so each distinct runtime (e.g., GPU-enabled, Windows emulation, specific tooling) becomes its own Deployment:
+
+- Build container images that contain the tooling/runtime you need. Reference those images in dedicated worker manifests.
+- Use `WORKER_TAGS` / `ALLOWED_USERS` env vars so the scheduler can target the correct pool.
+- Apply `nodeSelector`, `tolerations`, and `affinity` to bind a worker Deployment to the nodes that satisfy its requirements (e.g., GPUs, Windows nodes, ARM, etc.).
+- Scale each worker Deployment independently, or create a `StatefulSet` if you need stable `WORKER_ID`s. By default, the provided manifest sets `WORKER_ID` to the pod name via the Downward API.
+- For isolated namespaces/tenants, duplicate the worker Deployment with different Redis/Mongo URLs or credentials.
+
+This mirrors Docker-based environments: each worker image encapsulates the required interpreter/binaries, and the scheduler simply routes jobs based on tags and affinity.
 
 ## Debugging Tips
 
