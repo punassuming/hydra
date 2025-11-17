@@ -5,8 +5,8 @@ WORKDIR /app
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt && rm /tmp/requirements.txt
 
-COPY . /app/scheduler
-WORKDIR /app/scheduler
+COPY . /app
+WORKDIR /app
 
 EXPOSE 8000
 
