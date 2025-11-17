@@ -34,7 +34,7 @@ class CompletionCriteria(BaseModel):
 class JobDefinition(BaseModel):
     id: str = Field(default_factory=lambda: uuid.uuid4().hex, alias="_id")
     name: str
-    user: str
+    user: str = "default"
     affinity: Affinity
     executor: ExecutorConfig = Field(default_factory=lambda: ShellExecutor(script=""))
     retries: int = 0
@@ -56,7 +56,7 @@ class JobDefinition(BaseModel):
 
 class JobCreate(BaseModel):
     name: str
-    user: str
+    user: str = "default"
     affinity: Affinity
     executor: ExecutorConfig = Field(default_factory=lambda: ShellExecutor(script=""))
     retries: int = 0

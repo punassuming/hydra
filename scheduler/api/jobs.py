@@ -121,7 +121,12 @@ def get_job(job_id: str):
 def get_job_runs(job_id: str):
     db = get_db()
     runs = list(db.job_runs.find({"job_id": job_id}).sort("_id", 1))
-    return [JobRun.model_validate(r) for r in runs]
+    normalized = []
+    for run in runs:
+        if "_id" in run:
+            run["_id"] = str(run["_id"])
+        normalized.append(run)
+    return [JobRun.model_validate(r) for r in normalized]
 
 
 @router.put("/jobs/{job_id}", response_model=JobDefinition)

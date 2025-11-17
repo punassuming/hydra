@@ -137,7 +137,8 @@ export function JobForm({ selectedJob, onSubmit, onValidate, onManualRun, onAdho
   const fromInputValue = (value: string) => (value ? new Date(value).toISOString() : null);
 
   const handleSubmit = () => {
-    onSubmit(payload);
+    const normalized = { ...payload, user: payload.user?.trim() || "default" };
+    onSubmit(normalized);
   };
 
   const handleValidate = () => onValidate(payload);
@@ -171,7 +172,7 @@ export function JobForm({ selectedJob, onSubmit, onValidate, onManualRun, onAdho
         </Col>
         <Col xs={24} md={12}>
           <Form.Item label="User">
-            <Input value={payload.user} onChange={(e) => updatePayload("user", e.target.value)} required />
+            <Input value={payload.user} onChange={(e) => updatePayload("user", e.target.value)} placeholder="Optional" />
           </Form.Item>
         </Col>
       </Row>
@@ -467,7 +468,14 @@ export function JobForm({ selectedJob, onSubmit, onValidate, onManualRun, onAdho
           Validate
         </Button>
         {!selectedJob && (
-          <Button onClick={() => onAdhocRun(payload)} disabled={submitting} type="dashed">
+          <Button
+            onClick={() => {
+              const normalized = { ...payload, user: payload.user?.trim() || "default" };
+              onAdhocRun(normalized);
+            }}
+            disabled={submitting}
+            type="dashed"
+          >
             Run Adhoc
           </Button>
         )}
