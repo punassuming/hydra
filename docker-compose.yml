@@ -8,6 +8,8 @@ services:
     image: mongo:6
     ports:
       - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
 
   scheduler:
     build:
@@ -66,3 +68,6 @@ services:
       - scheduler
     ports:
       - "5173:80"
+
+volumes:
+  mongo-data:

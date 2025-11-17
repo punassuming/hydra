@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import { Card, Table, Tag } from "antd";
+import { useState } from "react";
+import { Card, Table, Tag, Modal, Typography, Space } from "antd";
 import { fetchJobRuns } from "../api/jobs";
 
 interface Props {
@@ -13,6 +14,10 @@ export function JobRuns({ jobId }: Props) {
     queryFn: () => fetchJobRuns(jobId!),
     enabled,
     refetchInterval: enabled ? 5000 : false,
+  });
+
+  const [logModal, setLogModal] = useState<{ visible: boolean; run?: (typeof data)[number] } | undefined>({
+    visible: false,
   });
 
   const columns = [
@@ -51,19 +56,10 @@ export function JobRuns({ jobId }: Props) {
     },
     { title: "Reason", dataIndex: "completion_reason", key: "completion_reason" },
     {
-      title: "Stdout (tail)",
-      dataIndex: "stdout_tail",
-      key: "stdout_tail",
-      render: (value?: string) => (
-        <pre style={{ maxHeight: 100, overflow: "auto", background: "#f5f5f5", padding: 8 }}>{value ?? "-"}</pre>
-      ),
-    },
-    {
-      title: "Stderr (tail)",
-      dataIndex: "stderr_tail",
-      key: "stderr_tail",
-      render: (value?: string) => (
-        <pre style={{ maxHeight: 100, overflow: "auto", background: "#f5f5f5", padding: 8 }}>{value ?? "-"}</pre>
+      title: "",
+      key: "logs",
+      render: (_: unknown, record: any) => (
+        <Typography.Link onClick={() => setLogModal({ visible: true, run: record })}>View Logs</Typography.Link>
       ),
     },
   ];
@@ -71,12 +67,35 @@ export function JobRuns({ jobId }: Props) {
   const runs = (data ?? []).map((run) => ({ ...run, key: run._id }));
 
   return (
-    <Card title="Job History" bordered={false}>
-      {!jobId ? (
-        <p>Select a job to view run history.</p>
-      ) : (
-        <Table dataSource={runs} columns={columns} loading={isLoading} pagination={{ pageSize: 5 }} size="small" />
-      )}
-    </Card>
+    <>
+      <Card title="Job History" bordered={false}>
+        {!jobId ? (
+          <p>Select a job to view run history.</p>
+        ) : (
+          <Table dataSource={runs} columns={columns} loading={isLoading} pagination={{ pageSize: 5 }} size="small" />
+        )}
+      </Card>
+      <Modal open={!!logModal?.visible} onCancel={() => setLogModal({ visible: false })} footer={null} width={800} title="Run Logs">
+        {logModal?.run ? (
+          <Space direction="vertical" style={{ width: "100%" }}>
+            <Typography.Text strong>Status: {logModal.run.status}</Typography.Text>
+            <Typography.Paragraph>
+              <Typography.Text strong>Stdout:</Typography.Text>
+              <pre style={{ background: "#f5f5f5", padding: 12, maxHeight: 200, overflow: "auto" }}>
+                {logModal.run.stdout_tail ?? logModal.run.stdout ?? "(no stdout)"}
+              </pre>
+            </Typography.Paragraph>
+            <Typography.Paragraph>
+              <Typography.Text strong>Stderr:</Typography.Text>
+              <pre style={{ background: "#f5f5f5", padding: 12, maxHeight: 200, overflow: "auto" }}>
+                {logModal.run.stderr_tail ?? logModal.run.stderr ?? "(no stderr)"}
+              </pre>
+            </Typography.Paragraph>
+          </Space>
+        ) : (
+          <Typography.Text type="secondary">No logs available.</Typography.Text>
+        )}
+      </Modal>
+    </>
   );
 }
