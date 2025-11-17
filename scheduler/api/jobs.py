@@ -125,6 +125,10 @@ def get_job_runs(job_id: str):
     for run in runs:
         if "_id" in run:
             run["_id"] = str(run["_id"])
+        stdout = (run.get("stdout") or "")[:]
+        stderr = (run.get("stderr") or "")[:]
+        run["stdout_tail"] = stdout[-4096:]
+        run["stderr_tail"] = stderr[-4096:]
         normalized.append(run)
     return [JobRun.model_validate(r) for r in normalized]
 
@@ -190,3 +194,35 @@ def run_adhoc_job(job: JobCreate):
     db.job_definitions.insert_one(job_def.to_mongo())
     _enqueue_job(job_def.id, reason="adhoc_run")
     return job_def
+
+
+@router.get("/jobs/overview")
+def jobs_overview():
+    db = get_db()
+    job_docs = list(db.job_definitions.find({}))
+    overview = []
+    for job in job_docs:
+        job_id = job["_id"]
+        total_runs = db.job_runs.count_documents({"job_id": job_id})
+        success_runs = db.job_runs.count_documents({"job_id": job_id, "status": "success"})
+        failed_runs = db.job_runs.count_documents({"job_id": job_id, "status": "failed"})
+        last_run = db.job_runs.find({"job_id": job_id}).sort("start_ts", -1).limit(1)
+        last_run_doc = next(iter(last_run), None)
+        if last_run_doc and "_id" in last_run_doc:
+            last_run_doc["_id"] = str(last_run_doc["_id"])
+            logs_out = (last_run_doc.get("stdout") or "")
+            logs_err = (last_run_doc.get("stderr") or "")
+            last_run_doc["stdout_tail"] = logs_out[-4096:]
+            last_run_doc["stderr_tail"] = logs_err[-4096:]
+        overview.append(
+            {
+                "job_id": job_id,
+                "name": job.get("name", ""),
+                "schedule_mode": (job.get("schedule") or {}).get("mode", "immediate"),
+                "total_runs": total_runs,
+                "success_runs": success_runs,
+                "failed_runs": failed_runs,
+                "last_run": last_run_doc,
+            }
+        )
+    return overview

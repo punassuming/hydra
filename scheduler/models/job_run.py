@@ -15,6 +15,8 @@ class JobRun(BaseModel):
     returncode: Optional[int] = None
     stdout: str = ""
     stderr: str = ""
+    stdout_tail: Optional[str] = None
+    stderr_tail: Optional[str] = None
     slot: Optional[int] = None
     attempt: Optional[int] = None
     retries_remaining: Optional[int] = None

@@ -50,6 +50,22 @@ export function JobRuns({ jobId }: Props) {
       render: (value?: string) => (value ? new Date(value).toLocaleTimeString() : "-"),
     },
     { title: "Reason", dataIndex: "completion_reason", key: "completion_reason" },
+    {
+      title: "Stdout (tail)",
+      dataIndex: "stdout_tail",
+      key: "stdout_tail",
+      render: (value?: string) => (
+        <pre style={{ maxHeight: 100, overflow: "auto", background: "#f5f5f5", padding: 8 }}>{value ?? "-"}</pre>
+      ),
+    },
+    {
+      title: "Stderr (tail)",
+      dataIndex: "stderr_tail",
+      key: "stderr_tail",
+      render: (value?: string) => (
+        <pre style={{ maxHeight: 100, overflow: "auto", background: "#f5f5f5", padding: 8 }}>{value ?? "-"}</pre>
+      ),
+    },
   ];
 
   const runs = (data ?? []).map((run) => ({ ...run, key: run._id }));

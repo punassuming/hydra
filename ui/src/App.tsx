@@ -6,6 +6,7 @@ import { JobList } from "./components/JobList";
 import { JobRuns } from "./components/JobRuns";
 import { WorkersPanel } from "./components/WorkersPanel";
 import { EventsFeed } from "./components/EventsFeed";
+import { JobOverview } from "./components/JobOverview";
 import { createJob, fetchJobs, JobPayload, runJobNow, runAdhocJob, updateJob, validateJob } from "./api/jobs";
 import { useSchedulerEvents } from "./hooks/useEvents";
 
@@ -144,7 +145,10 @@ function App() {
           </Col>
         </Row>
         <Row gutter={[16, 16]} style={{ marginTop: 8 }}>
-          <Col span={24}>
+          <Col xs={24} lg={12}>
+            <JobOverview />
+          </Col>
+          <Col xs={24} lg={12}>
             <EventsFeed events={events} />
           </Col>
         </Row>

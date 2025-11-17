@@ -1,5 +1,5 @@
 import { apiClient } from "./client";
-import { JobDefinition, JobRun, WorkerInfo, ScheduleConfig, CompletionCriteria } from "../types";
+import { JobDefinition, JobRun, WorkerInfo, ScheduleConfig, CompletionCriteria, JobOverview } from "../types";
 
 export interface JobPayload {
   name: string;
@@ -21,6 +21,7 @@ export interface ValidationResult {
 export const fetchJobs = () => apiClient.get<JobDefinition[]>("/jobs/");
 export const fetchWorkers = () => apiClient.get<WorkerInfo[]>("/workers/");
 export const fetchJobRuns = (jobId: string) => apiClient.get<JobRun[]>(`/jobs/${jobId}/runs`);
+export const fetchJobOverview = () => apiClient.get<JobOverview[]>("/jobs/overview");
 export const createJob = (payload: JobPayload) => apiClient.post<JobDefinition>("/jobs/", payload);
 export const updateJob = (jobId: string, payload: Partial<JobPayload>) =>
   apiClient.put<JobDefinition>(`/jobs/${jobId}`, payload);

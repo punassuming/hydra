@@ -97,6 +97,18 @@ export interface JobRun {
   executor_type?: string;
   queue_latency_ms?: number;
   completion_reason?: string;
+  stdout_tail?: string;
+  stderr_tail?: string;
+}
+
+export interface JobOverview {
+  job_id: string;
+  name: string;
+  schedule_mode: string;
+  total_runs: number;
+  success_runs: number;
+  failed_runs: number;
+  last_run?: JobRun;
 }
 
 export interface WorkerInfo {
