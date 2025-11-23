@@ -3,6 +3,7 @@ import { Layout, Typography, Space, Menu, Switch as AntSwitch } from "antd";
 import { Routes, Route, Link, useLocation } from "react-router-dom";
 import { ConfigProvider, theme } from "antd";
 import { HomePage } from "./pages/Home";
+import { BrowsePage } from "./pages/Browse";
 import { ComingSoon } from "./pages/ComingSoon";
 import { JobDetailPage } from "./pages/JobDetail";
 import { HistoryPage } from "./pages/History";
@@ -97,12 +98,7 @@ function App() {
             <Route path="/history" element={<HistoryPage />} />
             <Route
               path="/browse"
-              element={
-                <ComingSoon
-                  title="Browse"
-                  description="Global browsing utilities will appear here."
-                />
-              }
+              element={<BrowsePage />}
             />
             <Route
               path="/admin"
