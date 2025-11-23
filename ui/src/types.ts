@@ -111,6 +111,42 @@ export interface JobOverview {
   last_run?: JobRun;
 }
 
+export interface JobGridTaskInstance {
+  run_id: string;
+  status?: string;
+  start_ts?: string | null;
+  end_ts?: string | null;
+  duration?: number | null;
+}
+
+export interface JobGridTask {
+  task_id: string;
+  label: string;
+  instances: JobGridTaskInstance[];
+}
+
+export interface JobGridData {
+  runs: JobGridTaskInstance[];
+  tasks: JobGridTask[];
+}
+
+export interface JobGanttEntry {
+  run_id: string;
+  status?: string;
+  start_ts?: string | null;
+  end_ts?: string | null;
+  duration?: number | null;
+}
+
+export interface JobGanttData {
+  entries: JobGanttEntry[];
+}
+
+export interface JobGraphData {
+  nodes: { id: string; label: string; status?: string }[];
+  edges: { source: string; target: string }[];
+}
+
 export interface WorkerInfo {
   worker_id: string;
   os: string;

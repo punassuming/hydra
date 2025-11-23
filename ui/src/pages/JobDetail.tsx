@@ -1,12 +1,16 @@
 import { useMemo, useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, Space, Typography, Tabs, Button, Tag, Descriptions, message } from "antd";
 import { JobRuns } from "../components/JobRuns";
+import { JobGridView } from "../components/JobGridView";
+import { JobGanttView } from "../components/JobGanttView";
+import { JobGraphView } from "../components/JobGraphView";
 import { fetchJob, fetchJobRuns, runJobNow } from "../api/jobs";
 
 export function JobDetailPage() {
   const { jobId } = useParams<{ jobId: string }>();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [messageApi, contextHolder] = message.useMessage();
 
@@ -28,6 +32,9 @@ export function JobDetailPage() {
     onSuccess: () => {
       messageApi.success("Run queued");
       queryClient.invalidateQueries({ queryKey: ["job-runs", jobId] });
+      queryClient.invalidateQueries({ queryKey: ["job-grid", jobId] });
+      queryClient.invalidateQueries({ queryKey: ["job-gantt", jobId] });
+      queryClient.invalidateQueries({ queryKey: ["job-graph", jobId] });
     },
   });
 
@@ -52,9 +59,24 @@ export function JobDetailPage() {
         ),
       },
       {
+        key: "grid",
+        label: "Grid",
+        children: jobId ? <JobGridView jobId={jobId} /> : null,
+      },
+      {
         key: "runs",
         label: "Runs",
         children: <JobRuns jobId={jobId} runs={runsQuery.data ?? []} loading={runsQuery.isLoading} />,
+      },
+      {
+        key: "gantt",
+        label: "Gantt",
+        children: jobId ? <JobGanttView jobId={jobId} /> : null,
+      },
+      {
+        key: "graph",
+        label: "Graph",
+        children: jobId ? <JobGraphView jobId={jobId} /> : null,
       },
       {
         key: "code",
@@ -93,12 +115,8 @@ export function JobDetailPage() {
             <Tag color={job.schedule.enabled ? "green" : "default"}>{job.schedule.mode}</Tag>
           </Space>
           <Space>
-            <Button onClick={() => manualRun.mutate(job._id)}>
-              Run Now
-            </Button>
-            <Button>
-              <Link to="/">Back to Jobs</Link>
-            </Button>
+            <Button onClick={() => manualRun.mutate(job._id)}>Run Now</Button>
+            <Button onClick={() => navigate("/")}>Back to Jobs</Button>
           </Space>
         </Space>
       </Card>

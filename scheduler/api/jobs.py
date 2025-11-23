@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import List
+from typing import List, Dict, Any
 
 from fastapi import APIRouter, HTTPException
 
@@ -18,6 +18,29 @@ from ..utils.schedule import initialize_schedule
 
 
 router = APIRouter()
+
+
+def _fetch_job_runs(job_id: str) -> List[Dict[str, Any]]:
+    db = get_db()
+    runs = list(db.job_runs.find({"job_id": job_id}).sort("_id", 1))
+    normalized: List[Dict[str, Any]] = []
+    for run in runs:
+        doc = dict(run)
+        if "_id" in doc:
+            doc["_id"] = str(doc["_id"])
+        stdout = (doc.get("stdout") or "")[:]
+        stderr = (doc.get("stderr") or "")[:]
+        doc["stdout_tail"] = stdout[-4096:]
+        doc["stderr_tail"] = stderr[-4096:]
+        duration = None
+        if doc.get("start_ts") and doc.get("end_ts"):
+            try:
+                duration = (doc["end_ts"] - doc["start_ts"]).total_seconds()
+            except Exception:
+                duration = None
+        doc["duration"] = duration
+        normalized.append(doc)
+    return normalized
 
 
 def _enqueue_job(job_id: str, reason: str, extra_payload: dict | None = None):
@@ -119,18 +142,8 @@ def get_job(job_id: str):
 
 @router.get("/jobs/{job_id}/runs", response_model=List[JobRun])
 def get_job_runs(job_id: str):
-    db = get_db()
-    runs = list(db.job_runs.find({"job_id": job_id}).sort("_id", 1))
-    normalized = []
-    for run in runs:
-        if "_id" in run:
-            run["_id"] = str(run["_id"])
-        stdout = (run.get("stdout") or "")[:]
-        stderr = (run.get("stderr") or "")[:]
-        run["stdout_tail"] = stdout[-4096:]
-        run["stderr_tail"] = stderr[-4096:]
-        normalized.append(run)
-    return [JobRun.model_validate(r) for r in normalized]
+    runs = _fetch_job_runs(job_id)
+    return [JobRun.model_validate(r) for r in runs]
 
 
 @router.put("/jobs/{job_id}", response_model=JobDefinition)
@@ -226,3 +239,84 @@ def jobs_overview():
             }
         )
     return overview
+
+
+def _serialize_ts(value):
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return value
+
+
+@router.get("/jobs/{job_id}/grid")
+def job_grid(job_id: str):
+    db = get_db()
+    job = db.job_definitions.find_one({"_id": job_id})
+    if not job:
+        raise HTTPException(status_code=404, detail="job not found")
+    runs = _fetch_job_runs(job_id)
+    task_id = "task_main"
+    tasks = [
+        {
+            "task_id": task_id,
+            "label": job.get("name", task_id),
+            "instances": [
+                {
+                    "run_id": run["_id"],
+                    "status": run.get("status"),
+                    "start_ts": _serialize_ts(run.get("start_ts")),
+                    "end_ts": _serialize_ts(run.get("end_ts")),
+                    "duration": run.get("duration"),
+                }
+                for run in runs
+            ],
+        }
+    ]
+    run_summary = [
+        {
+            "run_id": run["_id"],
+            "status": run.get("status"),
+            "start_ts": _serialize_ts(run.get("start_ts")),
+            "end_ts": _serialize_ts(run.get("end_ts")),
+            "duration": run.get("duration"),
+        }
+        for run in runs
+    ]
+    return {"tasks": tasks, "runs": run_summary}
+
+
+@router.get("/jobs/{job_id}/gantt")
+def job_gantt(job_id: str):
+    db = get_db()
+    if not db.job_definitions.find_one({"_id": job_id}):
+        raise HTTPException(status_code=404, detail="job not found")
+    runs = _fetch_job_runs(job_id)
+    entries = [
+        {
+            "run_id": run["_id"],
+            "start_ts": _serialize_ts(run.get("start_ts")),
+            "end_ts": _serialize_ts(run.get("end_ts")),
+            "duration": run.get("duration"),
+            "status": run.get("status"),
+        }
+        for run in runs
+    ]
+    return {"entries": entries}
+
+
+@router.get("/jobs/{job_id}/graph")
+def job_graph(job_id: str):
+    db = get_db()
+    job = db.job_definitions.find_one({"_id": job_id})
+    if not job:
+        raise HTTPException(status_code=404, detail="job not found")
+    runs = _fetch_job_runs(job_id)
+    last_status = runs[-1]["status"] if runs else "unknown"
+    nodes = [
+        {
+            "id": job_id,
+            "label": job.get("name", job_id),
+            "status": last_status,
+        }
+    ]
+    edges: List[Dict[str, Any]] = []
+    return {"nodes": nodes, "edges": edges}
