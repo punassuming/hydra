@@ -5,6 +5,7 @@ import { ConfigProvider, theme } from "antd";
 import { HomePage } from "./pages/Home";
 import { ComingSoon } from "./pages/ComingSoon";
 import { JobDetailPage } from "./pages/JobDetail";
+import { HistoryPage } from "./pages/History";
 import { HydraLogo } from "./components/HydraLogo";
 
 function App() {
@@ -14,6 +15,7 @@ function App() {
   const menuItems = useMemo(
     () => [
       { label: <Link to="/">Home</Link>, key: "home" },
+      { label: <Link to="/history">History</Link>, key: "history" },
       { label: <Link to="/browse">Browse</Link>, key: "browse" },
       { label: <Link to="/admin">Admin</Link>, key: "admin" },
     ],
@@ -21,6 +23,7 @@ function App() {
   );
 
   const currentKey = useMemo(() => {
+    if (location.pathname.startsWith("/history")) return "history";
     if (location.pathname.startsWith("/browse")) return "browse";
     if (location.pathname.startsWith("/admin")) return "admin";
     return "home";
@@ -57,7 +60,7 @@ function App() {
           >
             <Space align="center">
               <HydraLogo size={40} color="#38bdf8" />
-              <Space size={20}>
+              <Space size={20} align="baseline">
                 <Typography.Title
                   level={3}
                   style={{ color: "#fff", margin: 0 }}
@@ -91,6 +94,7 @@ function App() {
         >
           <Routes>
             <Route path="/" element={<HomePage />} />
+            <Route path="/history" element={<HistoryPage />} />
             <Route
               path="/browse"
               element={

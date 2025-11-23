@@ -33,6 +33,7 @@ export const fetchJob = (jobId: string) => apiClient.get<JobDefinition>(`/jobs/$
 export const fetchWorkers = () => apiClient.get<WorkerInfo[]>("/workers/");
 export const fetchJobRuns = (jobId: string) => apiClient.get<JobRun[]>(`/jobs/${jobId}/runs`);
 export const fetchJobOverview = () => apiClient.get<JobOverview[]>("/jobs/overview");
+export const fetchHistory = () => apiClient.get<JobRun[]>("/history/");
 export const fetchJobGrid = (jobId: string) => apiClient.get<JobGridData>(`/jobs/${jobId}/grid`);
 export const fetchJobGantt = (jobId: string) => apiClient.get<JobGanttData>(`/jobs/${jobId}/gantt`);
 export const fetchJobGraph = (jobId: string) => apiClient.get<JobGraphData>(`/jobs/${jobId}/graph`);
