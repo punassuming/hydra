@@ -44,6 +44,7 @@ function App() {
             top: 0,
             zIndex: 1000,
             width: "100%",
+            background: darkMode ? "#050b18" : "#0f172a",
           }}
         >
           <div
