@@ -99,6 +99,7 @@ export interface JobRun {
   completion_reason?: string;
   stdout_tail?: string;
   stderr_tail?: string;
+  duration?: number | null;
 }
 
 export interface JobOverview {

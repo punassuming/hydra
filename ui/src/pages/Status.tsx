@@ -24,7 +24,7 @@ export function StatusPage() {
           return (
             <List.Item
               actions={[
-                <Button key="run" size="small" onClick={() => runNow.mutate(job.job_id)} loading={runNow.isLoading}>
+                <Button key="run" size="small" onClick={() => runNow.mutate(job.job_id)} loading={runNow.isPending}>
                   Run Now
                 </Button>,
               ]}
@@ -43,7 +43,7 @@ export function StatusPage() {
                     {last && (
                       <Space>
                         <div>Last run: {last.start_ts ? new Date(last.start_ts).toLocaleString() : "-"}</div>
-                        {last.duration != null && <div>Duration: {last.duration?.toFixed(1)}s</div>}
+                        {typeof last.duration === "number" && <div>Duration: {last.duration?.toFixed(1)}s</div>}
                       </Space>
                     )}
                     <Progress
