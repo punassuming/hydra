@@ -1,4 +1,5 @@
 import { Button, Card, Table, Tag } from "antd";
+import { Link } from "react-router-dom";
 import { JobDefinition } from "../types";
 
 interface Props {
@@ -11,7 +12,12 @@ interface Props {
 export function JobList({ jobs, onSelect, selectedId, loading }: Props) {
   const dataSource = (jobs ?? []).map((job) => ({ ...job, key: job._id }));
   const columns = [
-    { title: "Name", dataIndex: "name", key: "name" },
+    {
+      title: "Name",
+      dataIndex: "name",
+      key: "name",
+      render: (_: unknown, record: JobDefinition) => <Link to={`/jobs/${record._id}`}>{record.name}</Link>,
+    },
     { title: "User", dataIndex: "user", key: "user" },
     {
       title: "Executor",

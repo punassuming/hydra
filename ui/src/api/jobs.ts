@@ -19,6 +19,7 @@ export interface ValidationResult {
 }
 
 export const fetchJobs = () => apiClient.get<JobDefinition[]>("/jobs/");
+export const fetchJob = (jobId: string) => apiClient.get<JobDefinition>(`/jobs/${jobId}`);
 export const fetchWorkers = () => apiClient.get<WorkerInfo[]>("/workers/");
 export const fetchJobRuns = (jobId: string) => apiClient.get<JobRun[]>(`/jobs/${jobId}/runs`);
 export const fetchJobOverview = () => apiClient.get<JobOverview[]>("/jobs/overview");

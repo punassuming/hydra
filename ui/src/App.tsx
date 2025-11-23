@@ -4,6 +4,8 @@ import { Routes, Route, Link, useLocation } from "react-router-dom";
 import { ConfigProvider, theme } from "antd";
 import { HomePage } from "./pages/Home";
 import { ComingSoon } from "./pages/ComingSoon";
+import { JobDetailPage } from "./pages/JobDetail";
+import { HydraLogo } from "./components/HydraLogo";
 
 function App() {
   const location = useLocation();
@@ -35,26 +37,46 @@ function App() {
       }}
     >
       <Layout style={{ minHeight: "100vh" }}>
-        <Header style={{ padding: "0 24px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <Space direction="vertical" size={0}>
-            <Typography.Title level={3} style={{ color: "#fff", margin: 0 }}>
-              Hydra Scheduler
-            </Typography.Title>
-            <Typography.Text style={{ color: "#cbd5f5" }}>Jobs, tasks, and insights at a glance</Typography.Text>
-          </Space>
-          <Space align="center" size="large">
-            <Menu theme="dark" mode="horizontal" selectedKeys={[currentKey]} items={menuItems} style={{ background: "transparent" }} />
-            <Space>
-              <Typography.Text style={{ color: "#cbd5f5" }}>Dark Mode</Typography.Text>
-              <AntSwitch checked={darkMode} onChange={setDarkMode} />
+        <Header style={{ padding: "0 24px" }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              flexWrap: "wrap",
+              gap: 16,
+            }}
+          >
+            <Space align="center">
+              <HydraLogo size={40} color="#38bdf8" />
+              <Space direction="vertical" size={0}>
+                <Typography.Title level={3} style={{ color: "#fff", margin: 0 }}>
+                  Hydra Scheduler
+                </Typography.Title>
+                <Typography.Text style={{ color: "#cbd5f5" }}>Jobs, tasks, and insights at a glance</Typography.Text>
+              </Space>
             </Space>
-          </Space>
+            <Space align="center" size="large" style={{ flexWrap: "wrap" }}>
+              <Menu
+                theme="dark"
+                mode="horizontal"
+                selectedKeys={[currentKey]}
+                items={menuItems}
+                style={{ background: "transparent", borderBottom: "none" }}
+              />
+              <Space>
+                <Typography.Text style={{ color: "#cbd5f5" }}>Dark Mode</Typography.Text>
+                <AntSwitch checked={darkMode} onChange={setDarkMode} />
+              </Space>
+            </Space>
+          </div>
         </Header>
         <Content style={{ padding: 24, background: darkMode ? "#0f172a" : "#f5f7fb" }}>
           <Routes>
             <Route path="/" element={<HomePage />} />
             <Route path="/browse" element={<ComingSoon title="Browse" description="Global browsing utilities will appear here." />} />
             <Route path="/admin" element={<ComingSoon title="Admin" description="Administration pages are under construction." />} />
+            <Route path="/jobs/:jobId" element={<JobDetailPage />} />
           </Routes>
         </Content>
       </Layout>

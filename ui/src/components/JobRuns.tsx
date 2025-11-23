@@ -4,11 +4,15 @@ import { Table, Tag, Modal, Typography, Space } from "antd";
 import { JobRun } from "../types";
 import { fetchJobRuns } from "../api/jobs";
 
+import { JobRun } from "../types";
+
 interface Props {
   jobId?: string | null;
+  runs?: JobRun[];
+  loading?: boolean;
 }
 
-export function JobRuns({ jobId }: Props) {
+export function JobRuns({ jobId, runs: providedRuns, loading }: Props) {
   const enabled = Boolean(jobId);
   const { data, isLoading } = useQuery({
     queryKey: ["job-runs", jobId],
@@ -16,7 +20,6 @@ export function JobRuns({ jobId }: Props) {
     enabled,
     refetchInterval: enabled ? 5000 : false,
   });
-
   const [logModal, setLogModal] = useState<{ visible: boolean; run?: JobRun }>({ visible: false });
 
   const columns = [
@@ -63,14 +66,15 @@ export function JobRuns({ jobId }: Props) {
     },
   ];
 
-  const runs = (data ?? []).map((run) => ({ ...run, key: run._id }));
+  const combinedRuns = (providedRuns ?? data ?? []).map((run) => ({ ...run, key: run._id }));
+  const tableLoading = typeof loading === "boolean" ? loading : isLoading;
 
   return (
     <>
-      {!jobId ? (
+      {!jobId && !providedRuns ? (
         <p>Select a job to view run history.</p>
       ) : (
-        <Table dataSource={runs} columns={columns} loading={isLoading} pagination={{ pageSize: 5 }} size="small" />
+        <Table dataSource={combinedRuns} columns={columns} loading={tableLoading} pagination={{ pageSize: 5 }} size="small" />
       )}
       <Modal open={!!logModal?.visible} onCancel={() => setLogModal({ visible: false })} footer={null} width={800} title="Run Logs">
         {logModal?.run ? (
