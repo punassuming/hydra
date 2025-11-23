@@ -15,6 +15,16 @@ from .executor import execute_job, record_run_start, record_run_end
 def register_worker(worker_id: str, max_concurrency: int):
     r = get_redis()
     import platform
+    import socket
+    import getpass
+
+    hostname = socket.gethostname()
+    try:
+        ip_addr = socket.gethostbyname(hostname)
+    except Exception:
+        ip_addr = ""
+    subnet = ".".join(ip_addr.split(".")[:3]) if ip_addr else ""
+    deployment_type = os.getenv("DEPLOYMENT_TYPE", "docker")
 
     meta = {
         "os": platform.system().lower(),
@@ -26,6 +36,11 @@ def register_worker(worker_id: str, max_concurrency: int):
         "cpu_count": os.cpu_count() or 1,
         "python_version": platform.python_version(),
         "cwd": os.getcwd(),
+        "hostname": hostname,
+        "ip": ip_addr,
+        "subnet": subnet,
+        "deployment_type": deployment_type,
+        "run_user": getpass.getuser(),
     }
     r.hset(f"workers:{worker_id}", mapping=meta)
 

@@ -12,6 +12,9 @@ export function WorkersPanel() {
   const columns = [
     { title: "ID", dataIndex: "worker_id", key: "worker_id" },
     { title: "OS", dataIndex: "os", key: "os" },
+    { title: "Host", dataIndex: "hostname", key: "hostname" },
+    { title: "IP", dataIndex: "ip", key: "ip" },
+    { title: "Deploy", dataIndex: "deployment_type", key: "deployment_type" },
     {
       title: "Tags",
       dataIndex: "tags",
@@ -28,6 +31,8 @@ export function WorkersPanel() {
               <div>CPU: {record.cpu_count ?? "-"}</div>
               <div>Python: {record.python_version ?? "-"}</div>
               <div>CWD: {record.cwd ?? "-"}</div>
+              <div>User: {record.run_user ?? "-"}</div>
+              <div>Subnet: {record.subnet ?? "-"}</div>
             </>
           }
         >

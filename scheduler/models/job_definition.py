@@ -10,6 +10,9 @@ class Affinity(BaseModel):
     os: List[str] = Field(default_factory=list)
     tags: List[str] = Field(default_factory=list)
     allowed_users: List[str] = Field(default_factory=list)
+    hostnames: List[str] = Field(default_factory=list)
+    subnets: List[str] = Field(default_factory=list)
+    deployment_types: List[str] = Field(default_factory=list)
 
 
 class ScheduleConfig(BaseModel):

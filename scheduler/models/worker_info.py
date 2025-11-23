@@ -14,3 +14,8 @@ class WorkerInfo(BaseModel):
     cpu_count: Optional[int] = None
     python_version: Optional[str] = None
     cwd: Optional[str] = None
+    hostname: Optional[str] = None
+    ip: Optional[str] = None
+    subnet: Optional[str] = None
+    deployment_type: Optional[str] = None
+    run_user: Optional[str] = None

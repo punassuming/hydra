@@ -39,6 +39,10 @@ def list_online_workers(ttl_seconds: int) -> List[Dict]:
             "allowed_users": (data.get("allowed_users", "") or "").split(",") if data.get("allowed_users") else [],
             "max_concurrency": int(data.get("max_concurrency", 1)),
             "current_running": int(data.get("current_running", 0)),
+            "hostname": data.get("hostname", ""),
+            "ip": data.get("ip", ""),
+            "subnet": data.get("subnet", ""),
+            "deployment_type": data.get("deployment_type", ""),
         }
         # Only accept workers with available slots
         if worker["current_running"] < worker["max_concurrency"]:
