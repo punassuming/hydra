@@ -170,8 +170,9 @@ export function HomePage() {
           resetSelection();
         }}
         footer={null}
-        width={900}
+        width={1100}
         destroyOnClose
+        bodyStyle={{ background: "#0f172a0d", borderRadius: 12 }}
       >
         <JobForm
           selectedJob={selectedJob}
