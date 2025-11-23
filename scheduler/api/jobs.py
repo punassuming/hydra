@@ -65,10 +65,14 @@ def _validate_job_definition(job: JobDefinition) -> JobValidationResult:
             try:
                 compile(code, "<job>", "exec")
             except SyntaxError as exc:
-                errors.append(f"python code syntax error: {exc.msg} (line {exc.lineno})")
+                errors.append(
+                    f"python code syntax error: {exc.msg} (line {exc.lineno})"
+                )
         env_cfg = getattr(executor, "environment", None)
         if env_cfg and env_cfg.type != "venv" and env_cfg.venv_path:
-            errors.append("environment.venv_path can only be set when environment.type == 'venv'")
+            errors.append(
+                "environment.venv_path can only be set when environment.type == 'venv'"
+            )
     elif exec_type in {"shell", "batch"}:
         script = getattr(executor, "script", "")
         if not script.strip():
@@ -90,7 +94,11 @@ def _validate_job_definition(job: JobDefinition) -> JobValidationResult:
 
 def _attach_schedule(job_def: JobDefinition, force: bool = False) -> JobDefinition:
     schedule = job_def.schedule
-    needs_init = force or (schedule.mode != "immediate" and schedule.enabled and schedule.next_run_at is None)
+    needs_init = force or (
+        schedule.mode != "immediate"
+        and schedule.enabled
+        and schedule.next_run_at is None
+    )
     if not needs_init:
         return job_def
     try:
@@ -125,7 +133,11 @@ def submit_job(job: JobCreate):
             "name": job_def.name,
             "user": job_def.user,
             "schedule_mode": job_def.schedule.mode,
-            "next_run_at": job_def.schedule.next_run_at.isoformat() if job_def.schedule.next_run_at else None,
+            "next_run_at": (
+                job_def.schedule.next_run_at.isoformat()
+                if job_def.schedule.next_run_at
+                else None
+            ),
         },
     )
     return job_def
@@ -209,22 +221,27 @@ def run_adhoc_job(job: JobCreate):
     return job_def
 
 
-@router.get("/jobs/overview")
+@router.get("/overview/jobs")
 def jobs_overview():
     db = get_db()
     job_docs = list(db.job_definitions.find({}))
+    print(f"Job Docs: {job_docs}")
     overview = []
     for job in job_docs:
         job_id = job["_id"]
         total_runs = db.job_runs.count_documents({"job_id": job_id})
-        success_runs = db.job_runs.count_documents({"job_id": job_id, "status": "success"})
-        failed_runs = db.job_runs.count_documents({"job_id": job_id, "status": "failed"})
+        success_runs = db.job_runs.count_documents(
+            {"job_id": job_id, "status": "success"}
+        )
+        failed_runs = db.job_runs.count_documents(
+            {"job_id": job_id, "status": "failed"}
+        )
         last_run = db.job_runs.find({"job_id": job_id}).sort("start_ts", -1).limit(1)
         last_run_doc = next(iter(last_run), None)
         if last_run_doc and "_id" in last_run_doc:
             last_run_doc["_id"] = str(last_run_doc["_id"])
-            logs_out = (last_run_doc.get("stdout") or "")
-            logs_err = (last_run_doc.get("stderr") or "")
+            logs_out = last_run_doc.get("stdout") or ""
+            logs_err = last_run_doc.get("stderr") or ""
             last_run_doc["stdout_tail"] = logs_out[-4096:]
             last_run_doc["stderr_tail"] = logs_err[-4096:]
         overview.append(

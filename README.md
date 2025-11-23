@@ -148,7 +148,7 @@ Then query:
 
 - `GET /jobs/{job_id}` — job metadata
 - `GET /jobs/{job_id}/runs` — run history
-- `GET /jobs/overview` — aggregate stats + last run details/log tails for every job
+- `GET /overview/jobs` — aggregate stats + last run details/log tails for every job
 - `PUT /jobs/{job_id}` — update job configuration/executor
 - `POST /jobs/{job_id}/validate` or `/jobs/validate` — dry-run validation
 - `POST /jobs/{job_id}/run` — enqueue a manual run immediately, regardless of schedule
