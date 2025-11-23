@@ -12,11 +12,12 @@ interface Props {
 
 export function JobRuns({ jobId, runs: providedRuns, loading }: Props) {
   const enabled = Boolean(jobId);
+  const shouldQuery = !providedRuns && enabled;
   const { data, isLoading } = useQuery({
     queryKey: ["job-runs", jobId],
     queryFn: () => fetchJobRuns(jobId!),
-    enabled,
-    refetchInterval: enabled ? 5000 : false,
+    enabled: shouldQuery,
+    refetchInterval: shouldQuery ? 5000 : false,
   });
   const [logModal, setLogModal] = useState<{ visible: boolean; run?: JobRun }>({ visible: false });
 

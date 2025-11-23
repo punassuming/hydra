@@ -50,20 +50,22 @@ export function JobList({ jobs, onSelect, selectedId, loading }: Props) {
       key: "updated_at",
       render: (value: string) => new Date(value).toLocaleString(),
     },
-    {
-      title: "",
-      key: "actions",
-      render: (_: unknown, record: JobDefinition) => (
-        <Button type={record._id === selectedId ? "primary" : "default"} onClick={() => onSelect(record)}>
-          {record._id === selectedId ? "Selected" : "Edit"}
-        </Button>
-      ),
-    },
   ];
 
   return (
     <Card title="Jobs" bordered={false}>
-      <Table dataSource={dataSource} columns={columns} loading={loading} pagination={{ pageSize: 6 }} size="small" />
+      <Table
+        dataSource={dataSource}
+        columns={columns}
+        loading={loading}
+        pagination={{ pageSize: 6 }}
+        size="small"
+        rowClassName={(record) => (record._id === selectedId ? "job-row-selected" : "job-row")}
+        onRow={(record) => ({
+          onClick: () => onSelect(record),
+          style: { cursor: "pointer" },
+        })}
+      />
     </Card>
   );
 }
