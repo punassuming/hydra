@@ -3,7 +3,7 @@ import { useParams, Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, Space, Typography, Tabs, Button, Tag, Descriptions, message } from "antd";
 import { JobRuns } from "../components/JobRuns";
-import { createJob, fetchJob, fetchJobRuns, runJobNow } from "../api/jobs";
+import { fetchJob, fetchJobRuns, runJobNow } from "../api/jobs";
 
 export function JobDetailPage() {
   const { jobId } = useParams<{ jobId: string }>();
@@ -93,10 +93,12 @@ export function JobDetailPage() {
             <Tag color={job.schedule.enabled ? "green" : "default"}>{job.schedule.mode}</Tag>
           </Space>
           <Space>
-            <Button onClick={() => manualRun.mutate(job._id)} loading={manualRun.isLoading}>
+            <Button onClick={() => manualRun.mutate(job._id)}>
               Run Now
             </Button>
-            <Button><Link to="/">Back to Jobs</Link></Button>
+            <Button>
+              <Link to="/">Back to Jobs</Link>
+            </Button>
           </Space>
         </Space>
       </Card>

@@ -4,8 +4,6 @@ import { Table, Tag, Modal, Typography, Space } from "antd";
 import { JobRun } from "../types";
 import { fetchJobRuns } from "../api/jobs";
 
-import { JobRun } from "../types";
-
 interface Props {
   jobId?: string | null;
   runs?: JobRun[];
