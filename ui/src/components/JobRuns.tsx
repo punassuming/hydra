@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { Card, Table, Tag, Modal, Typography, Space } from "antd";
+import { Table, Tag, Modal, Typography, Space } from "antd";
+import { JobRun } from "../types";
 import { fetchJobRuns } from "../api/jobs";
 
 interface Props {
@@ -16,9 +17,7 @@ export function JobRuns({ jobId }: Props) {
     refetchInterval: enabled ? 5000 : false,
   });
 
-  const [logModal, setLogModal] = useState<{ visible: boolean; run?: (typeof data)[number] } | undefined>({
-    visible: false,
-  });
+  const [logModal, setLogModal] = useState<{ visible: boolean; run?: JobRun }>({ visible: false });
 
   const columns = [
     {
@@ -68,13 +67,11 @@ export function JobRuns({ jobId }: Props) {
 
   return (
     <>
-      <Card title="Job History" bordered={false}>
-        {!jobId ? (
-          <p>Select a job to view run history.</p>
-        ) : (
-          <Table dataSource={runs} columns={columns} loading={isLoading} pagination={{ pageSize: 5 }} size="small" />
-        )}
-      </Card>
+      {!jobId ? (
+        <p>Select a job to view run history.</p>
+      ) : (
+        <Table dataSource={runs} columns={columns} loading={isLoading} pagination={{ pageSize: 5 }} size="small" />
+      )}
       <Modal open={!!logModal?.visible} onCancel={() => setLogModal({ visible: false })} footer={null} width={800} title="Run Logs">
         {logModal?.run ? (
           <Space direction="vertical" style={{ width: "100%" }}>
