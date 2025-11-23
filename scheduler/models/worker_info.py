@@ -11,4 +11,6 @@ class WorkerInfo(BaseModel):
     current_running: int
     last_heartbeat: Optional[float] = None
     status: str = "online"
-
+    cpu_count: Optional[int] = None
+    python_version: Optional[str] = None
+    cwd: Optional[str] = None

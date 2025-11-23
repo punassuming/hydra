@@ -25,7 +25,9 @@ def list_workers():
                 current_running=int(data.get("current_running", 0)),
                 last_heartbeat=hb,
                 status=data.get("status", "online"),
+                cpu_count=int(data.get("cpu_count", 0)) or None,
+                python_version=data.get("python_version"),
+                cwd=data.get("cwd"),
             )
         )
     return workers
-

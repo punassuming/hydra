@@ -23,6 +23,9 @@ def register_worker(worker_id: str, max_concurrency: int):
         "max_concurrency": max_concurrency,
         "current_running": 0,
         "status": "online",
+        "cpu_count": os.cpu_count() or 1,
+        "python_version": platform.python_version(),
+        "cwd": os.getcwd(),
     }
     r.hset(f"workers:{worker_id}", mapping=meta)
 

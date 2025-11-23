@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Card, Table, Tag, Progress } from "antd";
+import { Card, Table, Tag, Progress, Tooltip } from "antd";
 import { fetchWorkers } from "../api/jobs";
 
 export function WorkersPanel() {
@@ -22,11 +22,21 @@ export function WorkersPanel() {
       title: "Concurrency",
       key: "concurrency",
       render: (_: unknown, record: any) => (
-        <Progress
-          size="small"
-          percent={Math.round((record.current_running / Math.max(record.max_concurrency, 1)) * 100)}
-          format={() => `${record.current_running}/${record.max_concurrency}`}
-        />
+        <Tooltip
+          title={
+            <>
+              <div>CPU: {record.cpu_count ?? "-"}</div>
+              <div>Python: {record.python_version ?? "-"}</div>
+              <div>CWD: {record.cwd ?? "-"}</div>
+            </>
+          }
+        >
+          <Progress
+            size="small"
+            percent={Math.round((record.current_running / Math.max(record.max_concurrency, 1)) * 100)}
+            format={() => `${record.current_running}/${record.max_concurrency}`}
+          />
+        </Tooltip>
       ),
     },
     {

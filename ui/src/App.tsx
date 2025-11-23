@@ -7,6 +7,7 @@ import { BrowsePage } from "./pages/Browse";
 import { ComingSoon } from "./pages/ComingSoon";
 import { JobDetailPage } from "./pages/JobDetail";
 import { HistoryPage } from "./pages/History";
+import { StatusPage } from "./pages/Status";
 import { HydraLogo } from "./components/HydraLogo";
 
 function App() {
@@ -16,6 +17,7 @@ function App() {
   const menuItems = useMemo(
     () => [
       { label: <Link to="/">Home</Link>, key: "home" },
+      { label: <Link to="/status">Status</Link>, key: "status" },
       { label: <Link to="/history">History</Link>, key: "history" },
       { label: <Link to="/browse">Browse</Link>, key: "browse" },
       { label: <Link to="/admin">Admin</Link>, key: "admin" },
@@ -24,6 +26,7 @@ function App() {
   );
 
   const currentKey = useMemo(() => {
+    if (location.pathname.startsWith("/status")) return "status";
     if (location.pathname.startsWith("/history")) return "history";
     if (location.pathname.startsWith("/browse")) return "browse";
     if (location.pathname.startsWith("/admin")) return "admin";
@@ -95,6 +98,7 @@ function App() {
         >
           <Routes>
             <Route path="/" element={<HomePage />} />
+            <Route path="/status" element={<StatusPage />} />
             <Route path="/history" element={<HistoryPage />} />
             <Route
               path="/browse"
