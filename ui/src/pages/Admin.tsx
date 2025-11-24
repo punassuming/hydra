@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, Form, Input, Space, Table, Typography, Button, message, Modal, Input as AntInput, Select } from "antd";
-import { fetchDomains, createDomain, updateDomain, DomainInfo, rotateDomainToken } from "../api/admin";
+import { fetchDomains, createDomain, updateDomain, DomainInfo, rotateDomainToken, fetchTemplates, importTemplate } from "../api/admin";
 import { setAuthToken, setDomain as storeDomain, getToken, withTempToken } from "../api/client";
 import { createJob } from "../api/jobs";
 import { useState } from "react";
@@ -78,6 +78,7 @@ export function AdminPage() {
     }},
   ];
   const [selectedSample, setSelectedSample] = useState<string | undefined>(undefined);
+  const templatesQuery = useQuery({ queryKey: ["templates"], queryFn: fetchTemplates, staleTime: 10000 });
 
   const createMut = useMutation({
     mutationFn: createDomain,
@@ -182,6 +183,35 @@ export function AdminPage() {
       <Card title="Import Jobs">
         <Space direction="vertical" style={{ width: "100%" }}>
           <Typography.Text type="secondary">Paste a job JSON (single object or array) or use the sample set.</Typography.Text>
+          <Space>
+            <Select
+              placeholder="Pick a built-in template"
+              style={{ minWidth: 220 }}
+              value={selectedSample}
+              onChange={(val) => {
+                setSelectedSample(val);
+              }}
+              options={templatesQuery.data?.templates?.map((t) => ({ label: t.name, value: t.id })) ?? []}
+              loading={templatesQuery.isLoading}
+            />
+            <Button
+              onClick={async () => {
+                if (!selectedSample) {
+                  message.error("Choose a template first");
+                  return;
+                }
+                try {
+                  await importTemplate(selectedSample);
+                  message.success("Template imported");
+                  queryClient.invalidateQueries({ queryKey: ["jobs"] });
+                } catch (err) {
+                  message.error((err as Error).message);
+                }
+              }}
+            >
+              Import Template
+            </Button>
+          </Space>
           <Space>
             <Select
               placeholder="Pick a sample job"

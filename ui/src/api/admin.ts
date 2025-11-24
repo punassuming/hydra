@@ -15,3 +15,5 @@ export const createDomain = (payload: DomainInfo) => apiClient.post<DomainInfo>(
 export const updateDomain = (domain: string, payload: Partial<DomainInfo>) =>
   apiClient.put(`/admin/domains/${domain}`, payload);
 export const rotateDomainToken = (domain: string) => apiClient.post<{ ok: boolean; domain: string; token: string }>(`/admin/domains/${domain}/token`, {});
+export const fetchTemplates = () => apiClient.get<{ templates: any[] }>("/admin/job_templates");
+export const importTemplate = (templateId: string) => apiClient.post(`/admin/job_templates/${templateId}/import`, {});

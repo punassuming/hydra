@@ -5,6 +5,7 @@ import hashlib
 from ..redis_client import get_redis
 from ..mongo_client import get_db
 from ..utils.auth import _hash_token
+from ..examples.templates import TEMPLATES
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -112,3 +113,28 @@ def delete_domain(domain: str, request: Request):
         r.delete(f"token_hash:{token_hash}:domain")
     r.delete(f"token_hash:{domain}")
     return {"ok": True}
+
+
+@router.get("/job_templates")
+def list_job_templates(request: Request):
+    _require_admin(request)
+    return {"templates": TEMPLATES}
+
+
+@router.post("/job_templates/{template_id}/import")
+def import_template(template_id: str, request: Request):
+    _require_admin(request)
+    db = get_db()
+    template = next((t for t in TEMPLATES if t["id"] == template_id), None)
+    if not template:
+        raise HTTPException(status_code=404, detail="template not found")
+    # attach domain from request
+    domain = getattr(request.state, "domain", "prod")
+    job_doc = dict(template)
+    job_doc["domain"] = domain
+    # ensure unique id
+    existing = db.job_definitions.find_one({"name": job_doc["name"], "domain": domain})
+    if existing:
+        raise HTTPException(status_code=409, detail="job with that name already exists in this domain")
+    db.job_definitions.insert_one(job_doc)
+    return {"ok": True, "job": job_doc}
