@@ -6,8 +6,8 @@ services:
     env_file:
       - .env
     environment:
-      - REDIS_URL=${REDIS_URL}
-      - MONGO_URL=${MONGO_URL}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - MONGO_URL=${MONGO_URL:-mongodb://mongo:27017}
       - MONGO_DB=${MONGO_DB:-hydra_jobs}
       - WORKER_ID=${WORKER_ID:-worker-standalone}
       - WORKER_DOMAIN=${WORKER_DOMAIN:-prod}
