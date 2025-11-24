@@ -44,7 +44,7 @@ const createDefaultPythonExecutor = () => ({
 
 const createDefaultPayload = (): JobPayload => ({
   name: "",
-  user: "",
+  user: "default",
   // queue removed
   priority: 5,
   affinity: {
@@ -149,7 +149,7 @@ export function JobForm({
     if (selectedJob) {
       setPayload({
         name: selectedJob.name,
-        user: selectedJob.user,
+        user: selectedJob.user || "default",
         affinity: { ...createDefaultPayload().affinity, ...selectedJob.affinity },
         executor: normalizeExecutor(selectedJob.executor),
         retries: selectedJob.retries,
@@ -222,7 +222,7 @@ export function JobForm({
   const fromInputValue = (value: string) => (value ? new Date(value).toISOString() : null);
 
   const handleSubmit = () => {
-    const normalized = { ...payload, user: payload.user?.trim() || "default" };
+    const normalized = { ...payload, user: "default" };
     onSubmit(normalized);
   };
 
@@ -265,11 +265,6 @@ export function JobForm({
                   <Col xs={24} md={12}>
                     <Form.Item label="Name" required>
                       <Input value={payload.name} onChange={(e) => updatePayload("name", e.target.value)} />
-                    </Form.Item>
-                  </Col>
-                  <Col xs={24} md={12}>
-                    <Form.Item label="User (optional)">
-                      <Input value={payload.user} onChange={(e) => updatePayload("user", e.target.value)} placeholder="Defaults to 'default'" />
                     </Form.Item>
                   </Col>
                 </Row>
