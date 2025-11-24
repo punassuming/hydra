@@ -17,12 +17,6 @@ export function WorkersPanel() {
     { title: "Deploy", dataIndex: "deployment_type", key: "deployment_type" },
     { title: "State", dataIndex: "state", key: "state", render: (state: string) => <Tag>{state || "online"}</Tag> },
     {
-      title: "Queues",
-      dataIndex: "queues",
-      key: "queues",
-      render: (queues: string[]) => (queues?.length ? queues.join(", ") : "default"),
-    },
-    {
       title: "Tags",
       dataIndex: "tags",
       key: "tags",

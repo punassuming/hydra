@@ -72,7 +72,6 @@ export interface JobDefinition {
   _id: string;
   name: string;
   user: string;
-  queue: string;
   priority: number;
   affinity: Affinity;
   executor: Executor;

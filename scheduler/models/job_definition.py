@@ -43,7 +43,6 @@ class JobDefinition(BaseModel):
     executor: ExecutorConfig = Field(default_factory=lambda: ShellExecutor(script=""))
     retries: int = 0
     timeout: int = 0
-    queue: str = "default"
     priority: int = 5
     schedule: ScheduleConfig = Field(default_factory=ScheduleConfig)
     completion: CompletionCriteria = Field(default_factory=CompletionCriteria)

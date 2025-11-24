@@ -25,7 +25,6 @@ export function JobList({ jobs, onSelect, selectedId, loading, onEdit }: Props) 
       key: "executor",
       render: (_: unknown, record: JobDefinition) => <Tag color="geekblue">{record.executor.type}</Tag>,
     },
-    { title: "Queue", dataIndex: "queue", key: "queue" },
     { title: "Priority", dataIndex: "priority", key: "priority" },
     {
       title: "Schedule",

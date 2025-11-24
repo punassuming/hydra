@@ -15,7 +15,6 @@ import {
 export interface JobPayload {
   name: string;
   user: string;
-  queue: string;
   priority: number;
   affinity: JobDefinition["affinity"];
   executor: JobDefinition["executor"];

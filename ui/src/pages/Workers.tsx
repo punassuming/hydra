@@ -23,7 +23,6 @@ export function WorkersPage() {
     { title: "OS", dataIndex: "os", key: "os" },
     { title: "Deploy", dataIndex: "deployment_type", key: "deployment_type" },
     { title: "Subnet", dataIndex: "subnet", key: "subnet" },
-    { title: "Queues", dataIndex: "queues", key: "queues", render: (qs: string[]) => (qs?.length ? qs.join(", ") : "default") },
     {
       title: "Tags",
       dataIndex: "tags",

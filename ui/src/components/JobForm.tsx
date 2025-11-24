@@ -45,7 +45,7 @@ const createDefaultPythonExecutor = () => ({
 const createDefaultPayload = (): JobPayload => ({
   name: "",
   user: "",
-  queue: "default",
+  // queue removed
   priority: 5,
   affinity: {
     os: [...defaultAffinity.os],
@@ -154,7 +154,7 @@ export function JobForm({
         executor: normalizeExecutor(selectedJob.executor),
         retries: selectedJob.retries,
         timeout: selectedJob.timeout,
-        queue: (selectedJob as any).queue ?? "default",
+        // queue removed
         priority: (selectedJob as any).priority ?? 5,
         schedule: { ...createDefaultPayload().schedule, ...(selectedJob.schedule ?? {}) },
         completion: { ...createDefaultPayload().completion, ...(selectedJob.completion ?? {}) },
@@ -294,19 +294,6 @@ export function JobForm({
                       />
                     </Form.Item>
                   </Col>
-                  <Col xs={24} md={12}>
-                    <Form.Item label="Queue">
-                      <Select
-                        mode="tags"
-                        value={[payload.queue]}
-                        onChange={(vals) => updatePayload("queue", (vals as string[])[(vals as string[]).length - 1] || "default")}
-                        options={(workerHints.queues ?? ["default"]).map((q) => ({ label: q, value: q }))}
-                        placeholder="default, ingest, gpu"
-                      />
-                    </Form.Item>
-                  </Col>
-                </Row>
-                <Row gutter={16}>
                   <Col xs={24} md={12}>
                     <Form.Item label="Priority (higher runs first)">
                       <InputNumber
