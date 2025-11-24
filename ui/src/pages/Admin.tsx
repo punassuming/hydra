@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, Form, Input, Space, Table, Typography, Button, message, Modal, Input as AntInput, Select } from "antd";
-import { fetchDomains, createDomain, updateDomain, DomainInfo } from "../api/admin";
+import { fetchDomains, createDomain, updateDomain, DomainInfo, rotateDomainToken } from "../api/admin";
 import { setAuthToken, setDomain as storeDomain, getToken, withTempToken } from "../api/client";
 import { createJob } from "../api/jobs";
 import { useState } from "react";
@@ -13,6 +13,15 @@ export function AdminPage() {
   const [importText, setImportText] = useState("");
   const [importing, setImporting] = useState(false);
   const [importToken, setImportToken] = useState("");
+  const rotateMut = useMutation({
+    mutationFn: (domain: string) => rotateDomainToken(domain),
+    onSuccess: (data) => {
+      message.success("Token rotated");
+      setTokenModal({ open: true, token: data.token, domain: data.domain });
+      queryClient.invalidateQueries({ queryKey: ["domains"] });
+    },
+    onError: (err: Error) => message.error(err.message),
+  });
   const sampleOptions = [
     { key: "quick-shell", label: "Quick Shell", payload: {
       name: "quick-shell",
@@ -97,6 +106,9 @@ export function AdminPage() {
     { title: "Domain", dataIndex: "domain", key: "domain" },
     { title: "Display Name", dataIndex: "display_name", key: "display_name" },
     { title: "Description", dataIndex: "description", key: "description" },
+    { title: "Jobs", dataIndex: "jobs_count", key: "jobs_count" },
+    { title: "Runs", dataIndex: "runs_count", key: "runs_count" },
+    { title: "Workers", dataIndex: "workers_count", key: "workers_count" },
     {
       title: "Actions",
       key: "actions",
@@ -107,6 +119,9 @@ export function AdminPage() {
             onClick={() => updateMut.mutate({ domain: record.domain, payload: { display_name: record.display_name || record.domain } })}
           >
             Save Name
+          </Button>
+          <Button size="small" onClick={() => rotateMut.mutate(record.domain)}>
+            Rotate Token
           </Button>
           <Button
             size="small"

@@ -23,11 +23,17 @@ def list_domains(request: Request) -> Dict[str, List[Dict]]:
     meta = {doc["domain"]: doc for doc in db.domains.find({})}
     result = []
     for d in domains:
+        jobs_count = db.job_definitions.count_documents({"domain": d})
+        runs_count = db.job_runs.count_documents({"domain": d})
+        workers_count = len(list(r.scan_iter(f"workers:{d}:*")))
         result.append(
             {
                 "domain": d,
                 "display_name": meta.get(d, {}).get("display_name", d),
                 "description": meta.get(d, {}).get("description", ""),
+                "jobs_count": jobs_count,
+                "runs_count": runs_count,
+                "workers_count": workers_count,
             }
         )
     return {"domains": result}
@@ -75,6 +81,22 @@ def rename_domain(domain: str, payload: Dict, request: Request):
         r = get_redis()
         r.setex(f"token_hash:{token_hash}:domain", 300, domain)
     return {"ok": True, "domain": domain, "token": token if token else None}
+
+
+@router.post("/domains/{domain}/token")
+def rotate_token(domain: str, request: Request):
+    _require_admin(request)
+    db = get_db()
+    r = get_redis()
+    doc = db.domains.find_one({"domain": domain})
+    if not doc:
+        raise HTTPException(status_code=404, detail="domain not found")
+    token = secrets.token_hex(24)
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+    db.domains.update_one({"domain": domain}, {"$set": {"token_hash": token_hash}})
+    r.set(f"token_hash:{domain}", token_hash)
+    r.set(f"token_hash:{token_hash}:domain", domain)
+    return {"ok": True, "domain": domain, "token": token}
 
 
 @router.delete("/domains/{domain}")
