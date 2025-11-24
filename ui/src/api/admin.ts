@@ -8,6 +8,6 @@ export interface DomainInfo {
 }
 
 export const fetchDomains = () => apiClient.get<{ domains: DomainInfo[] }>("/admin/domains");
-export const createDomain = (payload: DomainInfo) => apiClient.post("/admin/domains", payload);
+export const createDomain = (payload: DomainInfo) => apiClient.post<DomainInfo>("/admin/domains", payload);
 export const updateDomain = (domain: string, payload: Partial<DomainInfo>) =>
   apiClient.put(`/admin/domains/${domain}`, payload);

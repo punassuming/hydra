@@ -71,9 +71,12 @@ export function AdminPage() {
 
   const createMut = useMutation({
     mutationFn: createDomain,
-    onSuccess: () => {
+    onSuccess: (data) => {
       message.success("Domain created");
       queryClient.invalidateQueries({ queryKey: ["domains"] });
+      if (data?.token) {
+        setTokenModal({ open: true, token: data.token, domain: data.domain });
+      }
     },
     onError: (err: Error) => message.error(err.message),
   });
