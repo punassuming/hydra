@@ -80,11 +80,10 @@ def scheduling_loop(stop_event: threading.Event):
                 log.error("Received job_id %s with no definition; skipping", job_id)
                 continue
             domain = job.get("domain", domain)
-            job_queue = (job.get("queue") or "default").strip() or "default"
             candidates = [
                 w
                 for w in list_online_workers(ttl, domain)
-                if passes_affinity(job, w) and job_queue in (w.get("queues") or ["default"])
+                if passes_affinity(job, w)
             ]
             worker = select_best_worker(candidates)
             if not worker:
