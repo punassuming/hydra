@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, Form, Input, Space, Table, Typography, Button, message, Modal, Input as AntInput, Select } from "antd";
 import { fetchDomains, createDomain, updateDomain, DomainInfo } from "../api/admin";
-import { setAuthToken, setDomain as storeDomain } from "../api/client";
+import { setAuthToken, setDomain as storeDomain, getToken, withTempToken } from "../api/client";
 import { createJob } from "../api/jobs";
 import { useState } from "react";
 
@@ -12,6 +12,7 @@ export function AdminPage() {
   const [switchModal, setSwitchModal] = useState<{ open: boolean; domain?: string; token?: string }>({ open: false });
   const [importText, setImportText] = useState("");
   const [importing, setImporting] = useState(false);
+  const [importToken, setImportToken] = useState("");
   const sampleOptions = [
     { key: "quick-shell", label: "Quick Shell", payload: {
       name: "quick-shell",
@@ -72,11 +73,13 @@ export function AdminPage() {
   const createMut = useMutation({
     mutationFn: createDomain,
     onSuccess: (data) => {
-      message.success("Domain created");
-      queryClient.invalidateQueries({ queryKey: ["domains"] });
       if (data?.token) {
+        message.success("Domain created. Token shown below.");
         setTokenModal({ open: true, token: data.token, domain: data.domain });
+      } else {
+        message.success("Domain created");
       }
+      queryClient.invalidateQueries({ queryKey: ["domains"] });
     },
     onError: (err: Error) => message.error(err.message),
   });
@@ -268,18 +271,35 @@ export function AdminPage() {
                   return;
                 }
                 setImporting(true);
-                const results = await Promise.allSettled(jobs.map((j) => createJob(j as any)));
-                const ok = results.filter((r) => r.status === "fulfilled").length;
-                const fail = results.length - ok;
-                if (ok) message.success(`Imported ${ok} job(s)`);
-                if (fail) message.error(`${fail} job(s) failed`);
-                queryClient.invalidateQueries({ queryKey: ["jobs"] });
-                setImporting(false);
+                const originalToken = getToken();
+                try {
+                  const results = await Promise.allSettled(
+                    jobs.map((j) =>
+                      withTempToken(importToken || originalToken, () => createJob(j as any)),
+                    ),
+                  );
+                  const ok = results.filter((r) => r.status === "fulfilled").length;
+                  const fail = results.length - ok;
+                  if (ok) message.success(`Imported ${ok} job(s)`);
+                  if (fail) message.error(`${fail} job(s) failed`);
+                  queryClient.invalidateQueries({ queryKey: ["jobs"] });
+                } finally {
+                  if (originalToken) setAuthToken(originalToken);
+                  setImporting(false);
+                }
               }}
             >
               Import
             </Button>
           </Space>
+          <Typography.Text type="secondary">
+            Use a domain token here to import into that domain (recommended), instead of using the admin token.
+          </Typography.Text>
+          <Input.Password
+            placeholder="Domain token for import"
+            value={importToken}
+            onChange={(e) => setImportToken(e.target.value)}
+          />
         </Space>
       </Card>
       <Modal

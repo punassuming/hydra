@@ -15,6 +15,18 @@ export function setDomain(domain: string) {
   localStorage.setItem("hydra_domain", domain);
 }
 
+export function withTempToken<T>(token: string | undefined, fn: () => Promise<T>): Promise<T> {
+  const prev = getToken();
+  if (token) {
+    setAuthToken(token);
+  }
+  return fn().finally(() => {
+    if (prev) {
+      setAuthToken(prev);
+    }
+  });
+}
+
 async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const detail = await res.json().catch(() => ({}));
