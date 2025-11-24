@@ -4,6 +4,7 @@ import secrets
 import hashlib
 from ..redis_client import get_redis
 from ..mongo_client import get_db
+from ..utils.auth import _hash_token
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -74,3 +75,18 @@ def rename_domain(domain: str, payload: Dict, request: Request):
         r = get_redis()
         r.setex(f"token_hash:{token_hash}:domain", 300, domain)
     return {"ok": True, "domain": domain, "token": token if token else None}
+
+
+@router.delete("/domains/{domain}")
+def delete_domain(domain: str, request: Request):
+    _require_admin(request)
+    db = get_db()
+    r = get_redis()
+    db.domains.delete_one({"domain": domain})
+    r.srem("hydra:domains", domain)
+    # clear token cache
+    token_hash = r.get(f"token_hash:{domain}")
+    if token_hash:
+        r.delete(f"token_hash:{token_hash}:domain")
+    r.delete(f"token_hash:{domain}")
+    return {"ok": True}
