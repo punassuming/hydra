@@ -100,23 +100,6 @@ REDIS_URL=redis://localhost:6379/0 MONGO_URL=mongodb://localhost:27017 \
 docker compose -f docker-compose.worker.yml up --build
 ```
 
-### Dev stack (optional)
-
-```
-SEED_DOMAINS=1 ADMIN_TOKEN=<admin_token> API_TOKEN=<dev_token> \ 
-docker compose -f docker-compose.dev.yml up --build
-```
-
-### Import sample jobs
-
-With a domain or admin token:
-
-```
-API_BASE=http://localhost:8000 API_TOKEN=<token> python examples/import_jobs.py
-```
-
-Job definitions live in `examples/jobs/*.json` and cover quick shell, long-running shell, python env, and cron scenarios. The domain is inferred from the token.
-
 Once running:
 
 ```

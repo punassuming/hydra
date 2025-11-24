@@ -60,18 +60,14 @@ def _ensure_domains_seeded():
         r.set(f"token_hash:{domain}", token_hash)
         r.set(f"token_hash:{token_hash}:domain", domain)
     # Optional seeding (used by dev compose)
-    if os.getenv("SEED_DOMAINS") == "1" and db.domains.count_documents({}) == 0:
-        seeds = [("prod", secrets.token_hex(24), "Production")]
-        dev_token = os.getenv("SEED_DEV_TOKEN")
-        if dev_token:
-            seeds.append(("dev", dev_token, "Development"))
-        for domain, token, desc in seeds:
-            token_hash = hashlib.sha256(token.encode()).hexdigest()
-            db.domains.insert_one({"domain": domain, "display_name": desc, "description": desc, "token_hash": token_hash})
-            r.sadd("hydra:domains", domain)
-            r.set(f"token_hash:{domain}", token_hash)
-            r.set(f"token_hash:{token_hash}:domain", domain)
-            log.info("Seeded domain %s with token %s", domain, token)
+    if db.domains.count_documents({}) == 0:
+        token = secrets.token_hex(24)
+        token_hash = hashlib.sha256(token.encode()).hexdigest()
+        db.domains.insert_one({"domain": "prod", "display_name": "Production", "description": "Production", "token_hash": token_hash})
+        r.sadd("hydra:domains", "prod")
+        r.set(f"token_hash:prod", token_hash)
+        r.set(f"token_hash:{token_hash}:domain", "prod")
+        log.warning("Seeded default prod domain with token: %s", token)
 
 
 def _ensure_admin_token():
