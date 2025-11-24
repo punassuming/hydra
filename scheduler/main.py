@@ -10,7 +10,6 @@ from .api.workers import router as workers_router
 from .api.health import router as health_router
 from .api.events import router as events_router
 from .api.history import router as history_router
-from .api.queue import router as queue_router
 from .api.logs import router as logs_router
 from .api.admin import router as admin_router
 from .scheduler import scheduling_loop, failover_loop, schedule_trigger_loop
@@ -39,7 +38,6 @@ app.include_router(workers_router)
 app.include_router(health_router)
 app.include_router(events_router)
 app.include_router(history_router)
-app.include_router(queue_router)
 app.include_router(logs_router)
 app.include_router(admin_router)
 app.middleware("http")(enforce_api_key)
