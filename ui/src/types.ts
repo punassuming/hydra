@@ -2,6 +2,9 @@ export interface Affinity {
   os: string[];
   tags: string[];
   allowed_users: string[];
+  hostnames?: string[];
+  subnets?: string[];
+  deployment_types?: string[];
 }
 
 export type Executor =
@@ -53,6 +56,7 @@ export interface ScheduleConfig {
   start_at?: string | null;
   end_at?: string | null;
   next_run_at?: string | null;
+  timezone?: string;
   enabled: boolean;
 }
 
@@ -68,6 +72,8 @@ export interface JobDefinition {
   _id: string;
   name: string;
   user: string;
+  queue: string;
+  priority: number;
   affinity: Affinity;
   executor: Executor;
   retries: number;
@@ -109,7 +115,9 @@ export interface JobOverview {
   total_runs: number;
   success_runs: number;
   failed_runs: number;
+  queued_runs?: number;
   last_run?: JobRun;
+  recent_runs?: JobRun[];
 }
 
 export interface JobGridTaskInstance {
@@ -148,6 +156,11 @@ export interface JobGraphData {
   edges: { source: string; target: string }[];
 }
 
+export interface QueueOverview {
+  pending: { job_id: string; name: string; priority: number; queue: string; user?: string }[];
+  upcoming: { job_id: string; name: string; queue: string; priority: number; next_run_at?: string | null }[];
+}
+
 export interface WorkerInfo {
   worker_id: string;
   os: string;
@@ -157,6 +170,17 @@ export interface WorkerInfo {
   current_running: number;
   last_heartbeat?: number;
   status: string;
+  state?: string;
+  queues?: string[];
+  hostname?: string;
+  ip?: string;
+  subnet?: string;
+  deployment_type?: string;
+  run_user?: string;
+  cpu_count?: number;
+  python_version?: string;
+  cwd?: string;
+  running_jobs?: string[];
 }
 
 export interface SchedulerEvent {

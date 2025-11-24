@@ -7,6 +7,7 @@ class JobRun(BaseModel):
     id: Optional[str] = Field(default=None, alias="_id")
     job_id: str
     user: str
+    domain: str = "prod"
     worker_id: Optional[str] = None
     start_ts: Optional[datetime] = None
     scheduled_ts: Optional[datetime] = None
@@ -25,6 +26,7 @@ class JobRun(BaseModel):
     executor_type: Optional[str] = None
     queue_latency_ms: Optional[float] = None
     completion_reason: Optional[str] = None
+    duration: Optional[float] = None
 
     class Config:
         populate_by_name = True

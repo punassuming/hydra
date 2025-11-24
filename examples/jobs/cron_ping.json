@@ -1,0 +1,12 @@
+{
+  "name": "cron-ping",
+  "user": "demo",
+  "affinity": { "os": ["linux"], "tags": [], "allowed_users": [] },
+  "executor": { "type": "shell", "shell": "bash", "script": "echo cron-run $(date +%s)" },
+  "retries": 0,
+  "timeout": 30,
+  "queue": "default",
+  "priority": 3,
+  "schedule": { "mode": "cron", "cron": "*/5 * * * *", "enabled": true },
+  "completion": { "exit_codes": [0], "stdout_contains": ["cron-run"], "stdout_not_contains": [], "stderr_contains": [], "stderr_not_contains": [] }
+}

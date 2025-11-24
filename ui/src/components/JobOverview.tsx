@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { fetchJobOverview } from "../api/jobs";
 import { Card, Table, Tag, Modal, Typography, Space } from "antd";
 import { JobOverview as JobOverviewType } from "../types";
+import { Link } from "react-router-dom";
 
 export function JobOverview() {
   const { data, isLoading } = useQuery({
@@ -21,7 +22,12 @@ export function JobOverview() {
   );
 
   const columns = [
-    { title: "Job", dataIndex: "name", key: "name" },
+    {
+      title: "Job",
+      dataIndex: "name",
+      key: "name",
+      render: (_: unknown, record: JobOverviewType) => <Link to={`/jobs/${record.job_id}`}>{record.name}</Link>,
+    },
     {
       title: "Schedule",
       dataIndex: "schedule_mode",
@@ -43,6 +49,7 @@ export function JobOverview() {
       key: "failed_runs",
       render: (value: number) => <Typography.Text type={value > 0 ? "danger" : undefined}>{value}</Typography.Text>,
     },
+    { title: "Queued", dataIndex: "queued_runs", key: "queued_runs" },
     {
       title: "Last Run",
       key: "last_run",
@@ -72,7 +79,7 @@ export function JobOverview() {
   return (
     <>
       <Card title="Job Overview" bordered={false}>
-        <Table dataSource={rows} columns={columns} loading={isLoading} pagination={{ pageSize: 5 }} size="small" />
+        <Table dataSource={rows} columns={columns} loading={isLoading} pagination={{ pageSize: 10 }} size="small" />
       </Card>
       <Modal
         open={logModal.visible}

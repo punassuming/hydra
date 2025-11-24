@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import List, Dict, Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 
 from ..mongo_client import get_db
 from ..redis_client import get_redis
@@ -20,33 +20,43 @@ from ..utils.schedule import initialize_schedule
 router = APIRouter()
 
 
-def _fetch_job_runs(job_id: str) -> List[Dict[str, Any]]:
+def _fetch_job_runs(job_id: str, domain_filter: str | None = None) -> List[Dict[str, Any]]:
     db = get_db()
-    runs = list(db.job_runs.find({"job_id": job_id}).sort("_id", 1))
+    query: Dict[str, Any] = {"job_id": job_id}
+    if domain_filter:
+        query["domain"] = domain_filter
+    runs = list(db.job_runs.find(query).sort("_id", 1))
     normalized: List[Dict[str, Any]] = []
     for run in runs:
-        doc = dict(run)
-        if "_id" in doc:
-            doc["_id"] = str(doc["_id"])
-        stdout = (doc.get("stdout") or "")[:]
-        stderr = (doc.get("stderr") or "")[:]
-        doc["stdout_tail"] = stdout[-4096:]
-        doc["stderr_tail"] = stderr[-4096:]
-        duration = None
-        if doc.get("start_ts") and doc.get("end_ts"):
-            try:
-                duration = (doc["end_ts"] - doc["start_ts"]).total_seconds()
-            except Exception:
-                duration = None
-        doc["duration"] = duration
+        doc = _normalize_run_doc(run)
         normalized.append(doc)
     return normalized
 
 
-def _enqueue_job(job_id: str, reason: str, extra_payload: dict | None = None):
+def _normalize_run_doc(doc: Dict[str, Any]) -> Dict[str, Any]:
+    normalized = dict(doc)
+    if "_id" in normalized:
+        normalized["_id"] = str(normalized["_id"])
+    stdout = (normalized.get("stdout") or "")[:]
+    stderr = (normalized.get("stderr") or "")[:]
+    normalized["stdout_tail"] = stdout[-4096:]
+    normalized["stderr_tail"] = stderr[-4096:]
+    duration = None
+    if normalized.get("start_ts") and normalized.get("end_ts"):
+        try:
+            duration = (normalized["end_ts"] - normalized["start_ts"]).total_seconds()
+        except Exception:
+            duration = None
+    normalized["duration"] = duration
+    return normalized
+
+
+def _enqueue_job(job_id: str, reason: str, extra_payload: dict | None = None, priority: int | None = None, domain: str = "prod"):
     r = get_redis()
-    r.rpush("job_queue:pending", job_id)
-    payload = {"job_id": job_id, "reason": reason}
+    score = float(priority if priority is not None else 5)
+    r.sadd("hydra:domains", domain)
+    r.zadd(f"job_queue:{domain}:pending", {job_id: score})
+    payload = {"job_id": job_id, "reason": reason, "priority": score, "domain": domain}
     if extra_payload:
         payload.update(extra_payload)
     event_bus.publish("job_enqueued", payload)
@@ -109,29 +119,34 @@ def _attach_schedule(job_def: JobDefinition, force: bool = False) -> JobDefiniti
 
 
 @router.get("/jobs/", response_model=List[JobDefinition])
-def list_jobs():
+def list_jobs(request: Request):
     db = get_db()
-    docs = list(db.job_definitions.find({}).sort("created_at", -1))
+    domain = getattr(request.state, "domain", "prod")
+    is_admin = getattr(request.state, "is_admin", False)
+    query = {} if is_admin else {"domain": domain}
+    docs = list(db.job_definitions.find(query).sort("created_at", -1))
     return [JobDefinition.model_validate(doc) for doc in docs]
 
 
 @router.post("/jobs/", response_model=JobDefinition)
-def submit_job(job: JobCreate):
+def submit_job(job: JobCreate, request: Request):
     db = get_db()
-    job_def = JobDefinition(**job.model_dump())
+    domain = getattr(request.state, "domain", "prod")
+    job_def = JobDefinition(**job.model_dump(), domain=domain)
     validation = _validate_job_definition(job_def)
     if not validation.valid:
         raise HTTPException(status_code=422, detail=validation.errors)
     job_def = _attach_schedule(job_def, force=True)
     db.job_definitions.insert_one(job_def.to_mongo())
     if job_def.schedule.mode == "immediate":
-        _enqueue_job(job_def.id, reason="immediate_submit")
+        _enqueue_job(job_def.id, reason="immediate_submit", priority=job_def.priority)
     event_bus.publish(
         "job_submitted",
         {
             "job_id": job_def.id,
             "name": job_def.name,
             "user": job_def.user,
+            "domain": job_def.domain,
             "schedule_mode": job_def.schedule.mode,
             "next_run_at": (
                 job_def.schedule.next_run_at.isoformat()
@@ -144,26 +159,42 @@ def submit_job(job: JobCreate):
 
 
 @router.get("/jobs/{job_id}", response_model=JobDefinition)
-def get_job(job_id: str):
+def get_job(job_id: str, request: Request):
     db = get_db()
     doc = db.job_definitions.find_one({"_id": job_id})
     if not doc:
         raise HTTPException(status_code=404, detail="job not found")
+    domain = getattr(request.state, "domain", "prod")
+    is_admin = getattr(request.state, "is_admin", False)
+    if not is_admin and doc.get("domain", "prod") != domain:
+        raise HTTPException(status_code=403, detail="forbidden")
     return JobDefinition.model_validate(doc)
 
 
 @router.get("/jobs/{job_id}/runs", response_model=List[JobRun])
-def get_job_runs(job_id: str):
-    runs = _fetch_job_runs(job_id)
+def get_job_runs(job_id: str, request: Request):
+    db = get_db()
+    job = db.job_definitions.find_one({"_id": job_id})
+    if not job:
+        raise HTTPException(status_code=404, detail="job not found")
+    domain = getattr(request.state, "domain", "prod")
+    is_admin = getattr(request.state, "is_admin", False)
+    if not is_admin and job.get("domain", "prod") != domain:
+        raise HTTPException(status_code=403, detail="forbidden")
+    runs = _fetch_job_runs(job_id, domain_filter=None if is_admin else domain)
     return [JobRun.model_validate(r) for r in runs]
 
 
 @router.put("/jobs/{job_id}", response_model=JobDefinition)
-def update_job(job_id: str, updates: JobUpdate):
+def update_job(job_id: str, updates: JobUpdate, request: Request):
     db = get_db()
     existing = db.job_definitions.find_one({"_id": job_id})
     if not existing:
         raise HTTPException(status_code=404, detail="job not found")
+    domain = getattr(request.state, "domain", "prod")
+    is_admin = getattr(request.state, "is_admin", False)
+    if not is_admin and existing.get("domain", "prod") != domain:
+        raise HTTPException(status_code=403, detail="forbidden")
     update_doc = updates.model_dump(exclude_unset=True)
     if not update_doc:
         raise HTTPException(status_code=400, detail="no fields to update")
@@ -175,56 +206,72 @@ def update_job(job_id: str, updates: JobUpdate):
         raise HTTPException(status_code=422, detail=validation.errors)
     job_def = _attach_schedule(job_def, force="schedule" in update_doc)
     db.job_definitions.replace_one({"_id": job_id}, job_def.to_mongo())
-    event_bus.publish("job_updated", {"job_id": job_id})
+    event_bus.publish("job_updated", {"job_id": job_id, "domain": job_def.domain})
     return job_def
 
 
 @router.post("/jobs/{job_id}/validate", response_model=JobValidationResult)
-def validate_job(job_id: str):
+def validate_job(job_id: str, request: Request):
     db = get_db()
     doc = db.job_definitions.find_one({"_id": job_id})
     if not doc:
         raise HTTPException(status_code=404, detail="job not found")
+    domain = getattr(request.state, "domain", "prod")
+    is_admin = getattr(request.state, "is_admin", False)
+    if not is_admin and doc.get("domain", "prod") != domain:
+        raise HTTPException(status_code=403, detail="forbidden")
     job_def = JobDefinition.model_validate(doc)
     return _validate_job_definition(job_def)
 
 
 @router.post("/jobs/validate", response_model=JobValidationResult)
-def validate_payload(job: JobCreate):
-    job_def = JobDefinition(**job.model_dump())
+def validate_payload(job: JobCreate, request: Request):
+    domain = getattr(request.state, "domain", "prod")
+    job_def = JobDefinition(**job.model_dump(), domain=domain)
     return _validate_job_definition(job_def)
 
 
 @router.post("/jobs/{job_id}/run")
-def run_job_now(job_id: str):
+def run_job_now(job_id: str, request: Request):
     db = get_db()
     doc = db.job_definitions.find_one({"_id": job_id})
     if not doc:
         raise HTTPException(status_code=404, detail="job not found")
-    _enqueue_job(job_id, reason="manual_run")
+    domain = getattr(request.state, "domain", "prod")
+    is_admin = getattr(request.state, "is_admin", False)
+    if not is_admin and doc.get("domain", "prod") != domain:
+        raise HTTPException(status_code=403, detail="forbidden")
+    priority = doc.get("priority", 5)
+    _enqueue_job(job_id, reason="manual_run", priority=priority, domain=doc.get("domain", "prod"))
+    event_bus.publish("job_manual_run", {"job_id": job_id, "domain": doc.get("domain", "prod")})
     return {"job_id": job_id, "queued": True}
 
 
 @router.post("/jobs/adhoc", response_model=JobDefinition)
-def run_adhoc_job(job: JobCreate):
+def run_adhoc_job(job: JobCreate, request: Request):
     db = get_db()
+    domain = getattr(request.state, "domain", "prod")
     adhoc_schedule = ScheduleConfig(mode="immediate", enabled=False)
     job_dict = job.model_dump()
     job_dict["schedule"] = adhoc_schedule.model_dump()
-    job_def = JobDefinition(**job_dict)
+    job_def = JobDefinition(**job_dict, domain=domain)
     validation = _validate_job_definition(job_def)
     if not validation.valid:
         raise HTTPException(status_code=422, detail=validation.errors)
     job_def = _attach_schedule(job_def, force=True)
     db.job_definitions.insert_one(job_def.to_mongo())
-    _enqueue_job(job_def.id, reason="adhoc_run")
+    _enqueue_job(job_def.id, reason="adhoc_run", priority=job_def.priority, domain=domain)
     return job_def
 
 
 @router.get("/overview/jobs")
-def jobs_overview():
+def jobs_overview(request: Request):
     db = get_db()
-    job_docs = list(db.job_definitions.find({}))
+    r = get_redis()
+    domain = getattr(request.state, "domain", "prod")
+    is_admin = getattr(request.state, "is_admin", False)
+    query = {} if is_admin else {"domain": domain}
+    job_docs = list(db.job_definitions.find(query))
     print(f"Job Docs: {job_docs}")
     overview = []
     for job in job_docs:
@@ -236,14 +283,14 @@ def jobs_overview():
         failed_runs = db.job_runs.count_documents(
             {"job_id": job_id, "status": "failed"}
         )
-        last_run = db.job_runs.find({"job_id": job_id}).sort("start_ts", -1).limit(1)
-        last_run_doc = next(iter(last_run), None)
-        if last_run_doc and "_id" in last_run_doc:
-            last_run_doc["_id"] = str(last_run_doc["_id"])
-            logs_out = last_run_doc.get("stdout") or ""
-            logs_err = last_run_doc.get("stderr") or ""
-            last_run_doc["stdout_tail"] = logs_out[-4096:]
-            last_run_doc["stderr_tail"] = logs_err[-4096:]
+        queued = 1 if r.zscore(f"job_queue:{job.get('domain','prod')}:pending", job_id) is not None else 0
+        recent_runs_cursor = (
+            db.job_runs.find({"job_id": job_id})
+            .sort("start_ts", -1)
+            .limit(12)
+        )
+        recent_runs = [_normalize_run_doc(run) for run in recent_runs_cursor]
+        last_run_doc = recent_runs[0] if recent_runs else None
         overview.append(
             {
                 "job_id": job_id,
@@ -252,7 +299,9 @@ def jobs_overview():
                 "total_runs": total_runs,
                 "success_runs": success_runs,
                 "failed_runs": failed_runs,
+                "queued_runs": queued,
                 "last_run": last_run_doc,
+                "recent_runs": recent_runs,
             }
         )
     return overview

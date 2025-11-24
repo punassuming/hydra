@@ -4,6 +4,7 @@ from pydantic import BaseModel
 
 class WorkerInfo(BaseModel):
     worker_id: str
+    domain: str = "prod"
     os: str
     tags: List[str]
     allowed_users: List[str]
@@ -11,6 +12,8 @@ class WorkerInfo(BaseModel):
     current_running: int
     last_heartbeat: Optional[float] = None
     status: str = "online"
+    state: str = "online"
+    queues: List[str] = []
     cpu_count: Optional[int] = None
     python_version: Optional[str] = None
     cwd: Optional[str] = None
@@ -19,3 +22,4 @@ class WorkerInfo(BaseModel):
     subnet: Optional[str] = None
     deployment_type: Optional[str] = None
     run_user: Optional[str] = None
+    running_jobs: List[str] = []

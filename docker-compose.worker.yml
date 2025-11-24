@@ -1,0 +1,18 @@
+services:
+  worker:
+    build:
+      context: ./worker
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      - REDIS_URL=${REDIS_URL}
+      - MONGO_URL=${MONGO_URL}
+      - MONGO_DB=${MONGO_DB:-hydra_jobs}
+      - WORKER_ID=${WORKER_ID:-worker-standalone}
+      - WORKER_DOMAIN=${WORKER_DOMAIN:-prod}
+      - API_TOKEN=${API_TOKEN}
+      - WORKER_TAGS=${WORKER_TAGS:-}
+      - ALLOWED_USERS=${ALLOWED_USERS:-}
+      - WORKER_QUEUES=${WORKER_QUEUES:-default}
+      - MAX_CONCURRENCY=${MAX_CONCURRENCY:-2}

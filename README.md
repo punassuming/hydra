@@ -58,32 +58,64 @@ A distributed job runner with a FastAPI scheduler, cross‑platform workers, Red
 
 ## Redis Usage
 
-- `workers:<worker_id>`: hash with worker metadata, `max_concurrency`, `current_running`, status
-- `worker_heartbeats`: sorted set `id -> timestamp`
-- `job_queue:pending`: list of job IDs awaiting assignment
-- `job_queue:<worker_id>`: per‑worker list of job IDs
-- `job_running:<job_id>`: hash with `worker_id`, `heartbeat`, `user`
-- `worker_running_set:<worker_id>`: set of active job IDs
+- `workers:<domain>:<worker_id>`: hash with worker metadata, `max_concurrency`, `current_running`, status
+- `worker_heartbeats:<domain>`: sorted set `id -> timestamp`
+- `job_queue:<domain>:pending`: pending jobs per domain (priority zset)
+- `job_queue:<domain>:<worker_id>`: per‑worker list of job IDs
+- `job_running:<domain>:<job_id>`: hash with `worker_id`, `heartbeat`, `user`
+- `worker_running_set:<domain>:<worker_id>`: set of active job IDs
+- `token_hash:<domain>` and `token_hash:<hash>:domain`: cache of domain tokens (hashed)
 
 ## MongoDB Usage
 
 Collections:
-- `job_definitions` — job documents with `_id` (string), name, user, affinity, executor config (python/shell/batch/external), retries, timeout, schedule metadata (mode, cron/interval, next run), completion criteria, timestamps
-- `job_runs` — run history with job_id, user, worker_id, timestamps, status, returncode, stdout, stderr, concurrency slot, attempt count, queue latency, executor type, completion reason
+- `domains` — domain metadata and token hash (`domain`, `display_name`, `description`, `token_hash`)
+- `job_definitions` — job documents with `_id` (string), name, user, affinity, executor config (python/shell/batch/external), retries, timeout, schedule metadata (mode, cron/interval, next run), completion criteria, timestamps, **domain**
+- `job_runs` — run history with job_id, user, worker_id, timestamps, status, returncode, stdout, stderr, concurrency slot, attempt count, queue latency, executor type, completion reason, **domain**
 
 ## Quick Start
 
 - Prereqs: Docker + Docker Compose
-- Build the service images (from repo root):
+- Build images (from repo root):
 
 ```
 docker build -t hydra-scheduler:latest scheduler
 docker build -t hydra-worker:latest worker
+docker build -t hydra-ui:latest ui
 ```
 
+### Run core stack (scheduler/ui/redis/mongo)
+
 ```
-docker-compose up --build
+ADMIN_TOKEN=<your_admin_token> docker compose up --build
 ```
+
+### Run a worker separately
+
+Set a domain token for the worker (must match the domain in Mongo, e.g., created via Admin UI):
+
+```
+API_TOKEN=<domain_token> WORKER_DOMAIN=prod \ 
+REDIS_URL=redis://localhost:6379/0 MONGO_URL=mongodb://localhost:27017 \ 
+docker compose -f docker-compose.worker.yml up --build
+```
+
+### Dev stack (optional)
+
+```
+SEED_DOMAINS=1 ADMIN_TOKEN=<admin_token> API_TOKEN=<dev_token> \ 
+docker compose -f docker-compose.dev.yml up --build
+```
+
+### Import sample jobs
+
+With a domain or admin token:
+
+```
+API_BASE=http://localhost:8000 API_TOKEN=<token> python examples/import_jobs.py
+```
+
+Job definitions live in `examples/jobs/*.json` and cover quick shell, long-running shell, python env, and cron scenarios. The domain is inferred from the token.
 
 Once running:
 
@@ -106,6 +138,23 @@ Access the React UI at `http://localhost:5173` (served by Docker Compose via the
 **CORS note:** The scheduler enables CORS for `http://localhost:5173` and `http://localhost:8000` by default so the bundled UI can talk to the API. Override `CORS_ALLOW_ORIGINS` (comma-separated or `*`) if you host the UI/API on different domains.
 
 **Persistent history:** Mongo now uses a named Docker volume (`mongo-data`) so job definitions and run history survive container restarts.
+
+### Domains / Tokens (multi-tenant)
+
+- Scheduler: set `ADMIN_TOKEN` (admin domain defaults to `admin`). Domains/tokens live in Mongo (`domains` collection). No domains are pre-seeded unless you set `SEED_DOMAINS=1` (dev compose).
+- Workers: set `WORKER_DOMAIN=<domain>` and **required** `WORKER_DOMAIN_TOKEN=<matching token>`; workers register with a token hash and are accepted only for their domain.
+- Redis/Mongo are scoped per domain; admin token can see all domains, others only their own. Domain tokens are resolved from Mongo by hash, not from env.
+- UI: provide a token (admin or domain) via `.env`/localStorage; admin token shows the Admin page to manage domains and tokens.
+
+### Smoke-test jobs
+
+Seed common scenarios for quick validation:
+
+```bash
+API_BASE=http://localhost:8000 API_TOKEN=changeme python examples/seed_test_jobs.py
+```
+
+Creates quick shell, long-running shell, failing, python, and cron jobs to validate scheduling, logs, and queue handling.
 
 ## Write Your Own Worker
 

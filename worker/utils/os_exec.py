@@ -1,7 +1,8 @@
 import os
 import platform
 import subprocess
-from typing import Dict, List, Optional, Sequence, Tuple
+import threading
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 
 def _merged_env(extra: Optional[Dict[str, str]]) -> Dict[str, str]:
@@ -21,6 +22,59 @@ def _run(cmd: Sequence[str], timeout: Optional[int], env: Optional[Dict[str, str
         env=_merged_env(env),
     )
     return proc.returncode, proc.stdout, proc.stderr
+
+
+def _run_with_callbacks(
+    cmd: Sequence[str],
+    timeout: Optional[int],
+    env: Optional[Dict[str, str]],
+    workdir: Optional[str],
+    on_stdout: Optional[Callable[[str], None]] = None,
+    on_stderr: Optional[Callable[[str], None]] = None,
+) -> Tuple[int, str, str]:
+    """
+    Run a command, streaming stdout/stderr via callbacks while still returning full buffers.
+    """
+    proc = subprocess.Popen(
+        list(cmd),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        cwd=workdir,
+        env=_merged_env(env),
+    )
+    stdout_lines: List[str] = []
+    stderr_lines: List[str] = []
+
+    def _drain(pipe, sink: List[str], cb: Optional[Callable[[str], None]]):
+        for line in iter(pipe.readline, ""):
+            sink.append(line)
+            if cb:
+                try:
+                    cb(line)
+                except Exception:
+                    pass
+        pipe.close()
+
+    threads = []
+    if proc.stdout:
+        t_out = threading.Thread(target=_drain, args=(proc.stdout, stdout_lines, on_stdout), daemon=True)
+        t_out.start()
+        threads.append(t_out)
+    if proc.stderr:
+        t_err = threading.Thread(target=_drain, args=(proc.stderr, stderr_lines, on_stderr), daemon=True)
+        t_err.start()
+        threads.append(t_err)
+
+    try:
+        proc.wait(timeout=timeout if timeout and timeout > 0 else None)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+    for t in threads:
+        t.join(timeout=1)
+
+    return proc.returncode, "".join(stdout_lines), "".join(stderr_lines)
 
 
 def run_command(command: str, shell: str = "bash", timeout: Optional[int] = None,

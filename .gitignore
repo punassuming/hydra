@@ -5,3 +5,6 @@ __pycache__/
 node_modules/
 ui/node_modules/
 ui/dist/
+ui/src/*.js
+ui/src/*.js.map
+.resume

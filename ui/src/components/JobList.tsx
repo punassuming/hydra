@@ -7,9 +7,10 @@ interface Props {
   onSelect: (job: JobDefinition) => void;
   selectedId?: string | null;
   loading?: boolean;
+  onEdit?: () => void;
 }
 
-export function JobList({ jobs, onSelect, selectedId, loading }: Props) {
+export function JobList({ jobs, onSelect, selectedId, loading, onEdit }: Props) {
   const dataSource = (jobs ?? []).map((job) => ({ ...job, key: job._id }));
   const columns = [
     {
@@ -24,6 +25,8 @@ export function JobList({ jobs, onSelect, selectedId, loading }: Props) {
       key: "executor",
       render: (_: unknown, record: JobDefinition) => <Tag color="geekblue">{record.executor.type}</Tag>,
     },
+    { title: "Queue", dataIndex: "queue", key: "queue" },
+    { title: "Priority", dataIndex: "priority", key: "priority" },
     {
       title: "Schedule",
       key: "schedule",
@@ -58,11 +61,15 @@ export function JobList({ jobs, onSelect, selectedId, loading }: Props) {
         dataSource={dataSource}
         columns={columns}
         loading={loading}
-        pagination={{ pageSize: 6 }}
+        pagination={{ pageSize: 10 }}
         size="small"
         rowClassName={(record) => (record._id === selectedId ? "job-row-selected" : "job-row")}
         onRow={(record) => ({
           onClick: () => onSelect(record),
+          onDoubleClick: () => {
+            onSelect(record);
+            onEdit?.();
+          },
           style: { cursor: "pointer" },
         })}
       />

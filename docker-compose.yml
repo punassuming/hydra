@@ -15,6 +15,8 @@ services:
     build:
       context: ./scheduler
       dockerfile: Dockerfile
+    env_file:
+      - .env
     environment:
       - REDIS_URL=redis://redis:6379/0
       - MONGO_URL=mongodb://mongo:27017
@@ -25,38 +27,6 @@ services:
       - mongo
     ports:
       - "8000:8000"
-
-  worker1:
-    build:
-      context: ./worker
-      dockerfile: Dockerfile
-    environment:
-      - REDIS_URL=redis://redis:6379/0
-      - MONGO_URL=mongodb://mongo:27017
-      - MONGO_DB=hydra_jobs
-      - WORKER_ID=worker1
-      - WORKER_TAGS=
-      - ALLOWED_USERS=
-      - MAX_CONCURRENCY=2
-    depends_on:
-      - redis
-      - mongo
-
-  worker2:
-    build:
-      context: ./worker
-      dockerfile: Dockerfile
-    environment:
-      - REDIS_URL=redis://redis:6379/0
-      - MONGO_URL=mongodb://mongo:27017
-      - MONGO_DB=hydra_jobs
-      - WORKER_ID=worker2
-      - WORKER_TAGS=
-      - ALLOWED_USERS=
-      - MAX_CONCURRENCY=2
-    depends_on:
-      - redis
-      - mongo
 
   ui:
     build:

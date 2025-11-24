@@ -1,0 +1,97 @@
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  mongo:
+    image: mongo:6
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+
+  scheduler:
+    build:
+      context: ./scheduler
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - MONGO_URL=mongodb://mongo:27017
+      - MONGO_DB=hydra_jobs
+      - SCHEDULER_HEARTBEAT_TTL=10
+      - SEED_DOMAINS=1
+    depends_on:
+      - redis
+      - mongo
+    ports:
+      - "8000:8000"
+
+  worker-prod-1:
+    build:
+      context: ./worker
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - MONGO_URL=mongodb://mongo:27017
+      - MONGO_DB=hydra_jobs
+      - WORKER_ID=worker-prod-1
+      - WORKER_DOMAIN=prod
+      - WORKER_DOMAIN_TOKEN=prod-token
+      - WORKER_QUEUES=default
+      - MAX_CONCURRENCY=2
+    depends_on:
+      - redis
+      - mongo
+
+  worker-dev-1:
+    build:
+      context: ./worker
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - MONGO_URL=mongodb://mongo:27017
+      - MONGO_DB=hydra_jobs
+      - WORKER_ID=worker-dev-1
+      - WORKER_DOMAIN=dev
+      - API_TOKEN=${API_TOKEN}
+      - WORKER_QUEUES=default
+      - MAX_CONCURRENCY=2
+    depends_on:
+      - redis
+      - mongo
+      - scheduler
+
+  ui:
+    build:
+      context: ./ui
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: http://localhost:8000
+    depends_on:
+      - scheduler
+    ports:
+      - "5173:80"
+
+  seed-dev:
+    image: python:3.11-slim
+    depends_on:
+      - scheduler
+    env_file:
+      - .env
+    environment:
+      - API_BASE=http://scheduler:8000
+      - API_TOKEN=dev-token
+    volumes:
+      - ./examples:/app/examples:ro
+      - ./deploy/seed-dev.sh:/app/seed-dev.sh:ro
+    entrypoint: ["/bin/bash", "/app/seed-dev.sh"]
+
+volumes:
+  mongo-data:

@@ -1,0 +1,81 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hydra-scheduler
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hydra-scheduler
+  template:
+    metadata:
+      labels:
+        app: hydra-scheduler
+    spec:
+      containers:
+        - name: scheduler
+          image: hydra-scheduler:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          env:
+            - name: REDIS_URL
+              value: redis://hydra-redis:6379/0
+            - name: MONGO_URL
+              value: mongodb://hydra-mongo:27017
+            - name: MONGO_DB
+              value: hydra_jobs
+            - name: SCHEDULER_HEARTBEAT_TTL
+              value: "10"
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hydra-scheduler
+spec:
+  selector:
+    app: hydra-scheduler
+  ports:
+    - port: 8000
+      targetPort: 8000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hydra-ui
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hydra-ui
+  template:
+    metadata:
+      labels:
+        app: hydra-ui
+    spec:
+      containers:
+        - name: ui
+          image: hydra-ui:latest
+          ports:
+            - containerPort: 80
+          env:
+            - name: VITE_API_BASE_URL
+              value: http://hydra-scheduler:8000
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hydra-ui
+spec:
+  selector:
+    app: hydra-ui
+  ports:
+    - port: 80
+      targetPort: 80

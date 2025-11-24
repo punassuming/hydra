@@ -6,7 +6,7 @@ export function useSchedulerEvents(limit = 50) {
   const [events, setEvents] = useState<SchedulerEvent[]>([]);
 
   useEffect(() => {
-    const source = new EventSource(streamUrl);
+    const source = new EventSource(streamUrl());
     source.onmessage = (evt) => {
       try {
         const parsed = JSON.parse(evt.data) as SchedulerEvent;

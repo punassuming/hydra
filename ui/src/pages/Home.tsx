@@ -1,14 +1,14 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Row, Col, Card, Typography, Space, Button, Modal, Divider } from "antd";
+import { Row, Col, Card, Typography, Space, Button, Modal, Divider, Alert } from "antd";
 import { JobForm } from "../components/JobForm";
 import { JobList } from "../components/JobList";
 import { JobRuns } from "../components/JobRuns";
-import { WorkersPanel } from "../components/WorkersPanel";
 import { EventsFeed } from "../components/EventsFeed";
 import { JobOverview } from "../components/JobOverview";
 import { useSchedulerEvents } from "../hooks/useEvents";
 import { createJob, fetchJobs, JobPayload, runAdhocJob, runJobNow, updateJob, validateJob } from "../api/jobs";
+import { WorkersMini } from "../components/WorkersMini";
 
 export function HomePage() {
   const queryClient = useQueryClient();
@@ -117,13 +117,16 @@ export function HomePage() {
               Hydra Jobs Control Plane
             </Typography.Title>
             <Typography.Text type="secondary">
-              Submit jobs, watch executions, and inspect logs from a single workspace.
+              Submit, schedule, and inspect jobs across heterogeneous workers with queue/affinity aware placement.
             </Typography.Text>
           </Col>
           <Col>
             <Space>
               <Button type="primary" onClick={() => setModalVisible(true)}>
                 New Job
+              </Button>
+              <Button disabled={!selectedJob} onClick={() => setModalVisible(true)}>
+                Edit Selected
               </Button>
               {selectedJob && (
                 <Button onClick={handleManualRun}>Run Selected</Button>
@@ -136,18 +139,35 @@ export function HomePage() {
         )}
       </Card>
 
-      <Row gutter={[16, 16]}>
-        <Col xs={24} lg={16}>
-          <WorkersPanel />
-        </Col>
-        <Col xs={24} lg={8}>
-          <JobOverview />
-        </Col>
-      </Row>
+      <Alert
+        type="info"
+        showIcon
+        message="Hydra stitches together queues, priorities, affinities, and multiple executors (python, shell, batch, external). Use the nav to jump to Status (health/queues), History (runs), Browse (jobs/runs), and Workers (capabilities)."
+      />
+
+      <Card>
+        <Typography.Title level={4}>How to use</Typography.Title>
+        <Typography.Paragraph>
+          1) Create or edit a job with executor, queue/priority, schedule, and affinity. 2) Validate or run now (adhoc/manual).
+          3) Track live runs from Status and logs modal (supports live streaming). 4) Inspect history or browse cross-job runs. 5)
+          Tune placement via queues/affinity and worker capabilities under Workers.
+        </Typography.Paragraph>
+      </Card>
 
       <Card id="job-list" title="Jobs">
-        <JobList jobs={jobs} loading={jobsQuery.isLoading} selectedId={selectedJobId} onSelect={(job) => setSelectedJobId(job._id)} />
+        <JobList
+          jobs={jobs}
+          loading={jobsQuery.isLoading}
+          selectedId={selectedJobId}
+          onSelect={(job) => setSelectedJobId(job._id)}
+          onEdit={() => setModalVisible(true)}
+        />
       </Card>
+
+      <JobOverview />
+
+      <WorkersMini />
+
 
       <Row gutter={[16, 16]}>
         <Col xs={24} lg={12}>

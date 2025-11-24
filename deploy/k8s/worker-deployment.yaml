@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hydra-worker
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: hydra-worker
+  template:
+    metadata:
+      labels:
+        app: hydra-worker
+    spec:
+      containers:
+        - name: worker
+          image: hydra-worker:latest
+          env:
+            - name: REDIS_URL
+              value: redis://hydra-redis:6379/0
+            - name: MONGO_URL
+              value: mongodb://hydra-mongo:27017
+            - name: MONGO_DB
+              value: hydra_jobs
+            - name: WORKER_QUEUES
+              value: default
+            - name: MAX_CONCURRENCY
+              value: "2"
+            - name: DEPLOYMENT_TYPE
+              value: kubernetes
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: hydra-worker-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: hydra-worker
+  minReplicas: 1
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70

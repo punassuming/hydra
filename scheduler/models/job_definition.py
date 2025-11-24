@@ -38,10 +38,13 @@ class JobDefinition(BaseModel):
     id: str = Field(default_factory=lambda: uuid.uuid4().hex, alias="_id")
     name: str
     user: str = "default"
+    domain: str = "prod"
     affinity: Affinity
     executor: ExecutorConfig = Field(default_factory=lambda: ShellExecutor(script=""))
     retries: int = 0
     timeout: int = 0
+    queue: str = "default"
+    priority: int = 5
     schedule: ScheduleConfig = Field(default_factory=ScheduleConfig)
     completion: CompletionCriteria = Field(default_factory=CompletionCriteria)
     created_at: datetime = Field(default_factory=datetime.utcnow)
@@ -60,10 +63,13 @@ class JobDefinition(BaseModel):
 class JobCreate(BaseModel):
     name: str
     user: str = "default"
+    domain: str = "prod"
     affinity: Affinity
     executor: ExecutorConfig = Field(default_factory=lambda: ShellExecutor(script=""))
     retries: int = 0
     timeout: int = 0
+    queue: str = "default"
+    priority: int = 5
     schedule: ScheduleConfig = Field(default_factory=ScheduleConfig)
     completion: CompletionCriteria = Field(default_factory=CompletionCriteria)
 
@@ -71,10 +77,13 @@ class JobCreate(BaseModel):
 class JobUpdate(BaseModel):
     name: Optional[str] = None
     user: Optional[str] = None
+    domain: Optional[str] = None
     affinity: Optional[Affinity] = None
     executor: Optional[ExecutorConfig] = None
     retries: Optional[int] = None
     timeout: Optional[int] = None
+    queue: Optional[str] = None
+    priority: Optional[int] = None
     schedule: Optional[ScheduleConfig] = None
     completion: Optional[CompletionCriteria] = None
 

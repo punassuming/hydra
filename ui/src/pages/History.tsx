@@ -46,7 +46,10 @@ export function HistoryPage() {
   const runs = (data ?? []).map((run) => ({ ...run, key: run._id }));
 
   return (
-    <Card title="Job History">
+    <Card
+      title="Job History"
+      extra={<Typography.Text type="secondary">All runs across jobs. Open a run for logs; go to Jobs to edit definitions.</Typography.Text>}
+    >
       <Table dataSource={runs} columns={columns} loading={isLoading} size="small" pagination={{ pageSize: 10 }} />
       <Modal open={logModal.visible} onCancel={() => setLogModal({ visible: false })} footer={null} width={800} title="Run Logs">
         {logModal.run ? (

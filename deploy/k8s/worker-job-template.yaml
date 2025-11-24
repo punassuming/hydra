@@ -1,0 +1,30 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: hydra-worker-on-demand
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: hydra-worker-ondemand
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: worker
+          image: hydra-worker:latest
+          env:
+            - name: REDIS_URL
+              value: redis://hydra-redis:6379/0
+            - name: MONGO_URL
+              value: mongodb://hydra-mongo:27017
+            - name: MONGO_DB
+              value: hydra_jobs
+            - name: WORKER_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: DEPLOYMENT_TYPE
+              value: kubernetes-job
+            - name: WORKER_QUEUES
+              value: burst

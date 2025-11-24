@@ -15,6 +15,13 @@ export function WorkersPanel() {
     { title: "Host", dataIndex: "hostname", key: "hostname" },
     { title: "IP", dataIndex: "ip", key: "ip" },
     { title: "Deploy", dataIndex: "deployment_type", key: "deployment_type" },
+    { title: "State", dataIndex: "state", key: "state", render: (state: string) => <Tag>{state || "online"}</Tag> },
+    {
+      title: "Queues",
+      dataIndex: "queues",
+      key: "queues",
+      render: (queues: string[]) => (queues?.length ? queues.join(", ") : "default"),
+    },
     {
       title: "Tags",
       dataIndex: "tags",
@@ -49,6 +56,12 @@ export function WorkersPanel() {
       dataIndex: "status",
       key: "status",
       render: (status: string) => <Tag color={status === "online" ? "green" : "volcano"}>{status}</Tag>,
+    },
+    {
+      title: "Running Jobs",
+      dataIndex: "running_jobs",
+      key: "running_jobs",
+      render: (jobs: string[]) => (jobs?.length ? jobs.length : 0),
     },
   ];
 

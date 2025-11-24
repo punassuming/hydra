@@ -1,14 +1,18 @@
 from datetime import datetime
-from typing import Tuple
+from typing import Tuple, Callable, Optional
 
 from bson import ObjectId
 
 from .mongo_client import get_db
-from .utils.os_exec import run_command, run_external
+from .utils.os_exec import run_command, run_external, _run_with_callbacks
 from .utils.python_env import prepare_python_command
 
 
-def execute_job(job: dict) -> Tuple[int, str, str]:
+def execute_job(
+    job: dict,
+    log_callback_out: Optional[Callable[[str], None]] = None,
+    log_callback_err: Optional[Callable[[str], None]] = None,
+) -> Tuple[int, str, str]:
     executor = job.get("executor") or {}
     timeout = job.get("timeout", 0) or None
     env = executor.get("env")
@@ -25,21 +29,36 @@ def execute_job(job: dict) -> Tuple[int, str, str]:
             return 1, "", str(prep_err)
         try:
             cmd_with_code = command + ["-c", code] + args
-            return run_external(binary=cmd_with_code[0], args=cmd_with_code[1:], timeout=timeout, env=env, workdir=workdir)
+            if log_callback_out or log_callback_err:
+                rc, out, err = _run_with_callbacks(
+                    cmd_with_code, timeout, env, workdir, on_stdout=log_callback_out, on_stderr=log_callback_err
+                )
+            else:
+                rc, out, err = run_external(binary=cmd_with_code[0], args=cmd_with_code[1:], timeout=timeout, env=env, workdir=workdir)
+            return rc, out, err
         finally:
             if cleanup:
                 cleanup()
     if exec_type == "external":
         binary = executor.get("command") or job.get("command", "")
+        if log_callback_out or log_callback_err:
+            cmd = [binary] + args
+            return _run_with_callbacks(cmd, timeout, env, workdir, on_stdout=log_callback_out, on_stderr=log_callback_err)
         return run_external(binary=binary, args=args, timeout=timeout, env=env, workdir=workdir)
     if exec_type == "batch":
         script = executor.get("script") or job.get("command", "")
         shell = executor.get("shell", "cmd")
+        if log_callback_out or log_callback_err:
+            cmd = ["cmd", "/c", script] if shell == "cmd" else [shell, "-c", script]
+            return _run_with_callbacks(cmd, timeout, env, workdir, on_stdout=log_callback_out, on_stderr=log_callback_err)
         return run_command(script, shell=shell, timeout=timeout, env=env, workdir=workdir)
 
     # default shell executor
     script = executor.get("script") or job.get("command", "")
     shell = executor.get("shell", job.get("shell", "bash"))
+    cmd = ["/bin/bash", "-lc", script] if shell == "bash" else [shell, "-c", script]
+    if log_callback_out or log_callback_err:
+        return _run_with_callbacks(cmd, timeout, env, workdir, on_stdout=log_callback_out, on_stderr=log_callback_err)
     return run_command(script, shell=shell, timeout=timeout, env=env, workdir=workdir)
 
 
@@ -47,6 +66,7 @@ def record_run_start(job: dict, worker_id: str, slot: int, retries_remaining: in
     db = get_db()
     job_id = job.get("_id") or job.get("id")
     user = job.get("user", "")
+    domain = job.get("domain", "prod")
     executor_type = (job.get("executor") or {}).get("type", "shell")
     created_at = job.get("created_at")
     queue_latency_ms = None
@@ -59,6 +79,7 @@ def record_run_start(job: dict, worker_id: str, slot: int, retries_remaining: in
     run_doc = {
         "job_id": job_id,
         "user": user,
+        "domain": domain,
         "worker_id": worker_id,
         "start_ts": datetime.utcnow(),
         "scheduled_ts": datetime.utcnow(),

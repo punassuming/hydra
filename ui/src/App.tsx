@@ -8,18 +8,24 @@ import { ComingSoon } from "./pages/ComingSoon";
 import { JobDetailPage } from "./pages/JobDetail";
 import { HistoryPage } from "./pages/History";
 import { StatusPage } from "./pages/Status";
+import { WorkersPage } from "./pages/Workers";
+import { AdminPage } from "./pages/Admin";
 import { HydraLogo } from "./components/HydraLogo";
+import { DomainSelector } from "./components/DomainSelector";
+import { AuthPrompt } from "./components/AuthPrompt";
 
 function App() {
   const location = useLocation();
   const [darkMode, setDarkMode] = useState(false);
+  const [authOpen, setAuthOpen] = useState(!localStorage.getItem("hydra_token"));
   const { Header, Content } = Layout;
   const menuItems = useMemo(
     () => [
       { label: <Link to="/">Home</Link>, key: "home" },
       { label: <Link to="/status">Status</Link>, key: "status" },
       { label: <Link to="/history">History</Link>, key: "history" },
-      { label: <Link to="/browse">Browse</Link>, key: "browse" },
+      { label: <Link to="/browse">Jobs</Link>, key: "browse" },
+      { label: <Link to="/workers">Workers</Link>, key: "workers" },
       { label: <Link to="/admin">Admin</Link>, key: "admin" },
     ],
     [],
@@ -29,6 +35,7 @@ function App() {
     if (location.pathname.startsWith("/status")) return "status";
     if (location.pathname.startsWith("/history")) return "history";
     if (location.pathname.startsWith("/browse")) return "browse";
+    if (location.pathname.startsWith("/workers")) return "workers";
     if (location.pathname.startsWith("/admin")) return "admin";
     return "home";
   }, [location.pathname]);
@@ -46,7 +53,9 @@ function App() {
       <Layout>
         <Header
           style={{
-            padding: "0 24px",
+            padding: "12px 24px",
+            minHeight: 72,
+            lineHeight: "normal",
             position: "sticky",
             top: 0,
             zIndex: 1000,
@@ -84,6 +93,7 @@ function App() {
                 items={menuItems}
                 style={{ background: "transparent", borderBottom: "none" }}
               />
+              <DomainSelector />
               <Space>
                 <Typography.Text style={{ color: "#cbd5f5" }}>
                   Dark Mode
@@ -104,18 +114,15 @@ function App() {
               path="/browse"
               element={<BrowsePage />}
             />
+            <Route path="/workers" element={<WorkersPage />} />
             <Route
               path="/admin"
-              element={
-                <ComingSoon
-                  title="Admin"
-                  description="Administration pages are under construction."
-                />
-              }
+              element={<AdminPage />}
             />
             <Route path="/jobs/:jobId" element={<JobDetailPage />} />
           </Routes>
         </Content>
+        <AuthPrompt open={authOpen} onClose={() => setAuthOpen(false)} onSuccess={() => setAuthOpen(false)} />
       </Layout>
     </ConfigProvider>
   );
