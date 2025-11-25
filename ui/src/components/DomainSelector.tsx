@@ -1,12 +1,19 @@
-import { Select, Space, Typography } from "antd";
-import { useEffect } from "react";
-import { setActiveDomain as storeDomain, getActiveDomain, setTokenForDomain, forgetToken } from "../api/client";
+import { Select, Space, Typography, Button, Modal, Input } from "antd";
+import { useEffect, useState } from "react";
+import {
+  setActiveDomain as storeDomain,
+  getActiveDomain,
+  setTokenForDomain,
+  forgetToken,
+  getAdminToken,
+} from "../api/client";
 import { useDomains } from "../hooks/useDomains";
-import { useState } from "react";
 
 export function DomainSelector({ onChange }: { onChange?: (domain: string) => void }) {
   const domainOptions = useDomains();
   const [current, setCurrent] = useState<string>(getActiveDomain());
+  const [switchModal, setSwitchModal] = useState<{ open: boolean; domain?: string; token?: string }>({ open: false });
+  const adminToken = getAdminToken();
 
   useEffect(() => {
     setCurrent(getActiveDomain());
@@ -26,6 +33,22 @@ export function DomainSelector({ onChange }: { onChange?: (domain: string) => vo
         }}
         style={{ minWidth: 140 }}
       />
+      <Button size="small" onClick={() => setSwitchModal({ open: true, domain: current })}>
+        Switch Token
+      </Button>
+      {adminToken && (
+        <Button
+          size="small"
+          onClick={() => {
+            setTokenForDomain(current, adminToken);
+            storeDomain(current);
+            setCurrent(current);
+            onChange?.(current);
+          }}
+        >
+          Use Admin
+        </Button>
+      )}
       <Typography.Link
         onClick={() => {
           forgetToken(current);
@@ -33,6 +56,26 @@ export function DomainSelector({ onChange }: { onChange?: (domain: string) => vo
       >
         Forget Token
       </Typography.Link>
+      <Modal
+        open={switchModal.open}
+        title={`Set token for ${switchModal.domain}`}
+        onCancel={() => setSwitchModal({ open: false })}
+        onOk={() => {
+          if (switchModal.domain && switchModal.token) {
+            setTokenForDomain(switchModal.domain, switchModal.token);
+            storeDomain(switchModal.domain);
+            setCurrent(switchModal.domain);
+            onChange?.(switchModal.domain);
+            setSwitchModal({ open: false });
+          }
+        }}
+      >
+        <Input
+          placeholder="Token"
+          value={switchModal.token}
+          onChange={(e) => setSwitchModal((prev) => ({ ...prev, token: e.target.value }))}
+        />
+      </Modal>
     </Space>
   );
 }

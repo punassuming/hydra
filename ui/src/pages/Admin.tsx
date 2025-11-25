@@ -367,8 +367,8 @@ export function AdminPage() {
             message.error("Enter a token");
             return;
           }
-          setAuthToken(switchModal.token);
-          storeDomain(switchModal.domain);
+          setTokenForDomain(switchModal.domain, switchModal.token);
+          setActiveDomain(switchModal.domain);
           message.success(`Switched to domain ${switchModal.domain}`);
           setSwitchModal({ open: false });
         }}

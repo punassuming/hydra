@@ -28,6 +28,19 @@ export function getTokenForDomain(domain: string): string | undefined {
   return readTokenMap()[domain];
 }
 
+export function hasTokenForDomain(domain: string): boolean {
+  return Boolean(getTokenForDomain(domain));
+}
+
+export function getAdminToken(): string | undefined {
+  return readTokenMap()["admin"];
+}
+
+export function hasAnyToken(): boolean {
+  const map = readTokenMap();
+  return Object.keys(map).length > 0;
+}
+
 export function forgetToken(domain?: string) {
   if (!domain) {
     localStorage.removeItem(TOKEN_MAP_KEY);
