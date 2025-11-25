@@ -13,11 +13,12 @@ import { AdminPage } from "./pages/Admin";
 import { HydraLogo } from "./components/HydraLogo";
 import { DomainSelector } from "./components/DomainSelector";
 import { AuthPrompt } from "./components/AuthPrompt";
+import { hasAnyToken } from "./api/client";
 
 function App() {
   const location = useLocation();
   const [darkMode, setDarkMode] = useState(false);
-  const [authOpen, setAuthOpen] = useState(!localStorage.getItem("hydra_token"));
+  const [authOpen, setAuthOpen] = useState(!hasAnyToken());
   const { Header, Content } = Layout;
   const menuItems = useMemo(
     () => [
