@@ -31,7 +31,7 @@ def list_workers(request: Request):
                     os=data.get("os", ""),
                     tags=(data.get("tags", "") or "").split(",") if data.get("tags") else [],
                     allowed_users=(data.get("allowed_users", "") or "").split(",") if data.get("allowed_users") else [],
-                max_concurrency=int(data.get("max_concurrency", 1)),
+                    max_concurrency=int(data.get("max_concurrency", 1)),
                     current_running=int(data.get("current_running", 0)),
                     last_heartbeat=hb,
                     status=data.get("status", "online"),

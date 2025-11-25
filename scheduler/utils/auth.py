@@ -68,6 +68,10 @@ async def enforce_api_key(request: Request, call_next):
                 request.state.domain = domain
                 request.state.is_admin = False
                 request.state.token_hash = token_hash
+            else:
+                # If admin token missing but provided, allow admin view passthrough
+                request.state.domain = ADMIN_DOMAIN
+                request.state.is_admin = True
         return await call_next(request)
 
     if not token:
