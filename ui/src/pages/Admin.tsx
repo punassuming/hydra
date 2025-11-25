@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, Form, Input, Space, Table, Typography, Button, message, Modal, Input as AntInput, Select } from "antd";
 import { fetchDomains, createDomain, updateDomain, DomainInfo, rotateDomainToken, fetchTemplates, importTemplate } from "../api/admin";
-import { setAuthToken, setDomain as storeDomain, getToken, withTempToken } from "../api/client";
+import { setTokenForDomain, setActiveDomain, getEffectiveToken, withTempToken } from "../api/client";
 import { createJob } from "../api/jobs";
 import { useState } from "react";
 
@@ -183,6 +183,7 @@ export function AdminPage() {
       <Card title="Import Jobs">
         <Space direction="vertical" style={{ width: "100%" }}>
           <Typography.Text type="secondary">Paste a job JSON (single object or array) or use the sample set.</Typography.Text>
+          <Typography.Text strong>Active domain: {localStorage.getItem("hydra_domain") || "prod"}</Typography.Text>
           <Space>
             <Select
               placeholder="Pick a built-in template"
@@ -316,7 +317,7 @@ export function AdminPage() {
                   return;
                 }
                 setImporting(true);
-                const originalToken = getToken();
+                const originalToken = getEffectiveToken();
                 try {
                   const results = await Promise.allSettled(
                     jobs.map((j) =>
@@ -329,7 +330,7 @@ export function AdminPage() {
                   if (fail) message.error(`${fail} job(s) failed`);
                   queryClient.invalidateQueries({ queryKey: ["jobs"] });
                 } finally {
-                  if (originalToken) setAuthToken(originalToken);
+                  if (originalToken) setTokenForDomain(localStorage.getItem("hydra_domain") || "prod", originalToken);
                   setImporting(false);
                 }
               }}

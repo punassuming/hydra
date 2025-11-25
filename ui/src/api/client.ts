@@ -1,28 +1,68 @@
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
-let cachedToken = localStorage.getItem("hydra_token") || "";
+type TokenMap = Record<string, string>;
 
-export function setAuthToken(token: string) {
-  cachedToken = token;
-  localStorage.setItem("hydra_token", token);
+const TOKEN_MAP_KEY = "hydra_token_map";
+const ACTIVE_DOMAIN_KEY = "hydra_domain";
+
+function readTokenMap(): TokenMap {
+  try {
+    const raw = localStorage.getItem(TOKEN_MAP_KEY);
+    return raw ? (JSON.parse(raw) as TokenMap) : {};
+  } catch {
+    return {};
+  }
 }
 
-export function getToken(): string | undefined {
-  return cachedToken || localStorage.getItem("hydra_token") || undefined;
+function writeTokenMap(map: TokenMap) {
+  localStorage.setItem(TOKEN_MAP_KEY, JSON.stringify(map));
 }
 
-export function setDomain(domain: string) {
-  localStorage.setItem("hydra_domain", domain);
+export function setTokenForDomain(domain: string, token: string) {
+  const map = readTokenMap();
+  map[domain] = token;
+  writeTokenMap(map);
+}
+
+export function getTokenForDomain(domain: string): string | undefined {
+  return readTokenMap()[domain];
+}
+
+export function forgetToken(domain?: string) {
+  if (!domain) {
+    localStorage.removeItem(TOKEN_MAP_KEY);
+    return;
+  }
+  const map = readTokenMap();
+  delete map[domain];
+  writeTokenMap(map);
+}
+
+export function setActiveDomain(domain: string) {
+  localStorage.setItem(ACTIVE_DOMAIN_KEY, domain);
+}
+
+export function getActiveDomain(): string {
+  return localStorage.getItem(ACTIVE_DOMAIN_KEY) || "prod";
+}
+
+export function getEffectiveToken(domain?: string): string | undefined {
+  const map = readTokenMap();
+  const active = domain || getActiveDomain();
+  return map[active] || map["admin"];
 }
 
 export function withTempToken<T>(token: string | undefined, fn: () => Promise<T>): Promise<T> {
-  const prev = getToken();
+  const currentDomain = getActiveDomain();
+  const map = readTokenMap();
+  const prev = map[currentDomain];
   if (token) {
-    setAuthToken(token);
+    map[currentDomain] = token;
+    writeTokenMap(map);
   }
   return fn().finally(() => {
     if (prev) {
-      setAuthToken(prev);
+      setTokenForDomain(currentDomain, prev);
     }
   });
 }
@@ -37,7 +77,7 @@ async function handleResponse<T>(res: Response): Promise<T> {
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers || {});
-  const token = getToken();
+  const token = getEffectiveToken();
   if (token) {
     headers.set("x-api-key", token);
   }
@@ -62,11 +102,11 @@ export const apiClient = {
 };
 
 export const streamUrl = () => {
-  const token = getToken();
+  const token = getEffectiveToken();
   return token ? `${API_BASE}/events/stream?token=${encodeURIComponent(token)}` : `${API_BASE}/events/stream`;
 };
 export const runStreamUrl = (runId: string) => {
-  const token = getToken();
+  const token = getEffectiveToken();
   const qs = token ? `?token=${encodeURIComponent(token)}` : "";
   return `${API_BASE}/runs/${runId}/stream${qs}`;
 };

@@ -1,6 +1,6 @@
 import { Modal, Input, Typography, Space, message } from "antd";
 import { useState } from "react";
-import { setAuthToken } from "../api/client";
+import { setTokenForDomain, getActiveDomain } from "../api/client";
 
 interface Props {
   open: boolean;
@@ -20,8 +20,9 @@ export function AuthPrompt({ open, onClose, onSuccess }: Props) {
           message.error("Token required");
           return;
         }
-        setAuthToken(token.trim());
-        message.success("Token saved");
+        const domain = getActiveDomain();
+        setTokenForDomain(domain, token.trim());
+        message.success(`Token saved for domain ${domain}`);
         onSuccess?.();
         onClose();
       }}
