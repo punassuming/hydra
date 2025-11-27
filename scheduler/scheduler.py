@@ -13,7 +13,6 @@ from .utils.affinity import passes_affinity
 from .utils.selectors import select_best_worker
 from .utils.failover import failover_once
 from .utils.logging import setup_logging
-from .utils.auth import _hash_token
 from .event_bus import event_bus
 from .models.job_definition import ScheduleConfig
 from .utils.schedule import advance_schedule
@@ -44,7 +43,6 @@ def list_online_workers(ttl_seconds: int, domain: str) -> List[Dict]:
             "os": data.get("os", ""),
             "tags": (data.get("tags", "") or "").split(",") if data.get("tags") else [],
             "allowed_users": (data.get("allowed_users", "") or "").split(",") if data.get("allowed_users") else [],
-            "queues": (data.get("queues", "") or "").split(",") if data.get("queues") else ["default"],
             "max_concurrency": int(data.get("max_concurrency", 1)),
             "current_running": int(data.get("current_running", 0)),
             "hostname": data.get("hostname", ""),

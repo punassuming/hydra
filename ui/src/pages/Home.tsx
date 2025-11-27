@@ -66,7 +66,7 @@ export function HomePage() {
   });
 
   const handleSubmit = (payload: JobPayload) => {
-    setStatusMessage(undefined);
+    setStatusMessage("Saving job…");
     if (selectedJobId) {
       updateMutation.mutate(payload);
     } else {
@@ -85,8 +85,10 @@ export function HomePage() {
       } else {
         setStatusMessage(result.errors.join(", "));
       }
+      return result;
     } catch (err) {
       setStatusMessage((err as Error).message);
+      return undefined;
     } finally {
       setValidating(false);
     }
@@ -142,15 +144,15 @@ export function HomePage() {
       <Alert
         type="info"
         showIcon
-        message="Hydra stitches together queues, priorities, affinities, and multiple executors (python, shell, batch, external). Use the nav to jump to Status (health/queues), History (runs), Browse (jobs/runs), and Workers (capabilities)."
+        message="Hydra stitches together priorities, affinities, and multiple executors (python, shell, batch, external). Use the nav to jump to Status (health), History (runs), Browse (jobs/runs), and Workers (capabilities)."
       />
 
       <Card>
         <Typography.Title level={4}>How to use</Typography.Title>
         <Typography.Paragraph>
-          1) Create or edit a job with executor, queue/priority, schedule, and affinity. 2) Validate or run now (adhoc/manual).
-          3) Track live runs from Status and logs modal (supports live streaming). 4) Inspect history or browse cross-job runs. 5)
-          Tune placement via queues/affinity and worker capabilities under Workers.
+          1) Create or edit a job with executor, priority, schedule, and affinity. 2) Validate or run now (adhoc/manual). 3) Track
+          live runs from Status and logs modal (supports live streaming). 4) Inspect history or browse cross-job runs. 5) Tune
+          placement via affinity and worker capabilities under Workers.
         </Typography.Paragraph>
       </Card>
 

@@ -155,11 +155,6 @@ export interface JobGraphData {
   edges: { source: string; target: string }[];
 }
 
-export interface QueueOverview {
-  pending: { job_id: string; name: string; priority: number; queue: string; user?: string }[];
-  upcoming: { job_id: string; name: string; queue: string; priority: number; next_run_at?: string | null }[];
-}
-
 export interface WorkerInfo {
   worker_id: string;
   os: string;
@@ -170,7 +165,6 @@ export interface WorkerInfo {
   last_heartbeat?: number;
   status: string;
   state?: string;
-  queues?: string[];
   hostname?: string;
   ip?: string;
   subnet?: string;

@@ -1,12 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Card, Space, Tag, Typography, Button, Progress, Table, Row, Col } from "antd";
-import { fetchJobOverview, fetchQueueOverview, runJobNow } from "../api/jobs";
+import { Card, Space, Tag, Typography, Button, Progress, Table } from "antd";
+import { fetchJobOverview, runJobNow } from "../api/jobs";
 import { JobRun } from "../types";
 
 export function StatusPage() {
   const queryClient = useQueryClient();
   const overviewQuery = useQuery({ queryKey: ["job-overview"], queryFn: fetchJobOverview, refetchInterval: 5000 });
-  const queueQuery = useQuery({ queryKey: ["queue-overview"], queryFn: fetchQueueOverview, refetchInterval: 3000 });
 
   const runNow = useMutation({
     mutationFn: (jobId: string) => runJobNow(jobId),
@@ -147,46 +146,6 @@ export function StatusPage() {
           ]}
         />
       </Card>
-
-      <Row gutter={[16, 16]}>
-        <Col xs={24} lg={12}>
-          <Card title="Queued Jobs" loading={queueQuery.isLoading}>
-            <Table
-              rowKey="job_id"
-              size="small"
-              pagination={false}
-              dataSource={queueQuery.data?.pending ?? []}
-              columns={[
-                { title: "Job", dataIndex: "name", key: "name" },
-                { title: "Queue", dataIndex: "queue", key: "queue" },
-                { title: "Priority", dataIndex: "priority", key: "priority" },
-                { title: "User", dataIndex: "user", key: "user" },
-              ]}
-            />
-          </Card>
-        </Col>
-        <Col xs={24} lg={12}>
-          <Card title="Upcoming (scheduled)" loading={queueQuery.isLoading}>
-            <Table
-              rowKey="job_id"
-              size="small"
-              pagination={false}
-              dataSource={queueQuery.data?.upcoming ?? []}
-              columns={[
-                { title: "Job", dataIndex: "name", key: "name" },
-                { title: "Queue", dataIndex: "queue", key: "queue" },
-                { title: "Priority", dataIndex: "priority", key: "priority" },
-                {
-                  title: "Next Run",
-                  dataIndex: "next_run_at",
-                  key: "next_run_at",
-                  render: (v?: string) => (v ? new Date(v).toLocaleString() : "-"),
-                },
-              ]}
-            />
-          </Card>
-        </Col>
-      </Row>
     </Space>
   );
 }

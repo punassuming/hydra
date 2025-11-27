@@ -10,7 +10,6 @@ from .config import (
     get_tags,
     get_allowed_users,
     get_max_concurrency,
-    get_queues,
     get_initial_state,
     get_domain,
     get_domain_token,
@@ -41,7 +40,6 @@ def register_worker(worker_id: str, max_concurrency: int):
         "domain": get_domain(),
         "tags": ",".join(get_tags()),
         "allowed_users": ",".join(get_allowed_users()),
-        "queues": ",".join(get_queues()),
         "max_concurrency": max_concurrency,
         "current_running": 0,
         "status": "online",
@@ -65,6 +63,7 @@ def worker_main():
     db = get_db()
     worker_id = get_worker_id()
     max_concurrency = get_max_concurrency()
+    domain = get_domain()
     register_worker(worker_id, max_concurrency)
 
     active_jobs = set()
@@ -88,8 +87,8 @@ def worker_main():
             slot_position = incr_running(worker_id, +1) - 1
             add_active_job(worker_id, job_id)
             r.hset(
-                f"job_running:{get_domain()}:{job_id}",
-                mapping={"worker_id": worker_id, "heartbeat": time.time(), "user": job.get("user", ""), "domain": get_domain()},
+                f"job_running:{domain}:{job_id}",
+                mapping={"worker_id": worker_id, "heartbeat": time.time(), "user": job.get("user", ""), "domain": domain},
             )
 
             # Create/mark run start
@@ -103,7 +102,7 @@ def worker_main():
                     "run_id": run_id,
                     "job_id": job_id,
                     "worker_id": worker_id,
-                    "domain": get_domain(),
+                    "domain": domain,
                     "ts": time.time(),
                     "text": chunk,
                     "stream": kind,
@@ -111,8 +110,8 @@ def worker_main():
                 import json
 
                 data = json.dumps(payload)
-                channel = f"log_stream:{run_id}"
-                history_key = f"log_stream:{run_id}:history"
+                channel = f"log_stream:{domain}:{run_id}"
+                history_key = f"log_stream:{domain}:{run_id}:history"
                 r.rpush(history_key, data)
                 r.ltrim(history_key, -400, -1)
                 r.publish(channel, data)
@@ -141,7 +140,7 @@ def worker_main():
             status = "success" if success else "failed"
             record_run_end(run_id, status, rc, stdout, stderr, attempts_used, last_reason or "criteria not met")
         finally:
-            r.delete(f"job_running:{get_domain()}:{job_id}")
+            r.delete(f"job_running:{domain}:{job_id}")
             remove_active_job(worker_id, job_id)
             incr_running(worker_id, -1)
             with active_jobs_lock:
@@ -149,7 +148,7 @@ def worker_main():
 
     print(f"Worker {worker_id} starting with max_concurrency={max_concurrency}")
     while True:
-        item = r.blpop([f"job_queue:{get_domain()}:{worker_id}"], timeout=2)
+        item = r.blpop([f"job_queue:{domain}:{worker_id}"], timeout=2)
         if not item:
             continue
         _, job_id = item

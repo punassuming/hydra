@@ -1,5 +1,5 @@
 from typing import List, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class WorkerInfo(BaseModel):
@@ -21,4 +21,4 @@ class WorkerInfo(BaseModel):
     subnet: Optional[str] = None
     deployment_type: Optional[str] = None
     run_user: Optional[str] = None
-    running_jobs: List[str] = []
+    running_jobs: List[str] = Field(default_factory=list)

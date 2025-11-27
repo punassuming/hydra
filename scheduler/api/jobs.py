@@ -272,7 +272,6 @@ def jobs_overview(request: Request):
     is_admin = getattr(request.state, "is_admin", False)
     query = {} if is_admin else {"domain": domain}
     job_docs = list(db.job_definitions.find(query))
-    print(f"Job Docs: {job_docs}")
     overview = []
     for job in job_docs:
         job_id = job["_id"]

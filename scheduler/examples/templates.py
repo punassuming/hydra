@@ -7,7 +7,6 @@ TEMPLATES = [
         "executor": {"type": "shell", "shell": "bash", "script": "echo quick-ok"},
         "retries": 0,
         "timeout": 30,
-        "queue": "default",
         "priority": 5,
         "schedule": {"mode": "immediate", "enabled": True},
         "completion": {
@@ -26,7 +25,6 @@ TEMPLATES = [
         "executor": {"type": "shell", "shell": "bash", "script": "echo start; sleep 15; echo done"},
         "retries": 0,
         "timeout": 120,
-        "queue": "default",
         "priority": 4,
         "schedule": {"mode": "immediate", "enabled": True},
         "completion": {
@@ -50,7 +48,6 @@ TEMPLATES = [
         },
         "retries": 0,
         "timeout": 60,
-        "queue": "default",
         "priority": 5,
         "schedule": {"mode": "immediate", "enabled": True},
         "completion": {
@@ -69,7 +66,6 @@ TEMPLATES = [
         "executor": {"type": "shell", "shell": "bash", "script": "echo cron-run $(date +%s)"},
         "retries": 0,
         "timeout": 30,
-        "queue": "default",
         "priority": 3,
         "schedule": {"mode": "cron", "cron": "*/5 * * * *", "enabled": True},
         "completion": {

@@ -5,6 +5,7 @@ from scheduler.models.executor import ShellExecutor, PythonExecutor
 from scheduler.api.jobs import _validate_job_definition
 from scheduler.utils.schedule import initialize_schedule, advance_schedule
 from datetime import datetime
+from scheduler.models.worker_info import WorkerInfo
 
 
 def test_affinity_matching():
@@ -68,3 +69,43 @@ def test_advance_schedule_disables_after_end():
     advanced = advance_schedule(schedule)
     assert advanced.next_run_at is None
     assert not advanced.enabled
+
+
+def test_affinity_additional_filters():
+    job = {
+        "user": "dan",
+        "affinity": {
+            "os": ["linux"],
+            "tags": ["gpu"],
+            "allowed_users": ["dan"],
+            "hostnames": ["worker-a"],
+            "subnets": ["10.0.1"],
+            "deployment_types": ["kubernetes"],
+        },
+    }
+    worker_good = {
+        "os": "linux",
+        "tags": ["gpu", "other"],
+        "allowed_users": ["dan"],
+        "hostname": "worker-a",
+        "subnet": "10.0.1",
+        "deployment_type": "kubernetes",
+        "max_concurrency": 1,
+        "current_running": 0,
+    }
+    worker_bad_host = {**worker_good, "hostname": "worker-b"}
+    worker_bad_subnet = {**worker_good, "subnet": "10.0.2"}
+    worker_bad_deploy = {**worker_good, "deployment_type": "vm"}
+
+    assert passes_affinity(job, worker_good)
+    assert not passes_affinity(job, worker_bad_host)
+    assert not passes_affinity(job, worker_bad_subnet)
+    assert not passes_affinity(job, worker_bad_deploy)
+
+
+def test_worker_info_running_jobs_is_isolated():
+    w1 = WorkerInfo(worker_id="a", os="linux", tags=[], allowed_users=[], max_concurrency=1, current_running=0)
+    w2 = WorkerInfo(worker_id="b", os="linux", tags=[], allowed_users=[], max_concurrency=1, current_running=0)
+    w1.running_jobs.append("job-1")
+    assert w1.running_jobs == ["job-1"]
+    assert w2.running_jobs == []

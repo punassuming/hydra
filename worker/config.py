@@ -38,8 +38,3 @@ def get_domain_token() -> str:
     if not token:
         raise RuntimeError("WORKER_DOMAIN_TOKEN (or API_TOKEN) is required for domain-scoped worker registration")
     return token
-
-
-def get_queues() -> List[str]:
-    v = os.getenv("WORKER_QUEUES", "default")
-    return [t.strip() for t in v.split(",") if t.strip()]

@@ -32,7 +32,7 @@ export function WorkersMini() {
                     <Tag color={w.status === "online" ? "green" : "volcano"}>{w.status}</Tag>
                   </Space>
                   <div>{w.hostname || w.worker_id}</div>
-                  <div>Queues: {(w.queues ?? ["default"]).join(", ")}</div>
+                  <div>Tags: {(w.tags ?? []).join(", ") || "none"}</div>
                   <div>
                     Running: {w.current_running}/{w.max_concurrency}
                   </div>

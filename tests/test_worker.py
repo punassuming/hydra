@@ -3,6 +3,7 @@ from worker.utils.os_exec import run_command, run_python
 from worker.executor import execute_job
 from worker.utils.completion import evaluate_completion
 from worker.utils.python_env import prepare_python_command
+from worker.utils.completion import _contains_all, _contains_none
 
 
 def test_os_exec_echo():
@@ -73,3 +74,32 @@ def test_prepare_python_uv_command():
     assert "requests" in cmd
     assert cmd[-1] == "python3"
     assert cleanup is None
+
+
+def test_completion_handles_forbidden_tokens():
+    job = {
+        "completion": {
+            "exit_codes": [0],
+            "stdout_not_contains": ["forbidden"],
+            "stderr_contains": ["needle"],
+            "stderr_not_contains": ["panic"],
+        }
+    }
+    ok, reason = evaluate_completion(job, 0, "ok output", "needle present")
+    assert ok
+    ok, reason = evaluate_completion(job, 0, "forbidden text", "needle present")
+    assert not ok and "stdout" in reason.lower()
+    ok, reason = evaluate_completion(job, 0, "ok", "nothing here")
+    assert not ok and "stderr" in reason.lower()
+
+
+def test_completion_helpers_are_strict():
+    success, reason = _contains_all("abc def", ["abc", "def"])
+    assert success
+    success, reason = _contains_all("abc", ["abc", "def"])
+    assert not success and "missing" in reason.lower()
+
+    success, reason = _contains_none("abc def", ["zzz"])
+    assert success
+    success, reason = _contains_none("abc def", ["abc"])
+    assert not success and "forbidden" in reason.lower()
