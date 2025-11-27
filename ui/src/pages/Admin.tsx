@@ -13,6 +13,7 @@ export function AdminPage() {
   const [importText, setImportText] = useState("");
   const [importing, setImporting] = useState(false);
   const [importToken, setImportToken] = useState("");
+  const [importDomain, setImportDomain] = useState<string>(localStorage.getItem("hydra_domain") || "prod");
   const rotateMut = useMutation({
     mutationFn: (domain: string) => rotateDomainToken(domain),
     onSuccess: (data) => {
@@ -203,16 +204,16 @@ export function AdminPage() {
           size="small"
         />
       </Card>
-      <Card title={`Import Jobs (active domain: ${localStorage.getItem("hydra_domain") || "prod"})`}>
+      <Card title={`Import Jobs (active domain: ${importDomain})`}>
         <Space direction="vertical" style={{ width: "100%" }}>
           <Typography.Text type="secondary">Paste a job JSON (single object or array) or use the sample set.</Typography.Text>
-          <Typography.Text strong>Active domain: {localStorage.getItem("hydra_domain") || "prod"}</Typography.Text>
           <Select
             style={{ minWidth: 200 }}
             placeholder="Set active domain"
             options={domainsQuery.data?.domains?.map((d) => ({ label: d.domain, value: d.domain })) ?? []}
-            value={localStorage.getItem("hydra_domain") || "prod"}
+            value={importDomain}
             onChange={(val) => {
+              setImportDomain(val);
               setActiveDomain(val);
               message.info(`Active domain set to ${val}`);
             }}
@@ -354,7 +355,7 @@ export function AdminPage() {
                 try {
                   const results = await Promise.allSettled(
                     jobs.map((j) =>
-                      withTempToken(importToken || originalToken, () => createJob(j as any)),
+                      withTempToken(importToken || originalToken, () => createJob({ ...(j as any), domain: importDomain })),
                     ),
                   );
                   const ok = results.filter((r) => r.status === "fulfilled").length;

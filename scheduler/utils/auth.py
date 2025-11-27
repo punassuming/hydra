@@ -54,9 +54,10 @@ async def enforce_api_key(request: Request, call_next):
     token = _extract_token(request)
     admin_token = ADMIN_TOKEN or os.getenv("ADMIN_TOKEN")
 
-    # Admin token short-circuit
+    # Admin token short-circuit (respect ?domain override for observation)
     if token == admin_token:
-        request.state.domain = ADMIN_DOMAIN
+        req_domain = request.query_params.get("domain") or ADMIN_DOMAIN
+        request.state.domain = req_domain
         request.state.is_admin = True
         return await call_next(request)
 
