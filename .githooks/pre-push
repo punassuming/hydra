@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [ "${SKIP_TESTS:-0}" = "1" ] || [ "${SKIP:-0}" = "1" ]; then
+  echo "SKIP_TESTS set; skipping test-all.sh for this push"
+  exit 0
+fi
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+exec "$ROOT/scripts/test-all.sh"

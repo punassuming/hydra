@@ -122,6 +122,10 @@ Access the React UI at `http://localhost:5173` (served by Docker Compose via the
 
 **Persistent history:** Mongo now uses a named Docker volume (`mongo-data`) so job definitions and run history survive container restarts.
 
+See `doc/docker-compose-workflows.md` for faster dev loops (reload mounts), helper scripts in `scripts/`, worker-only stacks, and image build tips.
+
+For test guardrails and pre-push hooks, see `doc/testing.md`.
+
 ### Domains / Tokens (multi-tenant)
 
 - Scheduler: set `ADMIN_TOKEN` (admin domain defaults to `admin`). Domains/tokens live in Mongo (`domains` collection). No domains are pre-seeded unless you set `SEED_DOMAINS=1` (dev compose).

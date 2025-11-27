@@ -1,0 +1,27 @@
+services:
+  scheduler:
+    volumes:
+      - ./scheduler:/app/scheduler
+    command: ["uvicorn", "scheduler.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+  worker:
+    build:
+      context: ./worker
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - MONGO_URL=${MONGO_URL:-mongodb://mongo:27017}
+      - MONGO_DB=${MONGO_DB:-hydra_jobs}
+      - WORKER_ID=${WORKER_ID:-worker-dev}
+      - WORKER_DOMAIN=${WORKER_DOMAIN:-prod}
+      - API_TOKEN=${API_TOKEN:-changeme}
+      - WORKER_TAGS=${WORKER_TAGS:-dev}
+      - MAX_CONCURRENCY=${MAX_CONCURRENCY:-2}
+    depends_on:
+      - redis
+      - mongo
+      - scheduler
+    volumes:
+      - ./worker:/app/worker

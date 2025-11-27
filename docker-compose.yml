@@ -6,7 +6,7 @@ services:
 
   mongo:
     # mongo:6 requires AVX; use 5.x for broader CPU support
-    image: mongo:5.0
+    image: mongo:6.0
     ports:
       - "27017:27017"
     volumes:
@@ -34,7 +34,7 @@ services:
       context: ./ui
       dockerfile: Dockerfile
       args:
-        VITE_API_BASE_URL: http://localhost:8000
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
     depends_on:
       - scheduler
     ports:
