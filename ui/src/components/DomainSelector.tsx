@@ -1,4 +1,4 @@
-import { Select, Space, Typography, Button, Modal, Input } from "antd";
+import { Select, Space, Typography, Button, Modal, Input, Tag } from "antd";
 import { useEffect, useState } from "react";
 import {
   setActiveDomain as storeDomain,
@@ -6,6 +6,7 @@ import {
   setTokenForDomain,
   forgetToken,
   getAdminToken,
+  hasTokenForDomain,
 } from "../api/client";
 import { useDomains } from "../hooks/useDomains";
 
@@ -21,7 +22,12 @@ export function DomainSelector({ onChange }: { onChange?: (domain: string) => vo
 
   return (
     <Space>
-      <Typography.Text style={{ color: "#cbd5f5" }}>Domain</Typography.Text>
+      <Space direction="vertical" size={0}>
+        <Typography.Text style={{ color: "#cbd5f5" }}>Active Domain</Typography.Text>
+        <Tag color={hasTokenForDomain(current) ? "green" : "volcano"} style={{ marginTop: 2 }}>
+          {hasTokenForDomain(current) ? "Token saved" : "No token"}
+        </Tag>
+      </Space>
       <Select
         size="small"
         value={current}
