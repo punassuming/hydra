@@ -35,7 +35,7 @@ def requeue_jobs_for_worker(domain_and_worker: str):
         r.delete(f"job_running:{domain}:{job_id}")
         r.zadd(f"job_queue:{domain}:pending", {job_id: 5})
         r.srem(set_key, job_id)
-        event_bus.publish("job_requeued", {"job_id": job_id, "worker_id": worker_id})
+        event_bus.publish("job_requeued", {"job_id": job_id, "worker_id": worker_id, "domain": domain})
         # Optionally update last run doc to pending again (leave as is; worker will update when rerun)
     # Reset current_running counter to 0
     r.hset(f"workers:{domain}:{worker_id}", mapping={"current_running": 0, "status": "offline"})

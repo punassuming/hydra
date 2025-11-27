@@ -13,7 +13,7 @@ import { AdminPage } from "./pages/Admin";
 import { HydraLogo } from "./components/HydraLogo";
 import { DomainSelector } from "./components/DomainSelector";
 import { AuthPrompt } from "./components/AuthPrompt";
-import { hasAnyToken } from "./api/client";
+import { hasAnyToken, getActiveDomain } from "./api/client";
 
 function App() {
   const location = useLocation();
@@ -104,6 +104,9 @@ function App() {
             </Space>
           </div>
         </Header>
+        <div style={{ padding: "6px 24px", background: "#e0f2fe", color: "#075985" }}>
+          <Typography.Text strong>Active domain: {getActiveDomain()}</Typography.Text>
+        </div>
         <Content
           style={{ padding: 24, background: darkMode ? "#0f172a" : "#f5f7fb" }}
         >

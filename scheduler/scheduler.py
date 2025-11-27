@@ -90,7 +90,7 @@ def scheduling_loop(stop_event: threading.Event):
                 # No worker matches; requeue and backoff
                 log.warning("No eligible worker for job %s; requeuing", job_id)
                 r.zadd(f"job_queue:{domain}:pending", {job_id: float(job.get("priority", 5))})
-                event_bus.publish("job_pending", {"job_id": job_id, "reason": "no_worker"})
+                event_bus.publish("job_pending", {"job_id": job_id, "reason": "no_worker", "domain": domain})
                 time.sleep(1)
                 continue
             wid = worker["worker_id"]
