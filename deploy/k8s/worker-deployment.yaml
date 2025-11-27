@@ -22,8 +22,6 @@ spec:
               value: mongodb://hydra-mongo:27017
             - name: MONGO_DB
               value: hydra_jobs
-            - name: WORKER_QUEUES
-              value: default
             - name: MAX_CONCURRENCY
               value: "2"
             - name: DEPLOYMENT_TYPE

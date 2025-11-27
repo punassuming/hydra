@@ -26,5 +26,3 @@ spec:
                   fieldPath: metadata.name
             - name: DEPLOYMENT_TYPE
               value: kubernetes-job
-            - name: WORKER_QUEUES
-              value: burst
