@@ -5,7 +5,8 @@ services:
       - "6379:6379"
 
   mongo:
-    image: mongo:6
+    # mongo:6 requires AVX; use 5.x for broader CPU support
+    image: mongo:5.0
     ports:
       - "27017:27017"
     volumes:
