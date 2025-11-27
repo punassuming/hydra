@@ -112,6 +112,10 @@ export const apiClient = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     }),
+  delete: <T>(path: string) =>
+    request<T>(path, {
+      method: "DELETE",
+    }),
 };
 
 export const streamUrl = () => {

@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, Form, Input, Space, Table, Typography, Button, message, Modal, Input as AntInput, Select } from "antd";
-import { fetchDomains, createDomain, updateDomain, DomainInfo, rotateDomainToken, fetchTemplates, importTemplate } from "../api/admin";
-import { setTokenForDomain, setActiveDomain, getEffectiveToken, withTempToken } from "../api/client";
+import { fetchDomains, createDomain, updateDomain, DomainInfo, rotateDomainToken, fetchTemplates, importTemplate, deleteDomain } from "../api/admin";
+import { setTokenForDomain, setActiveDomain, getEffectiveToken, withTempToken, hasTokenForDomain } from "../api/client";
 import { createJob } from "../api/jobs";
 import { useState } from "react";
 
@@ -18,6 +18,14 @@ export function AdminPage() {
     onSuccess: (data) => {
       message.success("Token rotated");
       setTokenModal({ open: true, token: data.token, domain: data.domain });
+      queryClient.invalidateQueries({ queryKey: ["domains"] });
+    },
+    onError: (err: Error) => message.error(err.message),
+  });
+  const deleteMut = useMutation({
+    mutationFn: (domain: string) => deleteDomain(domain),
+    onSuccess: () => {
+      message.success("Domain deleted");
       queryClient.invalidateQueries({ queryKey: ["domains"] });
     },
     onError: (err: Error) => message.error(err.message),
@@ -131,6 +139,9 @@ export function AdminPage() {
           >
             Use Domain
           </Button>
+          <Button size="small" danger onClick={() => deleteMut.mutate(record.domain)}>
+            Delete
+          </Button>
         </Space>
       ),
     },
@@ -180,10 +191,20 @@ export function AdminPage() {
           size="small"
         />
       </Card>
-      <Card title="Import Jobs">
+      <Card title={`Import Jobs (active domain: ${localStorage.getItem("hydra_domain") || "prod"})`}>
         <Space direction="vertical" style={{ width: "100%" }}>
           <Typography.Text type="secondary">Paste a job JSON (single object or array) or use the sample set.</Typography.Text>
           <Typography.Text strong>Active domain: {localStorage.getItem("hydra_domain") || "prod"}</Typography.Text>
+          <Select
+            style={{ minWidth: 200 }}
+            placeholder="Set active domain"
+            options={domainsQuery.data?.domains?.map((d) => ({ label: d.domain, value: d.domain })) ?? []}
+            value={localStorage.getItem("hydra_domain") || "prod"}
+            onChange={(val) => {
+              setActiveDomain(val);
+              message.info(`Active domain set to ${val}`);
+            }}
+          />
           <Space>
             <Select
               placeholder="Pick a built-in template"
