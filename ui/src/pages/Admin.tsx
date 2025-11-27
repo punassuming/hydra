@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, Form, Input, Space, Table, Typography, Button, message, Modal, Input as AntInput, Select } from "antd";
 import { fetchDomains, createDomain, updateDomain, DomainInfo, rotateDomainToken, fetchTemplates, importTemplate, deleteDomain } from "../api/admin";
-import { setTokenForDomain, setActiveDomain, getEffectiveToken, withTempToken, hasTokenForDomain } from "../api/client";
+import { setTokenForDomain, setActiveDomain, getEffectiveToken, withTempToken, hasTokenForDomain, getAdminToken } from "../api/client";
 import { createJob } from "../api/jobs";
 import { useState } from "react";
 
@@ -87,6 +87,7 @@ export function AdminPage() {
   ];
   const [selectedSample, setSelectedSample] = useState<string | undefined>(undefined);
   const templatesQuery = useQuery({ queryKey: ["templates"], queryFn: fetchTemplates, staleTime: 10000 });
+  const adminToken = getAdminToken();
 
   const createMut = useMutation({
     mutationFn: createDomain,
@@ -135,7 +136,18 @@ export function AdminPage() {
           <Button
             size="small"
             type="link"
-            onClick={() => setSwitchModal({ open: true, domain: record.domain })}
+            onClick={() => {
+              if (adminToken) {
+                setTokenForDomain(record.domain, adminToken);
+                setActiveDomain(record.domain);
+                message.success(`Using admin token for domain ${record.domain}`);
+              } else if (hasTokenForDomain(record.domain)) {
+                setActiveDomain(record.domain);
+                message.success(`Switched to domain ${record.domain}`);
+              } else {
+                setSwitchModal({ open: true, domain: record.domain });
+              }
+            }}
           >
             Use Domain
           </Button>
