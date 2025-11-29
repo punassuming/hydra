@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
-import { Table, Tag, Modal, Typography, Space, Divider } from "antd";
+import { Table, Tag, Modal, Typography, Space, Divider, Button, Alert, Select } from "antd";
 import { JobRun } from "../types";
-import { fetchJobRuns } from "../api/jobs";
+import { fetchJobRuns, analyzeRun } from "../api/jobs";
 import { useEffect, useState } from "react";
 import { runStreamUrl } from "../api/client";
 import { Link } from "react-router-dom";
@@ -24,6 +24,33 @@ export function JobRuns({ jobId, runs: providedRuns, loading }: Props) {
   const [logModal, setLogModal] = useState<{ visible: boolean; run?: JobRun }>({ visible: false });
   const [liveLogs, setLiveLogs] = useState<{ stdout: string; stderr: string }>({ stdout: "", stderr: "" });
   const [source, setSource] = useState<EventSource | null>(null);
+  const [analysis, setAnalysis] = useState<string | null>(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [provider, setProvider] = useState<"gemini" | "openai">("gemini");
+
+  useEffect(() => {
+    setAnalysis(null);
+    setAnalyzing(false);
+  }, [logModal.run?._id]);
+
+  const handleAnalyze = async () => {
+    if (!logModal.run) return;
+    setAnalyzing(true);
+    try {
+        const res = await analyzeRun({
+            run_id: logModal.run._id,
+            stdout: liveLogs.stdout || logModal.run.stdout || "",
+            stderr: liveLogs.stderr || logModal.run.stderr || "",
+            exit_code: logModal.run.returncode || 1,
+            provider
+        });
+        setAnalysis(res.analysis);
+    } catch (e) {
+        console.error(e);
+    } finally {
+        setAnalyzing(false);
+    }
+  };
 
   useEffect(() => {
     if (!logModal.visible || !logModal.run) {
@@ -157,6 +184,28 @@ export function JobRuns({ jobId, runs: providedRuns, loading }: Props) {
                 {liveLogs.stderr || "(no stderr)"}
               </pre>
             </Typography.Paragraph>
+            {logModal.run.status === 'failed' && (
+                <div style={{ marginTop: 16 }}>
+                    <Space>
+                        <Select 
+                            value={provider} 
+                            onChange={setProvider} 
+                            options={[{label: 'Gemini', value: 'gemini'}, {label: 'OpenAI', value: 'openai'}]}
+                            style={{ width: 100 }}
+                        />
+                        <Button onClick={handleAnalyze} loading={analyzing} danger>Analyze Failure</Button>
+                    </Space>
+                    {analysis && (
+                        <Alert
+                            style={{ marginTop: 12 }}
+                            message="AI Analysis"
+                            description={<pre style={{ whiteSpace: 'pre-wrap' }}>{analysis}</pre>}
+                            type="warning"
+                            showIcon
+                        />
+                    )}
+                </div>
+            )}
           </Space>
         ) : (
           <Typography.Text type="secondary">No logs available.</Typography.Text>

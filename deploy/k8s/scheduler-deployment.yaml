@@ -27,6 +27,18 @@ spec:
               value: hydra_jobs
             - name: SCHEDULER_HEARTBEAT_TTL
               value: "10"
+            - name: GEMINI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hydra-secrets
+                  key: gemini-api-key
+                  optional: true
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hydra-secrets
+                  key: openai-api-key
+                  optional: true
           resources:
             requests:
               cpu: "100m"

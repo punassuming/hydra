@@ -1,7 +1,8 @@
 from datetime import datetime
 from typing import List, Optional, Literal
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 import uuid
+from croniter import croniter
 
 from .executor import ExecutorConfig, ShellExecutor
 
@@ -25,6 +26,15 @@ class ScheduleConfig(BaseModel):
     timezone: str = "UTC"
     enabled: bool = True
 
+    @model_validator(mode="after")
+    def validate_schedule_config(self):
+        if self.mode == "cron":
+            if not self.cron:
+                raise ValueError("cron expression is required when mode='cron'")
+            if not croniter.is_valid(self.cron):
+                raise ValueError(f"Invalid cron expression: {self.cron}")
+        return self
+
 
 class CompletionCriteria(BaseModel):
     exit_codes: List[int] = Field(default_factory=lambda: [0])
@@ -34,10 +44,17 @@ class CompletionCriteria(BaseModel):
     stderr_not_contains: List[str] = Field(default_factory=list)
 
 
+class SourceConfig(BaseModel):
+    protocol: Literal["git"] = "git"
+    url: str
+    ref: str = "main"
+
+
 class JobDefinition(BaseModel):
     id: str = Field(default_factory=lambda: uuid.uuid4().hex, alias="_id")
     name: str
     domain: str = "prod"
+    source: Optional[SourceConfig] = None
     affinity: Affinity
     executor: ExecutorConfig = Field(default_factory=lambda: ShellExecutor(script=""))
     retries: int = 0
@@ -61,6 +78,7 @@ class JobDefinition(BaseModel):
 class JobCreate(BaseModel):
     name: str
     domain: str = "prod"
+    source: Optional[SourceConfig] = None
     affinity: Affinity
     executor: ExecutorConfig = Field(default_factory=lambda: ShellExecutor(script=""))
     retries: int = 0
@@ -73,6 +91,7 @@ class JobCreate(BaseModel):
 class JobUpdate(BaseModel):
     name: Optional[str] = None
     domain: Optional[str] = None
+    source: Optional[SourceConfig] = None
     affinity: Optional[Affinity] = None
     executor: Optional[ExecutorConfig] = None
     retries: Optional[int] = None

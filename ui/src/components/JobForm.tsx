@@ -16,7 +16,7 @@ import {
   Steps,
 } from "antd";
 import { JobDefinition, PythonEnvironment } from "../types";
-import { JobPayload, ValidationResult, fetchWorkers } from "../api/jobs";
+import { JobPayload, ValidationResult, fetchWorkers, generateJob } from "../api/jobs";
 
 const defaultAffinity = {
   os: ["linux"],
@@ -102,6 +102,9 @@ export function JobForm({
 }: Props) {
   const [payload, setPayload] = useState<JobPayload>(() => createDefaultPayload());
   const [activeStep, setActiveStep] = useState(0);
+  const [prompt, setPrompt] = useState("");
+  const [generating, setGenerating] = useState(false);
+  const [provider, setProvider] = useState<"gemini" | "openai">("gemini");
 
   const workersQuery = useQuery({
     queryKey: ["workers"],
@@ -143,6 +146,24 @@ export function JobForm({
         requirements: exec.environment?.requirements ?? [],
       },
     } as JobPayload["executor"];
+  };
+
+  const handleGenerate = async () => {
+    if (!prompt.trim()) return;
+    setGenerating(true);
+    try {
+      const generated = await generateJob(prompt, provider);
+      if (generated) {
+        setPayload({
+            ...generated,
+            executor: normalizeExecutor(generated.executor)
+        });
+      }
+    } catch (e) {
+      console.error("Failed to generate job", e);
+    } finally {
+      setGenerating(false);
+    }
   };
 
   useEffect(() => {
@@ -740,6 +761,31 @@ export function JobForm({
 
   return (
     <Form layout="vertical" onFinish={handleValidateThenSubmit}>
+      {!selectedJob && (
+        <Alert
+            message="Magic Job Generator"
+            description={
+                <Space.Compact style={{ width: '100%' }}>
+                    <Select 
+                        value={provider} 
+                        onChange={setProvider} 
+                        options={[{label: 'Gemini', value: 'gemini'}, {label: 'OpenAI', value: 'openai'}]}
+                        style={{ width: 100 }}
+                    />
+                    <Input 
+                        placeholder="Describe your job (e.g., 'Run a backup script every Sunday at 2am')" 
+                        value={prompt}
+                        onChange={e => setPrompt(e.target.value)}
+                        onPressEnter={handleGenerate}
+                    />
+                    <Button type="primary" loading={generating} onClick={handleGenerate}>Generate</Button>
+                </Space.Compact>
+            }
+            type="info"
+            showIcon
+            style={{ marginBottom: 20 }}
+        />
+      )}
       <Steps
         current={activeStep}
         items={steps}

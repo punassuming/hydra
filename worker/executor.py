@@ -1,11 +1,15 @@
 from datetime import datetime
 from typing import Tuple, Callable, Optional
+import tempfile
+import shutil
+import os
 
 from bson import ObjectId
 
 from .mongo_client import get_db
 from .utils.os_exec import run_command, run_external, _run_with_callbacks
 from .utils.python_env import prepare_python_command
+from .utils.git import fetch_git_source
 
 
 def execute_job(
@@ -21,45 +25,82 @@ def execute_job(
     exec_type = (executor.get("type") or job.get("shell") or "shell").lower()
     job_identifier = job.get("_id") or job.get("id") or "job"
 
-    if exec_type == "python":
-        code = executor.get("code") or job.get("command", "")
+    source = job.get("source")
+    source_cleanup = None
+
+    if source and source.get("url"):
+        tmp_source_dir = tempfile.mkdtemp(prefix=f"hydra-source-{job_identifier}-")
         try:
-            command, cleanup = prepare_python_command(executor, job_identifier)
-        except Exception as prep_err:
-            return 1, "", str(prep_err)
-        try:
-            cmd_with_code = command + ["-c", code] + args
-            if log_callback_out or log_callback_err:
-                rc, out, err = _run_with_callbacks(
-                    cmd_with_code, timeout, env, workdir, on_stdout=log_callback_out, on_stderr=log_callback_err
-                )
+            fetch_git_source(source["url"], source.get("ref", "main"), tmp_source_dir)
+            # Determine effective workdir
+            # 1. Start at repo root
+            base_path = tmp_source_dir
+            # 2. If source has a 'path' sub-directory, append it
+            if source.get("path"):
+                base_path = os.path.join(base_path, source["path"])
+            
+            # 3. If executor has a workdir:
+            #    - if absolute, use it (ignores repo, risky but standard behavior)
+            #    - if relative, append to base_path
+            if workdir:
+                if os.path.isabs(workdir):
+                    pass # keep as is
+                else:
+                    workdir = os.path.join(base_path, workdir)
             else:
-                rc, out, err = run_external(binary=cmd_with_code[0], args=cmd_with_code[1:], timeout=timeout, env=env, workdir=workdir)
-            return rc, out, err
-        finally:
-            if cleanup:
-                cleanup()
-    if exec_type == "external":
-        binary = executor.get("command") or job.get("command", "")
-        if log_callback_out or log_callback_err:
-            cmd = [binary] + args
-            return _run_with_callbacks(cmd, timeout, env, workdir, on_stdout=log_callback_out, on_stderr=log_callback_err)
-        return run_external(binary=binary, args=args, timeout=timeout, env=env, workdir=workdir)
-    if exec_type == "batch":
+                workdir = base_path
+            
+            def _cleanup_source():
+                shutil.rmtree(tmp_source_dir, ignore_errors=True)
+            source_cleanup = _cleanup_source
+
+        except Exception as e:
+            shutil.rmtree(tmp_source_dir, ignore_errors=True)
+            return 1, "", f"Failed to fetch source: {str(e)}"
+
+    try:
+        if exec_type == "python":
+            code = executor.get("code") or job.get("command", "")
+            try:
+                command, cleanup = prepare_python_command(executor, job_identifier)
+            except Exception as prep_err:
+                return 1, "", str(prep_err)
+            try:
+                cmd_with_code = command + ["-c", code] + args
+                if log_callback_out or log_callback_err:
+                    rc, out, err = _run_with_callbacks(
+                        cmd_with_code, timeout, env, workdir, on_stdout=log_callback_out, on_stderr=log_callback_err
+                    )
+                else:
+                    rc, out, err = run_external(binary=cmd_with_code[0], args=cmd_with_code[1:], timeout=timeout, env=env, workdir=workdir)
+                return rc, out, err
+            finally:
+                if cleanup:
+                    cleanup()
+        if exec_type == "external":
+            binary = executor.get("command") or job.get("command", "")
+            if log_callback_out or log_callback_err:
+                cmd = [binary] + args
+                return _run_with_callbacks(cmd, timeout, env, workdir, on_stdout=log_callback_out, on_stderr=log_callback_err)
+            return run_external(binary=binary, args=args, timeout=timeout, env=env, workdir=workdir)
+        if exec_type == "batch":
+            script = executor.get("script") or job.get("command", "")
+            shell = executor.get("shell", "cmd")
+            if log_callback_out or log_callback_err:
+                cmd = ["cmd", "/c", script] if shell == "cmd" else [shell, "-c", script]
+                return _run_with_callbacks(cmd, timeout, env, workdir, on_stdout=log_callback_out, on_stderr=log_callback_err)
+            return run_command(script, shell=shell, timeout=timeout, env=env, workdir=workdir)
+
+        # default shell executor
         script = executor.get("script") or job.get("command", "")
-        shell = executor.get("shell", "cmd")
+        shell = executor.get("shell", job.get("shell", "bash"))
+        cmd = ["/bin/bash", "-lc", script] if shell == "bash" else [shell, "-c", script]
         if log_callback_out or log_callback_err:
-            cmd = ["cmd", "/c", script] if shell == "cmd" else [shell, "-c", script]
             return _run_with_callbacks(cmd, timeout, env, workdir, on_stdout=log_callback_out, on_stderr=log_callback_err)
         return run_command(script, shell=shell, timeout=timeout, env=env, workdir=workdir)
-
-    # default shell executor
-    script = executor.get("script") or job.get("command", "")
-    shell = executor.get("shell", job.get("shell", "bash"))
-    cmd = ["/bin/bash", "-lc", script] if shell == "bash" else [shell, "-c", script]
-    if log_callback_out or log_callback_err:
-        return _run_with_callbacks(cmd, timeout, env, workdir, on_stdout=log_callback_out, on_stderr=log_callback_err)
-    return run_command(script, shell=shell, timeout=timeout, env=env, workdir=workdir)
+    finally:
+        if source_cleanup:
+            source_cleanup()
 
 
 def record_run_start(job: dict, worker_id: str, slot: int, retries_remaining: int) -> str:

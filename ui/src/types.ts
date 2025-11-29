@@ -157,6 +157,7 @@ export interface JobGraphData {
 
 export interface WorkerInfo {
   worker_id: string;
+  domain?: string;
   os: string;
   tags: string[];
   allowed_users: string[];

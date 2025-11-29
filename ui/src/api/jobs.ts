@@ -45,3 +45,12 @@ export const validateJob = (payload: JobPayload) => apiClient.post<ValidationRes
 export const validateJobById = (jobId: string) => apiClient.post<ValidationResult>(`/jobs/${jobId}/validate`, {});
 export const runJobNow = (jobId: string) => apiClient.post<{ job_id: string; queued: boolean }>(`/jobs/${jobId}/run`, {});
 export const runAdhocJob = (payload: JobPayload) => apiClient.post<JobDefinition>("/jobs/adhoc", payload);
+
+export const generateJob = (prompt: string, provider: "gemini" | "openai" = "gemini", model?: string) => 
+    apiClient.post<JobPayload>("/ai/generate_job", { prompt, provider, model });
+
+export const analyzeRun = (payload: { run_id: string; stdout: string; stderr: string; exit_code: number; provider?: "gemini" | "openai"; model?: string }) => 
+    apiClient.post<{ analysis: string }>("/ai/analyze_run", { provider: "gemini", ...payload });
+
+
+

@@ -55,24 +55,21 @@ def prepare_python_command(executor: Dict, job_id: str) -> Tuple[List[str], Opti
         cmd += [interpreter]
         return cmd, cleanup
 
-    if env_type == "venv":
-        if venv_path:
-            python_bin = _venv_python_path(venv_path)
-        else:
-            base_python = _resolve_python_binary(python_version, interpreter)
-            tmp_dir = tempfile.mkdtemp(prefix=f"hydra-venv-{job_id}-")
-            _run([base_python, "-m", "venv", tmp_dir])
-            python_bin = _venv_python_path(tmp_dir)
+    # Enforce venv for all non-uv execution to ensure isolation
+    # "system" type now means "use system python to create a venv"
+    if venv_path:
+        python_bin = _venv_python_path(venv_path)
+    else:
+        base_python = _resolve_python_binary(python_version, interpreter)
+        tmp_dir = tempfile.mkdtemp(prefix=f"hydra-venv-{job_id}-")
+        _run([base_python, "-m", "venv", tmp_dir])
+        python_bin = _venv_python_path(tmp_dir)
 
-            def _cleanup():
-                shutil.rmtree(tmp_dir, ignore_errors=True)
+        def _cleanup():
+            shutil.rmtree(tmp_dir, ignore_errors=True)
 
-            cleanup = _cleanup
-        _install_requirements(python_bin, requirements, requirements_file)
-        return [python_bin], cleanup
-
-    # system python
-    python_bin = _resolve_python_binary(python_version, interpreter)
+        cleanup = _cleanup
+    
     if requirements or requirements_file:
         _install_requirements(python_bin, requirements, requirements_file)
     return [python_bin], cleanup
