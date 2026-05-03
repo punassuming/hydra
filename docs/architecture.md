@@ -4,7 +4,7 @@
 
 | Component | Role |
 |---|---|
-| **Scheduler API** | FastAPI service: REST API + SSE streams. In `api` mode: API only. In `combined` mode (default): API + orchestration loops. |
+| **Scheduler API** | FastAPI service: REST API + SSE streams. In `api` mode: API only. In `combined` mode (default): API + orchestration loops. Startup/shutdown managed via FastAPI `lifespan` context manager. |
 | **Orchestrator** | Control-plane process: owns all background reconciliation loops (dispatch, failover, schedule, events, monitoring). Can run as a separate process (`python -m scheduler.orchestrator_entrypoint`) or co-located with the API in `combined` mode. |
 | **Redis** | Message bus: job queues, worker coordination, heartbeats, log streaming, run events |
 | **MongoDB** | Durable store: domains, job definitions, run history, credentials |
