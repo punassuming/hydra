@@ -17,7 +17,7 @@ Hydra Jobs is a distributed job runner designed for flexibility and scalability.
 
 ## Architecture
 
-*   **Language:** Python 3.11 (Backend), TypeScript (Frontend)
+*   **Language:** Python 3.13 (CI target; minimum 3.11 supported), TypeScript (Frontend)
 *   **Frameworks:** FastAPI (Scheduler), React + Vite (UI)
 *   **Database:** MongoDB (v6.0 recommended, v5.0 for broader CPU support), Redis (v7-alpine)
 *   **AI Provider:** Google Gemini (requires `GEMINI_API_KEY`) or OpenAI (requires `OPENAI_API_KEY`)
@@ -55,7 +55,10 @@ Hydra Jobs is a distributed job runner designed for flexibility and scalability.
 - Jobs support `bypass_concurrency`; scheduler can dispatch these even when workers are at quota, and workers execute them outside normal `ThreadPoolExecutor` limits. The scheduler logs a warning when dispatching a bypass job to an overloaded worker. A soft cap (`SCHEDULER_BYPASS_MAX_EXTRA`) can limit how many bypass jobs each worker carries above its normal concurrency limit.
 - **No-worker starvation tracking**: `job_enqueue_meta:<domain>:<job_id>` records `no_worker_count` (incremented each time a job is requeued due to no eligible worker). A starvation warning is logged when `no_worker_count` reaches `SCHEDULER_STARVATION_WARN_THRESHOLD` (default 5). The count is visible in `/overview/queue` and `/overview/pressure`.
 - **Failover drains per-worker queue**: `failover_loop` / `requeue_jobs_for_worker` now recovers both running jobs (from `worker_running_set`) AND dispatched-but-not-started envelopes from `job_queue:<domain>:<worker_id>`, preventing silent job loss when a worker dies between dispatch and BLPOP.
-- Executors support Linux-only impersonation and Kerberos bootstrap: `executor.impersonate_user` and `executor.kerberos.{principal,keytab,ccache}`.
+- Executors support Linux-only impersonation and Kerberos bootstrap: `executor.impersonate_user` and `executor.kerberos.{principal,keytab,ccache}`. Kerberos credential cache is destroyed (`kdestroy`) in a `finally` block immediately after the job finishes. The `keytab` path is masked (`"********"`) in all job API responses.
+- **Credential domain validation**: the `?domain=` query parameter on admin credential endpoints is validated against the live `hydra:domains` Redis set; unknown domains receive a 404.
+- **Git PAT hygiene**: `worker/utils/git.py` injects the PAT into the HTTPS clone URL only for the network operation, then rewrites `origin` in `.git/config` to the clean URL before the workspace is cached, so tokens do not persist on disk.
+- **SQL temp file security**: SQL driver scripts are written via `tempfile.mkstemp()` (mode `0o600`) so the connection URI is never world-readable during execution.
 - **Sensor executor** (`executor.type == "sensor"`): dispatched and executed entirely on workers. The worker polls an HTTP endpoint or SQL query at `poll_interval_seconds` intervals. Scheduler resolves `credential_ref` at dispatch time so the worker needs no MongoDB access. No scheduler-side sensor evaluation loop exists.
 - **Worker capabilities are fail-closed**: `_detect_capabilities()` in `worker/executor.py` only advertises an executor type after a concrete preflight check (e.g., `shell` requires a shell binary to execute successfully; `sql` requires Python AND a DB driver; `sensor` is always present since HTTP sensor uses stdlib). `startup_duration_ms` is recorded in worker registration metadata and the start/restart operation event.
 - **Run timing fields** in `run_end` events (persisted to `job_runs`): `queue_latency_ms`, `total_run_ms`, `source_fetch_ms` (source provisioning time), `env_prep_ms` (Python env preparation time).
@@ -76,7 +79,7 @@ Hydra Jobs is a distributed job runner designed for flexibility and scalability.
 
 ## Project Structure & Key Modules
 
-- `scheduler/main.py` bootstraps FastAPI + CORS, reads `HYDRA_MODE`, and (in `combined` mode) starts all orchestration loops via `OrchestratorManager`.
+- `scheduler/main.py` bootstraps FastAPI + CORS, reads `HYDRA_MODE`, and (in `combined` mode) starts all orchestration loops via `OrchestratorManager`. Startup and shutdown are wired via a FastAPI `lifespan` context manager (`@asynccontextmanager`); the underlying `on_startup()` and `on_shutdown()` functions remain callable directly for tests.
 - `scheduler/startup.py` — shared initialisation helpers (`ensure_admin_token`, `ensure_domains_seeded`) used by both the API and the standalone orchestrator entrypoint.
 - `scheduler/orchestrator.py` — `OrchestratorManager` (loop registry, thread management, Redis heartbeat) and `create_standard_orchestrator()` factory.
 - `scheduler/orchestrator_entrypoint.py` — standalone control-plane process; run with `python -m scheduler.orchestrator_entrypoint` when `HYDRA_MODE=api`.
@@ -87,7 +90,7 @@ Hydra Jobs is a distributed job runner designed for flexibility and scalability.
 - `scheduler/utils/*` house affinity checks, worker selection, failover logic, auth helpers, schedule math, and logging setup.
 - `worker/worker.py` registers the worker, maintains heartbeats, executes jobs, emits `run_start`/`run_end` events to Redis, and records worker operation events.
 - `worker/utils/*` contain shell/exec helpers, python env prep (`uv`/venv/system), completion criteria evaluation, concurrency counters, and heartbeats.
-- `worker/utils/git.py` — Git clone/checkout logic.
+- `worker/utils/git.py` — Git clone/checkout logic. PAT is injected for the network operation only; the remote URL is rewritten to strip credentials before the workspace is cached.
 - `worker/executor.py` — Job execution engine (shell/python/batch/external) with git source support.
 - `worker/executor.py` — also handles Linux impersonation + Kerberos pre-auth when configured.
 - `worker/__main__.py` — CLI entry point; dispatches to `worker_main()` (default) or `bootstrap.main()` when the first argument is `bootstrap`.
@@ -175,6 +178,67 @@ Located in `scripts/`:
 *   `start-domain-workers.sh`: Agentic worker bring-up for Docker/Kubernetes/Bare deployments.
 *   `diagnose-domain-admin.sh`: Agentic diagnostics for domain auth and worker visibility (with optional Redis deep checks).
 
+## Command-Line Interface (`hydra-ctl`)
+
+`hydra-ctl` is a standalone Python CLI (like `gh` for GitHub) that lets operators interact with the scheduler from any machine with network access. It is **completely independent of the worker** — it does not connect to Redis, run jobs, or require any worker configuration.
+
+### Package location
+
+`cli/` at the repo root. Entry point registered in `pyproject.toml`:
+
+```toml
+[project.scripts]
+hydra-ctl = "cli.__main__:main"
+```
+
+Install: `pip install -e .` (dev) or `pip install hydra-jobs` (release).
+
+### Authentication
+
+Uses the same domain token as the worker, resolved in order:
+
+1. `--token` flag
+2. `API_TOKEN` environment variable
+
+Similarly `--domain` / `DOMAIN` and `--api-url` / `HYDRA_API_URL`.
+
+### Module structure
+
+| File | Purpose |
+|---|---|
+| `cli/__main__.py` | `argparse` command tree + all command handler functions |
+| `cli/_client.py` | `HydraClient` — thin `urllib`-only HTTP wrapper, no third-party deps |
+| `cli/_output.py` | `print_table()`, `fmt_duration()`, `fmt_ts()`, `fmt_status()` helpers |
+
+### Command surface
+
+```
+hydra-ctl jobs list [--search TEXT] [--tags t1,t2]
+hydra-ctl jobs show <name-or-id>
+hydra-ctl jobs trigger <name-or-id> [--param k=v …]
+hydra-ctl jobs enable <name-or-id>
+hydra-ctl jobs disable <name-or-id>
+hydra-ctl jobs runs <name-or-id> [--limit N]
+
+hydra-ctl runs list [--limit N]
+hydra-ctl runs show <run-id>
+hydra-ctl runs logs <run-id>          # streams live if run is active
+hydra-ctl runs kill <run-id>
+
+hydra-ctl workers list
+hydra-ctl workers show <worker-id>
+hydra-ctl workers state <worker-id> online|draining|offline
+
+hydra-ctl overview
+hydra-ctl overview queue [--limit N]
+```
+
+All commands accept `--json` for machine-readable output (exit codes: `0` success, `1` API/network error, `2` usage error).
+
+Name resolution: `jobs show/trigger/enable/disable/runs` accept either a UUID or a job name; the client resolves name → ID via `GET /jobs/?search=<arg>`.
+
+SSE log streaming: `runs logs` reads `GET /runs/{id}/stream` line-by-line; falls back to `stdout_tail`/`stderr_tail` from `GET /runs/{id}` when the run is no longer active.
+
 ## Testing
 
 ### Backend (Python)
@@ -231,7 +295,7 @@ Located in `scripts/`:
 
 ### Additional Notes
 
-- Docker images target Python 3.11 slim; `uv` is optional but must be present in the image to use the `uv` python environment.
+- Docker images target Python 3.13 slim; `uv` is optional but must be present in the image to use the `uv` python environment.
 - Environment variables can be configured via `.env` file (see `.env.example`).
 - MongoDB uses a named volume `mongo-data` for persistence.
 - Redis connection precedence: if both `REDIS_SENTINELS` and `REDIS_SENTINEL_MASTER` are set, scheduler/worker use Sentinel discovery; otherwise they use `REDIS_URL`.
@@ -264,7 +328,7 @@ The worker will clone the repo to a temporary directory, switch to `path` (if pr
 ### Backend (Python)
 
 *   **Location:** `scheduler/` and `worker/`
-*   **Style:** Adheres to standard Python 3.11 practices. Type hints are encouraged.
+*   **Style:** Adheres to standard Python 3.13 practices. Type hints are encouraged. All datetime values use timezone-aware UTC (`datetime.now(timezone.utc)`).
 *   **Formatting:** Linting/formatting are not configured; match existing style (4-space indent, type hints where present).
 
 ### Frontend (React)

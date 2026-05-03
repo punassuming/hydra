@@ -1,7 +1,7 @@
 # hydra-jobs
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Python](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![Python](https://img.shields.io/badge/Python-3.13-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100%2B-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=white)](https://react.dev/)
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)](https://docs.docker.com/compose/)
@@ -198,7 +198,10 @@ Hydra Jobs is built for multi-tenant deployments. Each domain is fully isolated:
 - **Redis ACL** per domain: workers are scoped to only their domain's keys and channels
 - **Encrypted credential store**: database URIs, PAT tokens, SMTP passwords — all stored encrypted in MongoDB, resolved at dispatch, never returned by the API
 - **Linux impersonation**: `executor.impersonate_user` runs jobs as a specific OS user
-- **Kerberos**: `executor.kerberos` bootstraps a Kerberos ticket before execution
+- **Kerberos**: `executor.kerberos` bootstraps a Kerberos ticket before execution; credential cache is destroyed immediately after the job completes
+- **Secret masking**: `connection_uri` and `kerberos.keytab` path are redacted in all job API responses
+- **Git PAT hygiene**: personal access tokens are injected only for the clone operation; the remote URL is rewritten to remove credentials before the workspace is cached
+- **Secure temp files**: SQL driver scripts are written to mode `0o600` files so connection strings are never world-readable
 
 ### Start Workers (Recommended ACL Path)
 
@@ -329,6 +332,52 @@ Manifests are in `deploy/k8s/`:
 | `scripts/start-domain-workers.sh <domain> [scale]` | Agentic worker bring-up (Docker/K8s/Bare) |
 | `scripts/diagnose-domain-admin.sh <domain>` | Agentic domain + Redis diagnostics |
 | `scripts/create-domain.sh` | Create a new domain via the API |
+
+---
+
+## Command-Line Interface (`hydra-ctl`)
+
+`hydra-ctl` is a standalone CLI for interacting with the Hydra scheduler — think `gh` for Hydra. Install it on any machine that can reach the scheduler; it does not run jobs and has no dependency on Redis.
+
+```bash
+pip install hydra-jobs   # hydra-ctl is included
+```
+
+Authenticate via environment variables (same token the worker uses):
+
+```bash
+export API_TOKEN=<domain-token>
+export DOMAIN=prod                          # default: prod
+export HYDRA_API_URL=http://localhost:8000  # default: http://localhost:8000
+```
+
+Or pass flags directly:
+
+```bash
+hydra-ctl --token <TOKEN> --domain prod --api-url http://scheduler:8000 jobs list
+```
+
+### Commands
+
+| Command | Description |
+|---|---|
+| `jobs list [--search TEXT] [--tags t1,t2]` | List jobs with schedule mode and last-run status |
+| `jobs show <name-or-id>` | Full job definition |
+| `jobs trigger <name-or-id> [--param k=v …]` | Manually trigger a job; prints run ID |
+| `jobs enable <name-or-id>` | Enable schedule |
+| `jobs disable <name-or-id>` | Disable schedule |
+| `jobs runs <name-or-id> [--limit N]` | Run history for a job |
+| `runs list [--limit N]` | Recent runs across all jobs |
+| `runs show <run-id>` | Run metadata and outcome |
+| `runs logs <run-id>` | Print logs (streams live if run is active) |
+| `runs kill <run-id>` | Kill an active run |
+| `workers list` | Worker list with state and running-job count |
+| `workers show <worker-id>` | Worker detail (capabilities, tags, metrics) |
+| `workers state <worker-id> online\|draining\|offline` | Change worker dispatch state |
+| `overview` | Domain summary: job totals, success rate, active workers |
+| `overview queue [--limit N]` | Pending + upcoming scheduled jobs |
+
+Add `--json` to any command for machine-readable output.
 
 ---
 

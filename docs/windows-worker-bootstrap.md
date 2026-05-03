@@ -32,7 +32,7 @@ Windows Task Scheduler
 
 | Requirement | Notes |
 |---|---|
-| Python 3.11+ | Available via [uv](https://github.com/astral-sh/uv) or a standalone installer |
+| Python 3.13 (3.11+ supported) | Available via [uv](https://github.com/astral-sh/uv) or a standalone installer |
 | uv | Recommended for managing the Python virtual environment |
 | Hydra worker installed | See **Runtime directory setup** below |
 | Redis connection | `REDIS_URL` must be reachable from the Windows host |
