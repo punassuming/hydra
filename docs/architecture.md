@@ -60,6 +60,7 @@ docker compose -f docker-compose.yml -f docker-compose.separated.yml up --build
 
 ```mermaid
 flowchart TB
+    CLI["hydra-ctl CLI\n(standalone, no Redis)"]
     UI["React UI\n(Vite + Ant Design)"]
 
     subgraph APIService["Scheduler API (FastAPI)"]
@@ -68,52 +69,210 @@ flowchart TB
 
     subgraph ControlPlane["Orchestrator (control-plane)"]
         STL["Schedule Trigger Loop\n(cron / interval → dispatch)"]
-        DFL["Dispatch / Failover Loop\n(pending queue → worker queues)"]
+        DFL["Dispatch Loop\n(pending queue → worker queues)"]
+        FOL["Failover Loop\n(offline workers → requeue)"]
         REL["Run Event Loop\n(run_events → MongoDB)"]
         MON["Timeout · SLA · Backfill\nMonitors"]
         HB["Orchestrator Heartbeat\n(hydra:orchestrator:heartbeat)"]
     end
 
     subgraph Stores["Data Stores"]
-        Redis[("Redis\n· job queues\n· heartbeats\n· log streams\n· run events\n· worker ops")]
-        MongoDB[("MongoDB\n· domains\n· job_definitions\n· job_runs\n· credentials")]
+        Redis[("Redis 7\n· job queues\n· heartbeats\n· log streams\n· run events\n· worker ops\n· ACL")]
+        MongoDB[("MongoDB 6\n· domains\n· job_definitions\n· job_runs\n· credentials")]
     end
 
-    subgraph WorkerPool["Workers (per domain, Redis-only)"]
-        WA1["Worker\n(domain-a)"]
-        WA2["Worker\n(domain-a)"]
-        WB1["Worker\n(domain-b)"]
+    subgraph WorkerPool["Workers (Redis-only at runtime)"]
+        WA1["Python Worker\n(domain-a)"]
+        WA2["Python Worker\n(domain-a)"]
+        WB1["Go Worker\n(domain-b)"]
     end
 
-    %% UI ↔ Scheduler
-    UI -- "HTTP / SSE" --> API
+    %% Clients ↔ Scheduler API
+    CLI -- "HTTP (urllib)" --> API
+    UI  -- "HTTP / SSE" --> API
     API -- "read / write" --> MongoDB
 
     %% Orchestrator loops ↔ Redis + MongoDB
     STL -- "advance schedule" --> MongoDB
     STL -- "enqueue pending" --> Redis
     DFL -- "read worker state\n+ pending queue" --> Redis
-    DFL -- "dispatch → worker queue" --> Redis
-    REL -- "consume run_events" --> Redis
-    REL -- "persist job_runs" --> MongoDB
-    MON -- "timeout/SLA/backfill" --> MongoDB
-    HB -- "heartbeat key\n(TTL=30s)" --> Redis
-
-    %% Scheduler resolves credentials at dispatch time
     DFL -- "resolve credential_refs" --> MongoDB
+    DFL -- "dispatch → worker queue" --> Redis
+    FOL -- "detect stale heartbeats" --> Redis
+    FOL -- "mark failed runs" --> MongoDB
+    REL -- "consume run_events\n(RPOPLPUSH staging)" --> Redis
+    REL -- "persist job_runs" --> MongoDB
+    MON -- "timeout / SLA / backfill" --> MongoDB
+    HB  -- "heartbeat key (TTL=30s)" --> Redis
 
-    %% Redis → Workers (job dispatch)
+    %% Redis ↔ Workers
     Redis -- "BLPOP job dispatch" --> WA1
     Redis -- "BLPOP job dispatch" --> WA2
     Redis -- "BLPOP job dispatch" --> WB1
 
-    %% Workers → Redis (heartbeat / logs / events)
-    WA1 -- "heartbeat · logs\nrun events · ops" --> Redis
-    WA2 -- "heartbeat · logs\nrun events · ops" --> Redis
-    WB1 -- "heartbeat · logs\nrun events · ops" --> Redis
+    WA1 -- "heartbeat · metrics\nlogs · run events · ops" --> Redis
+    WA2 -- "heartbeat · metrics\nlogs · run events · ops" --> Redis
+    WB1 -- "heartbeat · metrics\nlogs · run events · ops" --> Redis
 ```
 
-> **Note:** In `combined` mode both boxes (`Scheduler API` and `Orchestrator`) run inside the same OS process. In `separated` mode they are distinct processes (or containers) connected only through Redis and MongoDB.
+> **Note:** In `combined` mode (default) both `Scheduler API` and `Orchestrator` run in the same OS process. In `separated` mode they are distinct processes (or containers) connected only through Redis and MongoDB.
+
+## Job Dispatch Sequence
+
+The following sequence diagram shows the full lifecycle of a scheduled job — from trigger through execution to persistence.
+
+```mermaid
+sequenceDiagram
+    participant STL as Schedule Trigger Loop
+    participant DFL as Dispatch Loop
+    participant Redis
+    participant Worker
+    participant REL as Run Event Loop
+    participant MongoDB
+
+    Note over STL,MongoDB: 1. Schedule advancement
+    STL->>MongoDB: Read next_run_at for due jobs
+    STL->>MongoDB: Update next_run_at (advance schedule)
+    STL->>Redis: ZADD job_queue:<domain>:pending
+
+    Note over DFL,MongoDB: 2. Dispatch
+    DFL->>Redis: ZPOPMIN job_queue:<domain>:pending
+    DFL->>Redis: Read workers:<domain>:* (affinity check)
+    DFL->>MongoDB: Resolve credential_refs (decrypt)
+    DFL->>Redis: RPUSH job_queue:<domain>:<worker_id>
+
+    Note over Worker,Redis: 3. Execution
+    Worker->>Redis: BLPOP job_queue:<domain>:<worker_id>
+    Worker->>Redis: SET job_running:<domain>:<job_id>
+    Worker->>Redis: SADD worker_running_set:<domain>:<worker_id>
+    Worker->>Redis: RPUSH run_events:<domain> {run_start}
+    Worker->>Redis: PUBLISH log_stream:<domain>:<run_id> (chunks)
+    Worker->>Redis: RPUSH run_events:<domain> {run_end}
+    Worker->>Redis: DEL job_running / SREM running_set
+
+    Note over REL,MongoDB: 4. Event ingestion
+    REL->>Redis: RPOPLPUSH run_events:<domain> → staging
+    REL->>MongoDB: Upsert job_runs (run_start → $setOnInsert)
+    REL->>MongoDB: Update job_runs terminal state (run_end)
+    REL->>Redis: LREM staging queue
+```
+
+## Worker Deployment Options
+
+Hydra workers are stateless and Redis-only. They can be deployed in several configurations:
+
+```mermaid
+flowchart LR
+    subgraph DockerCompose["Docker Compose (local / small prod)"]
+        direction TB
+        W1["python worker"]
+        W2["python worker"]
+        W3["go worker"]
+    end
+
+    subgraph Kubernetes["Kubernetes"]
+        direction TB
+        W4["worker Pod"]
+        W5["worker Pod"]
+        W6["worker Pod (HPA)"]
+    end
+
+    subgraph Windows["Windows Bare-Metal"]
+        direction TB
+        BS["bootstrap watchdog\n(Task Scheduler)"]
+        BS --> WW["python -m worker"]
+    end
+
+    subgraph BareMetal["Linux / macOS Bare-Metal"]
+        direction TB
+        WL["python -m worker\n(standalone)"]
+    end
+
+    Redis2[("Redis")]
+    W1 & W2 & W3 --> Redis2
+    W4 & W5 & W6 --> Redis2
+    WW --> Redis2
+    WL --> Redis2
+```
+
+## Multi-Domain Security Model
+
+Each domain is a fully isolated tenant. The diagram below shows how tokens and Redis ACL rules are scoped per domain.
+
+```mermaid
+flowchart TB
+    AdminToken["Admin Token\n(ADMIN_TOKEN env)"]
+
+    subgraph DomainA["Domain: prod"]
+        TokenA["Domain Token\n(hashed in MongoDB)"]
+        ACLA["Redis ACL User: prod\n(scoped to prod:* keys)"]
+        WorkerA1["Worker A1"]
+        WorkerA2["Worker A2"]
+    end
+
+    subgraph DomainB["Domain: staging"]
+        TokenB["Domain Token\n(hashed in MongoDB)"]
+        ACLB["Redis ACL User: staging\n(scoped to staging:* keys)"]
+        WorkerB1["Worker B1"]
+    end
+
+    subgraph Scheduler["Scheduler API"]
+        AuthMiddleware["Auth Middleware\n(x-api-key header)"]
+        CredStore["Encrypted Credential Store\n(AES-GCM in MongoDB)"]
+    end
+
+    AdminToken -- "cross-domain\naccess" --> AuthMiddleware
+    TokenA -- "domain-scoped\naccess" --> AuthMiddleware
+    TokenB -- "domain-scoped\naccess" --> AuthMiddleware
+
+    AuthMiddleware --> CredStore
+
+    ACLA --> WorkerA1
+    ACLA --> WorkerA2
+    ACLB --> WorkerB1
+
+    WorkerA1 -. "can only read/write\nprod:* Redis keys" .-> ACLA
+    WorkerB1 -. "can only read/write\nstaging:* Redis keys" .-> ACLB
+
+    CredStore -. "decrypted at dispatch,\nnever stored on worker" .-> WorkerA1
+    CredStore -. "decrypted at dispatch,\nnever stored on worker" .-> WorkerB1
+```
+
+## Failover Sequence
+
+When a worker goes offline unexpectedly, the `failover_loop` recovers both in-flight running jobs and dispatched-but-not-started envelopes.
+
+```mermaid
+sequenceDiagram
+    participant FOL as Failover Loop
+    participant Redis
+    participant MongoDB
+
+    Note over FOL,Redis: Every 2 seconds
+    FOL->>Redis: Read worker_heartbeats:<domain> (sorted set)
+    FOL->>Redis: Check age vs SCHEDULER_HEARTBEAT_TTL
+
+    alt Worker heartbeat is stale
+        FOL->>Redis: SET NX worker_failover_handled:<domain>:<worker_id> (TTL guard)
+
+        Note over FOL,MongoDB: Recover running jobs
+        FOL->>Redis: SMEMBERS worker_running_set:<domain>:<worker_id>
+        FOL->>MongoDB: Mark open run docs as failed (worker offline)
+        FOL->>Redis: DEL job_running:<domain>:<job_id> (for each)
+
+        Note over FOL,Redis: Recover dispatched-but-not-started envelopes
+        FOL->>Redis: LRANGE job_queue:<domain>:<worker_id> (drain entire queue)
+        FOL->>Redis: ZADD job_queue:<domain>:pending (re-enqueue each envelope)
+
+        Note over FOL,Redis: Reset worker state
+        FOL->>Redis: SET workers:<domain>:<worker_id> current_running=0, status=offline
+    else Heartbeat is fresh
+        Note over FOL: No action
+    end
+
+    Note over FOL,Redis: Stale worker pruning (after SCHEDULER_WORKER_OFFLINE_PRUNE_SECONDS)
+    FOL->>Redis: DEL workers / heartbeat / running_set keys (if queues empty)
+```
 
 ## Orchestration Health
 
@@ -165,23 +324,41 @@ This lets operators and monitoring systems independently verify:
 
 Each job run moves through the following states. The transitions are explicit so operators and developers can reason about where a job is and what happened to it.
 
-```
-                ┌─ cron/interval trigger
-                │  or POST /jobs/{id}/run
-                ▼
-         [ pending ]  ◄─── failover_requeue / no_worker requeue
-                │
-                │ scheduling_loop: eligible worker found
-                ▼
-        [ dispatched ]  ← envelope in job_queue:<domain>:<worker_id>
-                │
-                │ worker BLPOP + run_start event
-                ▼
-         [ running ]   ← job_running:<domain>:<job_id> + worker_running_set
-                │
-         ┌──────┼──────┐
-         ▼      ▼      ▼
-    [success] [failed] [timed_out]
+```mermaid
+stateDiagram-v2
+    [*] --> pending : cron/interval trigger\nor POST /jobs/{id}/run
+
+    pending --> dispatched : dispatch loop finds\neligible worker
+    pending --> pending    : no eligible worker\n(no_worker requeue)
+
+    dispatched --> running   : worker BLPOP\n+ run_start event
+    dispatched --> pending   : failover requeue\n(worker offline before BLPOP)
+
+    running --> success   : run_end status=success
+    running --> failed    : run_end status=failed
+    running --> timed_out : timeout_seconds exceeded
+
+    failed    --> pending : retry (new run_id)
+    timed_out --> pending : retry (new run_id)
+
+    success   --> [*]
+    failed    --> [*]
+    timed_out --> [*]
+
+    note right of pending
+        Redis: job_queue:<domain>:pending
+        MongoDB: no run doc yet
+    end note
+
+    note right of dispatched
+        Redis: job_queue:<domain>:<worker_id>
+        MongoDB: no run doc yet
+    end note
+
+    note right of running
+        Redis: job_running + worker_running_set
+        MongoDB: status = running
+    end note
 ```
 
 ### State definitions
