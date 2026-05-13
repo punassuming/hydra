@@ -32,37 +32,40 @@
 
 ## Architecture
 
-```
-┌──────────────────────────────────────────────────────────────────────────┐
-│                           Scheduler (FastAPI)                             │
-│  ┌──────────────┐  ┌──────────────────┐  ┌────────────────────────────┐ │
-│  │ Schedule     │  │  Dispatch /      │  │  Run Event Loop            │ │
-│  │ Trigger Loop │  │  Failover Loop   │  │  (Redis run_events →       │ │
-│  │              │  │                  │  │   MongoDB job_runs)        │ │
-│  └──────────────┘  └──────────────────┘  └────────────────────────────┘ │
-└────────────┬─────────────────┬────────────────────────────────┬──────────┘
-             │ dispatch/queues │ worker state / run_events      │ read/write
-             ▼                 ▼                                ▼
-      ┌─────────────────────────────┐                  ┌───────────┐
-      │            Redis            │                  │  MongoDB  │
-      │  (queues, heartbeats,       │                  │  (domains,│
-      │   logs, events, ACL)        │                  │   jobs,   │
-      └──────────┬──────────────────┘                  │   runs,   │
-                 │ dispatch / heartbeat                 │   creds)  │
-                 │ / logs / events                      └───────────┘
-     ┌───────────┼───────────────────┐
-     ▼           ▼                   ▼
-┌─────────┐ ┌─────────┐       ┌─────────┐
-│ Worker  │ │ Worker  │       │ Worker  │
-│(domainA)│ │(domainA)│       │(domainB)│
-└─────────┘ └─────────┘       └─────────┘
+```mermaid
+flowchart LR
+    CLI["hydra-ctl CLI"]
+    UI["React UI"]
+
+    subgraph Scheduler["Scheduler (FastAPI)"]
+        API["REST API + SSE"]
+        Orch["Orchestrator\n(dispatch · failover · events)"]
+    end
+
+    Redis[("Redis")]
+    MongoDB[("MongoDB")]
+
+    subgraph Workers["Workers"]
+        W1["Python Worker"]
+        W2["Go Worker"]
+    end
+
+    CLI -- HTTP --> API
+    UI  -- HTTP/SSE --> API
+    API --- Orch
+    API <--> MongoDB
+    Orch <--> Redis
+    Orch <--> MongoDB
+    Redis <--> W1
+    Redis <--> W2
 ```
 
 - **Scheduler** owns orchestration and persistence: dispatches jobs to Redis queues, handles failover, advances cron/interval schedules, and persists run events consumed from Redis into MongoDB.
 - **Workers** are Redis-only at runtime: register metadata, heartbeat with rolling metrics (memory/CPU/load), execute jobs, stream logs, and emit lifecycle events — they never connect to MongoDB.
 - **MongoDB** stores durable state: `domains`, `job_definitions`, `job_runs`, `credentials`.
+- **hydra-ctl** is a standalone CLI that talks only to the scheduler API — no Redis or MongoDB dependency.
 
-> See [`docs/architecture.md`](docs/architecture.md) for a detailed Mermaid diagram.
+> See [`docs/architecture.md`](docs/architecture.md) for detailed diagrams covering the job dispatch sequence, state machine, multi-domain security model, failover flow, and worker deployment options.
 
 ---
 

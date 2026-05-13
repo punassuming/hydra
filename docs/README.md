@@ -4,7 +4,18 @@ Hydra's documentation is organized by topic so the `docs/` directory stays easy 
 
 ## Core docs
 
-- [`architecture.md`](architecture.md) — system architecture and Redis/Mongo/worker flow
+- [`architecture.md`](architecture.md) — system architecture with Mermaid diagrams:
+  - Component overview and runtime modes (combined vs separated)
+  - System architecture flowchart
+  - Job dispatch sequence diagram
+  - Worker deployment options
+  - Multi-domain security model
+  - Failover sequence diagram
+  - Job run state machine
+  - Redis key layout and security boundaries
+  - Executor types and workspace caching
+  - Run lifecycle and event ingestion semantics
+  - Backpressure and queue visibility
 
 ## Development
 
