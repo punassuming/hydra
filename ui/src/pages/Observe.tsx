@@ -1,8 +1,8 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Card, Space, Typography, Button, Progress, Table, Tag, Modal, Tabs, Input, Select } from "antd";
+import { Card, Space, Typography, Button, Progress, Table, Tag, Modal, Tabs, Input, Select, Spin } from "antd";
 import { fetchJobOverview, runJobNow, fetchHistory, fetchJobs, fetchWorkers } from "../api/jobs";
-import { JobRun, WorkerInfo } from "../types";
+import { JobOverview, JobRun, WorkerInfo } from "../types";
 import { useActiveDomain } from "../context/ActiveDomainContext";
 import { StatusBadge } from "../components/StatusBadge";
 import { LogViewer } from "../components/LogViewer";
@@ -11,6 +11,7 @@ import { useTheme } from "../theme";
 import {
   BarChartOutlined,
   HistoryOutlined,
+  TableOutlined,
 } from "@ant-design/icons";
 
 function StatusTab() {
@@ -406,6 +407,103 @@ function HistoryTab() {
   );
 }
 
+const GRID_TICKS = 30;
+
+function statusToCellClass(status: string | undefined): string {
+  if (!status) return "gcell-skipped";
+  switch (status.toLowerCase()) {
+    case "success": return "gcell-success";
+    case "failed":
+    case "error": return "gcell-failed";
+    case "running": return "gcell-running";
+    case "queued":
+    case "pending": return "gcell-queued";
+    default: return "gcell-skipped";
+  }
+}
+
+function GridTab() {
+  const { domain } = useActiveDomain();
+  const overviewQuery = useQuery({
+    queryKey: ["job-overview", domain],
+    queryFn: fetchJobOverview,
+    refetchInterval: 10000,
+  });
+
+  const jobs: JobOverview[] = overviewQuery.data ?? [];
+
+  const tickLabels = Array.from({ length: GRID_TICKS }, (_, i) => {
+    const tick = GRID_TICKS - i;
+    return tick % 5 === 0 ? `t-${tick}` : "";
+  });
+
+  return (
+    <Card
+      title="Task Instance Grid — All Jobs"
+      extra={
+        <div className="grid-tab-legend">
+          <span className="grid-tab-legend-item"><span className="gcell gcell-success" /> ok</span>
+          <span className="grid-tab-legend-item"><span className="gcell gcell-failed" /> fail</span>
+          <span className="grid-tab-legend-item"><span className="gcell gcell-running" /> run</span>
+          <span className="grid-tab-legend-item"><span className="gcell gcell-skipped" /> no data</span>
+        </div>
+      }
+    >
+      {overviewQuery.isLoading ? (
+        <div style={{ textAlign: "center", padding: 32 }}>
+          <Spin size="large" />
+        </div>
+      ) : jobs.length === 0 ? (
+        <Typography.Text type="secondary">No jobs found.</Typography.Text>
+      ) : (
+        <>
+          <Typography.Text type="secondary" style={{ fontSize: 12, display: "block", marginBottom: 12 }}>
+            Last {GRID_TICKS} run slots across all jobs — newest on the right.
+          </Typography.Text>
+          <div className="grid-tab-wrap">
+            <table className="grid-tab-table">
+              <thead>
+                <tr>
+                  <th className="grid-tab-label-cell" style={{ fontWeight: 500, fontSize: 11, color: "var(--v2-text-3)" }}>
+                    Job
+                  </th>
+                  {tickLabels.map((label, j) => (
+                    <th key={j} className="grid-tab-head-cell">{label}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {jobs.map((job) => {
+                  const runs = (job.recent_runs ?? []).slice().reverse();
+                  const cells = Array.from({ length: GRID_TICKS }, (_, i) => {
+                    const run = runs[i];
+                    return run ? run.status : undefined;
+                  });
+                  return (
+                    <tr key={job.job_id}>
+                      <td className="grid-tab-label-cell">
+                        <span title={job.job_id}>{job.name}</span>
+                      </td>
+                      {cells.map((status, j) => (
+                        <td key={j} style={{ padding: 0 }}>
+                          <span
+                            className={`gcell ${statusToCellClass(status)}`}
+                            title={status ?? "no data"}
+                          />
+                        </td>
+                      ))}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </Card>
+  );
+}
+
 export function ObservePage() {
   return (
     <Space direction="vertical" size="large" style={{ width: "100%" }}>
@@ -420,6 +518,15 @@ export function ObservePage() {
               </span>
             ),
             children: <StatusTab />,
+          },
+          {
+            key: "grid",
+            label: (
+              <span>
+                <TableOutlined /> Grid
+              </span>
+            ),
+            children: <GridTab />,
           },
           {
             key: "history",
