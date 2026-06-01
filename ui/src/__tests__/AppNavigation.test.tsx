@@ -38,6 +38,9 @@ vi.mock("../api/jobs", () => ({
   validateJob: vi.fn(),
   runJobNow: vi.fn(),
   runAdhocJob: vi.fn(),
+  fetchTemplates: vi.fn().mockResolvedValue([]),
+  detachWorker: vi.fn(),
+  fetchWorkerOperations: vi.fn().mockResolvedValue({ events: [] }),
 }));
 
 vi.mock("../api/admin", () => ({
@@ -82,8 +85,8 @@ describe("App navigation and routing", () => {
     renderWithProviders(<App />);
     expect(screen.getByText("Operate")).toBeInTheDocument();
     expect(screen.getByText("Observe")).toBeInTheDocument();
-    const domainElements = screen.getAllByText((_content, element) => element?.textContent === "Domain: prod");
-    expect(domainElements.length).toBeGreaterThan(0);
+    expect(screen.getByText("Workers")).toBeInTheDocument();
+    expect(screen.getByText("Admin")).toBeInTheDocument();
   });
 
   it("routes to worker detail and allows state changes", async () => {

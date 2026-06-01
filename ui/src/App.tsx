@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { Layout, Typography, Space, Segmented, Switch, Button } from "antd";
+import { Layout, Segmented, Button } from "antd";
 import { Routes, Route, useLocation, useNavigate } from "react-router-dom";
 import { ConfigProvider, theme } from "antd";
-import { MoonOutlined, SunOutlined } from "@ant-design/icons";
 import { HomePage } from "./pages/Home";
 import { JobDetailPage } from "./pages/JobDetail";
 import { ObservePage } from "./pages/Observe";
@@ -80,17 +79,26 @@ function AppShell({ darkMode, setDarkMode }: { darkMode: boolean; setDarkMode: (
 
   if (authOpen) {
     return (
-      <Layout style={{ minHeight: "100vh", background: colors.bgSecondary }}>
-        <Content style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <AuthPrompt
-            open
-            onClose={() => {}}
-            onSuccess={() => {
-              setAuthOpen(!hasAnyToken());
-            }}
-          />
-        </Content>
-      </Layout>
+      <ConfigProvider
+        theme={{
+          algorithm: darkMode ? theme.darkAlgorithm : theme.defaultAlgorithm,
+          token: darkMode
+            ? { colorPrimary: "#38bdf8", colorBgContainer: "#131c2e", colorBgLayout: "#0c1220", fontFamily: "'IBM Plex Sans', -apple-system, system-ui, sans-serif" }
+            : { colorPrimary: "#2563eb", fontFamily: "'IBM Plex Sans', -apple-system, system-ui, sans-serif" },
+        }}
+      >
+        <Layout style={{ minHeight: "100vh", background: darkMode ? "#06090f" : colors.bgSecondary }}>
+          <Content style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <AuthPrompt
+              open
+              onClose={() => {}}
+              onSuccess={() => {
+                setAuthOpen(!hasAnyToken());
+              }}
+            />
+          </Content>
+        </Layout>
+      </ConfigProvider>
     );
   }
 
@@ -98,94 +106,97 @@ function AppShell({ darkMode, setDarkMode }: { darkMode: boolean; setDarkMode: (
     <ConfigProvider
       theme={{
         algorithm: darkMode ? theme.darkAlgorithm : theme.defaultAlgorithm,
+        token: darkMode
+          ? {
+              colorPrimary: "#38bdf8",
+              colorBgContainer: "#131c2e",
+              colorBgLayout: "#0c1220",
+              colorBgElevated: "#1c2940",
+              colorBorder: "rgba(148,163,184,0.15)",
+              colorBorderSecondary: "rgba(148,163,184,0.08)",
+              colorText: "#f1f5f9",
+              colorTextSecondary: "#94a3b8",
+              colorSuccess: "#34d399",
+              colorError: "#f87171",
+              colorWarning: "#fbbf24",
+              colorInfo: "#60a5fa",
+              fontFamily: "'IBM Plex Sans', -apple-system, system-ui, sans-serif",
+            }
+          : {
+              colorPrimary: "#2563eb",
+              fontFamily: "'IBM Plex Sans', -apple-system, system-ui, sans-serif",
+            },
       }}
     >
       <Layout>
         <Header
           style={{
-            padding: "12px 18px",
-            minHeight: 82,
+            padding: "0 24px",
+            height: 56,
             lineHeight: "normal",
             position: "sticky",
             top: 0,
             zIndex: 1000,
             width: "100%",
             background: darkMode
-              ? "linear-gradient(115deg, #020617 0%, #0f172a 55%, #1e293b 100%)"
-              : "linear-gradient(115deg, #ffffff 0%, #f8fbff 60%, #e7efff 100%)",
-            borderBottom: `1px solid ${colors.border}`,
-            boxShadow: darkMode
-              ? "0 6px 24px rgba(2, 6, 23, 0.45)"
-              : "0 6px 24px rgba(15, 23, 42, 0.08)",
+              ? "linear-gradient(180deg, #0c1220 0%, #0f1729 100%)"
+              : "linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)",
+            borderBottom: `1px solid ${darkMode ? "rgba(148,163,184,0.10)" : "rgba(15,23,42,0.08)"}`,
+            backdropFilter: "blur(12px)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
           }}
         >
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              flexWrap: "wrap",
-              gap: "14px",
-            }}
-          >
-            <Space align="center" wrap>
-              <HydraLogo size={40} color={colors.primary} />
-              <Space size={12} align="baseline" style={{ flexWrap: "wrap" }}>
-                <Typography.Title
-                  level={3}
-                  style={{
-                    color: darkMode ? "#e2e8f0" : "#0f172a",
-                    margin: 0,
-                    fontSize: "clamp(16px, 4vw, 24px)",
-                    letterSpacing: "0.2px",
-                  }}
-                >
-                  Hydra Scheduler
-                </Typography.Title>
-                <Typography.Text
-                  style={{
-                    color: darkMode ? "#94a3b8" : "#334155",
-                    fontSize: "clamp(12px, 2vw, 14px)",
-                  }}
-                  className="hide-on-mobile"
-                >
-                  Jobs, tasks, and insights at a glance
-                </Typography.Text>
-              </Space>
-            </Space>
-            <Space align="center" size={12} style={{ flexWrap: "wrap", justifyContent: "flex-end" }}>
-              <Segmented
-                className="header-nav-tabs"
-                value={currentNav}
-                options={navItems.map((item) => ({ label: item.label, value: item.value }))}
-                onChange={(value) => {
-                  const next = navItems.find((item) => item.value === value);
-                  if (next) {
-                    navigate(next.path);
-                  }
+          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+            <div
+              style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}
+              onClick={() => navigate("/")}
+            >
+              <HydraLogo size={28} color={colors.primary} />
+              <span
+                style={{
+                  fontSize: 15,
+                  fontWeight: 600,
+                  color: darkMode ? "#f1f5f9" : "#0f172a",
+                  letterSpacing: "-0.01em",
+                  fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
                 }}
-              />
-              <Switch
-                checked={darkMode}
-                onChange={(checked) => setDarkMode(checked)}
-                checkedChildren={<MoonOutlined />}
-                unCheckedChildren={<SunOutlined />}
-                aria-label="Theme mode"
-              />
-              <Button
-                type={location.pathname.startsWith("/admin") ? "primary" : "default"}
-                onClick={() => navigate("/admin")}
               >
-                Admin
-              </Button>
-              <HeaderSettings />
-            </Space>
+                Hydra
+              </span>
+            </div>
+            <Segmented
+              className="header-nav-tabs v2-nav-pill"
+              value={currentNav}
+              options={navItems.map((item) => ({ label: item.label, value: item.value }))}
+              onChange={(value) => {
+                const next = navItems.find((item) => item.value === value);
+                if (next) navigate(next.path);
+              }}
+            />
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <button
+              className="v2-theme-btn"
+              onClick={() => setDarkMode(!darkMode)}
+              title="Toggle theme"
+            >
+              {darkMode ? "☀" : "☽"}
+            </button>
+            <Button
+              type={location.pathname.startsWith("/admin") ? "primary" : "default"}
+              onClick={() => navigate("/admin")}
+            >
+              Admin
+            </Button>
+            <HeaderSettings />
           </div>
         </Header>
         <Content
-          style={{ 
-            background: colors.bgSecondary,
-            minHeight: "calc(100vh - 72px)"
+          style={{
+            background: darkMode ? "#0c1220" : colors.bgSecondary,
+            minHeight: "calc(100vh - 56px)"
           }}
           className="main-content"
         >
