@@ -75,4 +75,73 @@ describe("JobList", () => {
       expect(onDelete).toHaveBeenCalledWith(expect.objectContaining({ _id: "job-1" })),
     );
   });
+
+  it("shows a bulk action bar after selecting rows and invokes bulk handlers", async () => {
+    const onBulkPause = vi.fn();
+    const onBulkDelete = vi.fn();
+    renderWithProviders(
+      <JobList
+        jobs={jobs}
+        onSelect={vi.fn()}
+        onBulkPause={onBulkPause}
+        onBulkResume={vi.fn()}
+        onBulkDelete={onBulkDelete}
+      />,
+    );
+    const user = userEvent.setup();
+
+    // Select all via header checkbox
+    const checkboxes = screen.getAllByRole("checkbox");
+    await user.click(checkboxes[0]);
+
+    expect(await screen.findByText(/2 selected/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Pause/ }));
+    expect(onBulkPause).toHaveBeenCalledWith(expect.arrayContaining([
+      expect.objectContaining({ _id: "job-1" }),
+      expect.objectContaining({ _id: "job-2" }),
+    ]));
+
+    // Selection clears after an action
+    expect(screen.queryByText(/selected/i)).not.toBeInTheDocument();
+  });
+
+  it("does not render selection controls without bulk handlers", () => {
+    renderWithProviders(<JobList jobs={jobs} onSelect={vi.fn()} />);
+    expect(screen.queryAllByRole("checkbox")).toHaveLength(0);
+  });
+
+  it("exports the currently filtered jobs as sanitized JSON", async () => {
+    const createObjectURL = vi.fn().mockReturnValue("blob:mock-url");
+    const revokeObjectURL = vi.fn();
+    (URL as unknown as { createObjectURL: typeof createObjectURL }).createObjectURL = createObjectURL;
+    (URL as unknown as { revokeObjectURL: typeof revokeObjectURL }).revokeObjectURL = revokeObjectURL;
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+
+    renderWithProviders(<JobList jobs={jobs} onSelect={vi.fn()} />);
+    const user = userEvent.setup();
+
+    // Narrow to a single job first so only the filtered subset is exported.
+    await user.type(screen.getByPlaceholderText(/Search name/i), "billing");
+    await user.click(screen.getByRole("button", { name: /Export All/i }));
+
+    expect(createObjectURL).toHaveBeenCalledTimes(1);
+    const blob = createObjectURL.mock.calls[0][0] as Blob;
+    const text = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(blob);
+    });
+    const exported = JSON.parse(text);
+
+    expect(exported).toHaveLength(1);
+    expect(exported[0].name).toBe("billing-reconcile");
+    // Server-assigned fields must not be present in the export.
+    expect(exported[0]._id).toBeUndefined();
+    expect(exported[0].created_at).toBeUndefined();
+    expect(exported[0].updated_at).toBeUndefined();
+
+    vi.restoreAllMocks();
+  });
 });

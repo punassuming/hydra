@@ -2,13 +2,15 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, Space, Typography, Tabs, Button, Tag, Descriptions, message, Modal, Input, Form, Popconfirm } from "antd";
+import { DownloadOutlined } from "@ant-design/icons";
 import { JobForm } from "../components/JobForm";
 import { JobRuns } from "../components/JobRuns";
 import { JobGridView } from "../components/JobGridView";
 import { JobGanttView } from "../components/JobGanttView";
 import { JobGraphView } from "../components/JobGraphView";
-import { JobPayload, ValidationResult, deleteJob, fetchJob, fetchJobRuns, runJobNow, killRun, backfillJob, updateJob, validateJob } from "../api/jobs";
+import { JobPayload, ValidationResult, deleteJob, fetchJob, fetchJobRuns, runJobNow, killRun, backfillJob, toExportPayload, updateJob, validateJob } from "../api/jobs";
 import { useActiveDomain } from "../context/ActiveDomainContext";
+import { downloadJson, slugify } from "../utils/download";
 
 export function JobDetailPage() {
   const { jobId } = useParams<{ jobId: string }>();
@@ -317,6 +319,12 @@ export function JobDetailPage() {
             </Button>
             <Button onClick={handleRunNow} loading={manualRun.isPending}>Run Now</Button>
             <Button onClick={handleBackfill} loading={backfillMutation.isPending}>Backfill</Button>
+            <Button
+              icon={<DownloadOutlined />}
+              onClick={() => downloadJson(`${slugify(job.name)}.json`, toExportPayload(job))}
+            >
+              Export JSON
+            </Button>
             <Popconfirm
               title={`Delete job "${job.name}"?`}
               description="The definition and pending queue entries are removed. Run history is preserved."

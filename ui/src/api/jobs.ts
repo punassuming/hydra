@@ -41,6 +41,32 @@ export interface JobPayload {
   sla_max_duration_seconds?: number | null;
 }
 
+/** Strip server-assigned fields (id, domain, timestamps, computed next_run_at) so the
+ * result can be re-imported as-is via createJob / Admin's Import Jobs flow. */
+export function toExportPayload(job: JobDefinition): JobPayload {
+  return {
+    name: job.name,
+    user: job.user,
+    priority: job.priority,
+    affinity: job.affinity,
+    executor: job.executor,
+    retries: job.retries,
+    timeout: job.timeout,
+    bypass_concurrency: job.bypass_concurrency,
+    source: job.source ?? null,
+    schedule: { ...job.schedule, next_run_at: undefined },
+    completion: job.completion,
+    tags: job.tags,
+    depends_on: job.depends_on,
+    max_retries: job.max_retries,
+    retry_delay_seconds: job.retry_delay_seconds,
+    on_failure_webhooks: job.on_failure_webhooks,
+    on_failure_email_to: job.on_failure_email_to,
+    on_failure_email_credential_ref: job.on_failure_email_credential_ref,
+    sla_max_duration_seconds: job.sla_max_duration_seconds ?? null,
+  };
+}
+
 export interface ValidationResult {
   valid: boolean;
   errors: string[];
