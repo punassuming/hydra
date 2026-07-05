@@ -24,7 +24,13 @@ def _credential_domain(request: Request) -> str:
     """Resolve the effective domain for credential operations."""
     domain = getattr(request.state, "domain", "prod")
     force_domain = (request.query_params.get("domain") or "").strip()
-    return force_domain or domain
+    if not force_domain:
+        return domain
+    validated = _validated_domain_name(force_domain)
+    r = get_redis()
+    if not r.sismember("hydra:domains", validated):
+        raise HTTPException(status_code=404, detail=f"domain '{validated}' not found")
+    return validated
 
 
 def _validated_domain_name(domain: str) -> str:
@@ -209,6 +215,11 @@ def list_credentials(request: Request) -> Dict:
     _require_admin(request)
     db = get_db()
     force_domain = (request.query_params.get("domain") or "").strip()
+    if force_domain:
+        force_domain = _validated_domain_name(force_domain)
+        r = get_redis()
+        if not r.sismember("hydra:domains", force_domain):
+            raise HTTPException(status_code=404, detail=f"domain '{force_domain}' not found")
     query = {"domain": force_domain} if force_domain else {}
     docs = list(db.credentials.find(query))
     refs = []

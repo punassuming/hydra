@@ -40,6 +40,9 @@ def _sanitize_job_response(job: JobDefinition) -> dict:
     executor = data.get("executor") or {}
     if executor.get("type") == "sql" and "connection_uri" in executor:
         executor["connection_uri"] = MASKED_SECRET if executor["connection_uri"] else None
+    kerberos = executor.get("kerberos") or {}
+    if kerberos.get("keytab"):
+        kerberos["keytab"] = MASKED_SECRET
     return data
 
 

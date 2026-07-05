@@ -25,6 +25,16 @@ def _inject_token_into_url(url: str, token: str) -> str:
     return urlunparse((parsed.scheme, netloc, parsed.path, parsed.params, parsed.query, parsed.fragment))
 
 
+def _strip_credentials_from_remote(dest: str, clean_url: str) -> None:
+    """Rewrite git remote URL to remove embedded credentials from .git/config."""
+    git = _git_bin()
+    try:
+        subprocess.run([git, "remote", "set-url", "origin", clean_url],
+                       cwd=dest, check=False, capture_output=True)
+    except Exception:
+        pass
+
+
 def fetch_git_source(url: str, ref: str, dest: str, token: str = "", sparse_path: str = "") -> None:
     """
     Clones a git repository to the destination directory and checks out the reference.
@@ -41,12 +51,12 @@ def fetch_git_source(url: str, ref: str, dest: str, token: str = "", sparse_path
     clone_url = _inject_token_into_url(url, token) if token else url
 
     if sparse_path:
-        _sparse_clone(clone_url, ref, dest, sparse_path)
+        _sparse_clone(clone_url, ref, dest, sparse_path, clean_url=url)
     else:
-        _full_clone(clone_url, ref, dest)
+        _full_clone(clone_url, ref, dest, clean_url=url)
 
 
-def _full_clone(clone_url: str, ref: str, dest: str) -> None:
+def _full_clone(clone_url: str, ref: str, dest: str, clean_url: str = "") -> None:
     """Standard shallow-then-full clone strategy."""
     git = _git_bin()
     cmd_shallow = [git, "clone", "-q", "--depth", "1", clone_url, dest]
@@ -60,8 +70,11 @@ def _full_clone(clone_url: str, ref: str, dest: str) -> None:
     if ref:
         subprocess.run([git, "checkout", ref], cwd=dest, check=True)
 
+    if clean_url and clean_url != clone_url:
+        _strip_credentials_from_remote(dest, clean_url)
 
-def _sparse_clone(clone_url: str, ref: str, dest: str, sparse_path: str) -> None:
+
+def _sparse_clone(clone_url: str, ref: str, dest: str, sparse_path: str, clean_url: str = "") -> None:
     """Clone using sparse-checkout so only *sparse_path* is materialized."""
     git = _git_bin()
     os.makedirs(dest, exist_ok=True)
@@ -79,3 +92,6 @@ def _sparse_clone(clone_url: str, ref: str, dest: str, sparse_path: str) -> None
         fetch_cmd_full = [git, "fetch", "-q", "origin", ref or "HEAD"]
         subprocess.run(fetch_cmd_full, cwd=dest, check=True)
     subprocess.run([git, "checkout", ref or "FETCH_HEAD"], cwd=dest, check=True)
+
+    if clean_url and clean_url != clone_url:
+        _strip_credentials_from_remote(dest, clean_url)
