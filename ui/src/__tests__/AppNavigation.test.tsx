@@ -28,19 +28,24 @@ vi.mock("../api/jobs", () => ({
   fetchHistory: vi.fn().mockResolvedValue([]),
   fetchJobOverview: vi.fn().mockResolvedValue([]),
   fetchQueueOverview: vi.fn().mockResolvedValue({ pending: [], upcoming: [] }),
+  fetchQueuePressure: vi.fn().mockResolvedValue({}),
+  fetchJobStatistics: vi.fn().mockResolvedValue({}),
   fetchJobRuns: vi.fn().mockResolvedValue([]),
   fetchJob: vi.fn().mockResolvedValue(null),
   fetchJobGrid: vi.fn().mockResolvedValue({ rows: [] }),
   fetchJobGantt: vi.fn().mockResolvedValue({ rows: [] }),
   fetchJobGraph: vi.fn().mockResolvedValue({ nodes: [], links: [] }),
+  fetchWorkerMetrics: vi.fn().mockResolvedValue({ points: [] }),
+  fetchWorkerTimeline: vi.fn().mockResolvedValue({ entries: [], max_concurrency: 1, window_start_ts: 0, window_end_ts: 0 }),
+  fetchWorkerOperations: vi.fn().mockResolvedValue({ events: [] }),
+  detachWorker: vi.fn().mockResolvedValue({ ok: true, worker_id: "", detached: true, requeued_jobs: 0 }),
+  fetchTemplates: vi.fn().mockResolvedValue([]),
+  generateJob: vi.fn(),
   createJob: vi.fn(),
   updateJob: vi.fn(),
   validateJob: vi.fn(),
   runJobNow: vi.fn(),
   runAdhocJob: vi.fn(),
-  fetchTemplates: vi.fn().mockResolvedValue([]),
-  detachWorker: vi.fn(),
-  fetchWorkerOperations: vi.fn().mockResolvedValue({ events: [] }),
 }));
 
 vi.mock("../api/admin", () => ({
@@ -86,7 +91,7 @@ describe("App navigation and routing", () => {
     expect(screen.getByText("Operate")).toBeInTheDocument();
     expect(screen.getByText("Observe")).toBeInTheDocument();
     expect(screen.getByText("Workers")).toBeInTheDocument();
-    expect(screen.getByText("Admin")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Admin/i })).toBeInTheDocument();
   });
 
   it("routes to worker detail and allows state changes", async () => {

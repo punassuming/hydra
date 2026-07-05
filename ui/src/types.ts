@@ -71,6 +71,24 @@ export type Executor =
       workdir?: string | null;
       impersonate_user?: string | null;
       kerberos?: KerberosConfig | null;
+    }
+  | {
+      type: "http";
+      url: string;
+      method?: string;
+      body?: string;
+      headers?: Record<string, string>;
+      expected_status?: number;
+      timeout_seconds?: number;
+      env?: Record<string, string>;
+    }
+  | {
+      type: "sensor";
+      condition: string;
+      poll_interval?: number;
+      max_wait?: number;
+      env?: Record<string, string>;
+      workdir?: string | null;
     };
 
 export interface KerberosConfig {
