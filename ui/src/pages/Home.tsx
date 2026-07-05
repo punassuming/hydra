@@ -8,7 +8,7 @@ import { JobRuns } from "../components/JobRuns";
 import { EventsFeed } from "../components/EventsFeed";
 import { TemplateDrawer } from "../components/TemplateDrawer";
 import { useSchedulerEvents } from "../hooks/useEvents";
-import { createJob, fetchJobs, fetchQueueOverview, JobPayload, runAdhocJob, runJobNow, updateJob, validateJob } from "../api/jobs";
+import { createJob, deleteJob, fetchJobs, fetchQueueOverview, JobPayload, runAdhocJob, runJobNow, setJobEnabled, updateJob, validateJob } from "../api/jobs";
 import { useActiveDomain } from "../context/ActiveDomainContext";
 import { JobsDashboard } from "../components/JobsDashboard";
 import { JobDefinition, QueueJobItem } from "../types";
@@ -76,6 +76,26 @@ export function HomePage() {
       setSelectedJobId(data._id);
       setStatusMessage("Adhoc job queued");
       setModalVisible(false);
+    },
+    onError: (err: Error) => setStatusMessage(err.message),
+  });
+
+  const toggleEnabledMutation = useMutation({
+    mutationFn: ({ job, enabled }: { job: JobDefinition; enabled: boolean }) => setJobEnabled(job, enabled),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["jobs", domain] });
+      setStatusMessage(`Job ${data.name} ${data.schedule.enabled ? "resumed" : "paused"}`);
+    },
+    onError: (err: Error) => setStatusMessage(err.message),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (job: JobDefinition) => deleteJob(job._id),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["jobs", domain] });
+      queryClient.invalidateQueries({ queryKey: ["queue-overview", domain] });
+      if (selectedJobId === data.job_id) setSelectedJobId(null);
+      setStatusMessage("Job deleted");
     },
     onError: (err: Error) => setStatusMessage(err.message),
   });
@@ -254,6 +274,9 @@ export function HomePage() {
           onSelect={(job) => setSelectedJobId(job._id)}
           onEdit={() => setModalVisible(true)}
           onClone={handleClone}
+          onToggleEnabled={(job, enabled) => toggleEnabledMutation.mutate({ job, enabled })}
+          onDelete={(job) => deleteMutation.mutate(job)}
+          togglingJobId={toggleEnabledMutation.isPending ? toggleEnabledMutation.variables?.job._id : null}
         />
       </Card>
 
