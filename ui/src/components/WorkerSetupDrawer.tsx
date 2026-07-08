@@ -150,15 +150,16 @@ PYTHONUNBUFFERED=1
 .venv\\Scripts\\python.exe -m worker bootstrap install`
       );
     }
-    // kubernetes
+    // kubernetes — start-domain-workers.sh rotates its own token + Redis ACL via
+    // ADMIN_TOKEN and takes `<domain> [scale]` as positional args; it does not
+    // read API_TOKEN/REDIS_PASSWORD/REDIS_URL from the environment.
     return (
-      `# Create K8s secret and scale workers
+      `# Rotates a fresh domain token + Redis ACL and scales the K8s deployment.
+ADMIN_TOKEN=<your-admin-token> \\
 WORKER_BACKEND=k8s \\
 K8S_NAMESPACE=hydra \\
 K8S_DEPLOYMENT=hydra-worker \\
-` +
-      envPrefix.map((e) => `${e} \\`).join("\n") +
-      "\n./scripts/start-domain-workers.sh 3"
+./scripts/start-domain-workers.sh ${effectiveDomain} 2`
     );
   }, [mode, effectiveDomain, effectiveToken, effectivePassword, redisPassword, workerRedisUrl, maxConcurrency, tagsCleaned, tags]);
 
@@ -166,7 +167,7 @@ K8S_DEPLOYMENT=hydra-worker \\
     docker: "Add --scale worker=N to run N workers in parallel. Workers auto-restart on crash (restart: unless-stopped).",
     bare: "Use a process supervisor (systemd, supervisord) to keep the worker alive. Set WORKER_ID to a unique value when running multiple workers on the same host.",
     windows: "The bootstrap installs a Task Scheduler watchdog that restarts the worker automatically. See docs/windows-worker-bootstrap.md for a full guide.",
-    kubernetes: "The script creates a K8s Secret and scales the Deployment. Manifests are in deploy/k8s/worker-deployment.yaml.",
+    kubernetes: "This script rotates a fresh domain token + Redis ACL itself and writes them into a K8s Secret before scaling — the domain token / Redis fields above are not used for this path. Requires an admin token and kubectl access. Manifests are in deploy/k8s/worker-deployment.yaml.",
   };
 
   return (

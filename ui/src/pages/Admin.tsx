@@ -867,9 +867,12 @@ docker compose -f docker-compose.worker.yml up -d --build`} />
           </Typography.Text>
           <CopyableCode code={`DOMAIN=${tokenModal.domain ?? activeDomain} API_TOKEN=${tokenModal.token ?? "<domain_token>"} \\
 REDIS_URL=redis://<redis-host>:6379/0 \\
+REDIS_PASSWORD=<worker_redis_acl_password> \\
 docker compose -f docker-compose.worker.yml up -d --build`} />
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            To use Redis ACL isolation, also run <Typography.Text code>Rotate Worker Redis ACL</Typography.Text> and add <Typography.Text code>REDIS_PASSWORD</Typography.Text>.
+            Workers require <Typography.Text code>REDIS_PASSWORD</Typography.Text> by default (<Typography.Text code>WORKER_REQUIRE_REDIS_ACL=true</Typography.Text>) — the
+            worker exits on startup without it. Run <Typography.Text code>Rotate Worker Redis ACL</Typography.Text> below to get a real value, or
+            set <Typography.Text code>WORKER_REQUIRE_REDIS_ACL=false</Typography.Text> if this Redis instance has no ACL configured.
           </Typography.Text>
         </Space>
       </Modal>
@@ -901,7 +904,7 @@ docker compose -f docker-compose.worker.yml up -d --build`} />
               </Typography.Text>
               <Input
                 readOnly
-                value={`hydra_${redisAclModal.domain ?? activeDomain}`}
+                value={redisAclModal.acl?.username ?? redisAclModal.domain ?? activeDomain}
                 style={{ fontFamily: "monospace" }}
               />
             </div>
