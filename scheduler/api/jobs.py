@@ -40,6 +40,9 @@ def _sanitize_job_response(job: JobDefinition) -> dict:
     executor = data.get("executor") or {}
     if executor.get("type") == "sql" and "connection_uri" in executor:
         executor["connection_uri"] = MASKED_SECRET if executor["connection_uri"] else None
+    kerberos = executor.get("kerberos") or {}
+    if kerberos.get("keytab"):
+        kerberos["keytab"] = MASKED_SECRET
     return data
 
 
@@ -289,6 +292,32 @@ def update_job(job_id: str, updates: JobUpdate, request: Request):
     db.job_definitions.replace_one({"_id": job_id}, job_def.to_mongo())
     event_bus.publish("job_updated", {"job_id": job_id, "domain": job_def.domain})
     return _sanitize_job_response(job_def)
+
+
+@router.delete("/jobs/{job_id}")
+def delete_job(job_id: str, request: Request):
+    """Delete a job definition and remove any pending queue entries for it.
+
+    Historical runs are preserved; only the definition and pending work are removed.
+    """
+    db = get_db()
+    existing = db.job_definitions.find_one({"_id": job_id})
+    if not existing:
+        raise HTTPException(status_code=404, detail="job not found")
+    domain = getattr(request.state, "domain", "prod")
+    is_admin = getattr(request.state, "is_admin", False)
+    job_domain = existing.get("domain", "prod")
+    if not is_admin and job_domain != domain:
+        raise HTTPException(status_code=403, detail="forbidden")
+
+    db.job_definitions.delete_one({"_id": job_id})
+
+    r = get_redis()
+    r.zrem(f"job_queue:{job_domain}:pending", job_id)
+    r.delete(f"job_enqueue_meta:{job_domain}:{job_id}")
+
+    event_bus.publish("job_deleted", {"job_id": job_id, "domain": job_domain, "name": existing.get("name")})
+    return {"job_id": job_id, "deleted": True}
 
 
 @router.post("/jobs/{job_id}/validate", response_model=JobValidationResult)

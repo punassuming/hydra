@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Card, Form, Input, Space, Table, Typography, Button, message, Modal, Input as AntInput, Select } from "antd";
+import { Card, Form, Input, Space, Table, Typography, Button, message, Modal, Input as AntInput, Select, Divider, Tooltip } from "antd";
+import { CopyOutlined, CheckOutlined } from "@ant-design/icons";
 import {
   fetchDomains,
   createDomain,
@@ -32,6 +33,46 @@ import { setTokenForDomain, getEffectiveToken, withTempToken, hasTokenForDomain,
 import { createJob } from "../api/jobs";
 import { useEffect, useState } from "react";
 import { useActiveDomain } from "../context/ActiveDomainContext";
+
+function CopyableCode({ code }: { code: string }) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = () => {
+    navigator.clipboard?.writeText(code).then(
+      () => { setCopied(true); setTimeout(() => setCopied(false), 2000); },
+      () => {},
+    );
+  };
+  return (
+    <div style={{ position: "relative" }}>
+      <pre
+        style={{
+          background: "var(--v2-bg-0, #0a0e14)",
+          border: "1px solid var(--v2-border, rgba(0,0,0,0.15))",
+          borderRadius: 6,
+          padding: "10px 44px 10px 12px",
+          fontSize: 12,
+          lineHeight: 1.7,
+          overflowX: "auto",
+          whiteSpace: "pre-wrap",
+          wordBreak: "break-all",
+          margin: 0,
+          fontFamily: "var(--font-mono, monospace)",
+          color: "var(--v2-text-1, #e2e8f0)",
+        }}
+      >
+        {code}
+      </pre>
+      <Tooltip title={copied ? "Copied!" : "Copy"}>
+        <Button
+          size="small"
+          icon={copied ? <CheckOutlined /> : <CopyOutlined />}
+          onClick={handleCopy}
+          style={{ position: "absolute", top: 6, right: 6, opacity: 0.75 }}
+        />
+      </Tooltip>
+    </div>
+  );
+}
 
 function normalizeCredentialPayload(values: any): CredentialPayload {
   const payload: CredentialPayload = {
@@ -396,25 +437,21 @@ export function AdminPage() {
           : "Manage your active domain settings and credentials with your domain token."}
       </Typography.Text>
       <Card title="Worker Auth & Setup">
-        <Space direction="vertical" style={{ width: "100%" }} size={6}>
+        <Space direction="vertical" style={{ width: "100%" }} size={8}>
           <Typography.Text>
             Worker authentication is a pair: <Typography.Text code>domain + token</Typography.Text>. Do not combine them into a single string.
           </Typography.Text>
-          <Typography.Text>
-            1) Create or rotate a domain token in this page. 2) Start worker with that domain + token.
+          <Typography.Text type="secondary">
+            1) Create or rotate a domain token below. &nbsp;2) Start worker with that domain + token.
+            Optional: rotate the worker Redis ACL and pass <Typography.Text code>REDIS_PASSWORD</Typography.Text> for extra isolation.
           </Typography.Text>
-          <Typography.Text>
-            Optional hardening: rotate worker Redis ACL and run worker with <Typography.Text code>REDIS_PASSWORD</Typography.Text>.
-            Redis username is derived from <Typography.Text code>DOMAIN</Typography.Text>.
-          </Typography.Text>
-          <Typography.Paragraph style={{ marginBottom: 0 }}>
-            <pre style={{ margin: 0, whiteSpace: "pre-wrap" }}>
-{`DOMAIN=${activeDomain} API_TOKEN=<domain_token> \\
-REDIS_URL=redis://localhost:6379/0 \\
+          <CopyableCode code={`DOMAIN=${activeDomain} API_TOKEN=<domain_token> \\
+REDIS_URL=redis://<redis-host>:6379/0 \\
 REDIS_PASSWORD=<worker_redis_acl_password> \\
-docker compose -f docker-compose.worker.yml up --build`}
-            </pre>
-          </Typography.Paragraph>
+docker compose -f docker-compose.worker.yml up -d --build`} />
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            After rotating a token below, the modal will show a ready-to-run command with the actual credential values filled in.
+          </Typography.Text>
         </Space>
       </Card>
       <Card title={`Current Domain Settings (${activeDomain})`}>
@@ -804,45 +841,94 @@ docker compose -f docker-compose.worker.yml up --build`}
         footer={null}
         onCancel={() => setTokenModal({ open: false })}
         title={`Domain Token – ${tokenModal.domain}`}
+        width={560}
       >
-        <Space direction="vertical" style={{ width: "100%" }}>
-          <Typography.Text strong>Copy this token for workers and client access. It will not be shown again.</Typography.Text>
+        <Space direction="vertical" style={{ width: "100%" }} size={12}>
+          <Typography.Text strong>
+            Copy this token. It will not be shown again.
+          </Typography.Text>
           <Input.Password
             readOnly
             value={tokenModal.token ?? ""}
             style={{ fontFamily: "monospace" }}
           />
-          <Button onClick={() => { navigator.clipboard.writeText(tokenModal.token ?? ""); message.success("Token copied"); }}>
+          <Button
+            icon={<CopyOutlined />}
+            onClick={() => {
+              navigator.clipboard?.writeText(tokenModal.token ?? "");
+              message.success("Token copied");
+            }}
+          >
             Copy Token
           </Button>
+          <Divider style={{ margin: "4px 0" }} />
+          <Typography.Text type="secondary">
+            Ready-to-run startup command — token is substituted in:
+          </Typography.Text>
+          <CopyableCode code={`DOMAIN=${tokenModal.domain ?? activeDomain} API_TOKEN=${tokenModal.token ?? "<domain_token>"} \\
+REDIS_URL=redis://<redis-host>:6379/0 \\
+REDIS_PASSWORD=<worker_redis_acl_password> \\
+docker compose -f docker-compose.worker.yml up -d --build`} />
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            Workers require <Typography.Text code>REDIS_PASSWORD</Typography.Text> by default (<Typography.Text code>WORKER_REQUIRE_REDIS_ACL=true</Typography.Text>) — the
+            worker exits on startup without it. Run <Typography.Text code>Rotate Worker Redis ACL</Typography.Text> below to get a real value, or
+            set <Typography.Text code>WORKER_REQUIRE_REDIS_ACL=false</Typography.Text> if this Redis instance has no ACL configured.
+          </Typography.Text>
         </Space>
       </Modal>
       <Modal
         open={redisAclModal.open}
         footer={null}
         onCancel={() => setRedisAclModal({ open: false })}
-        title={`Worker Redis ACL${redisAclModal.domain ? ` – ${redisAclModal.domain}` : ""}`}
+        title={`Worker Redis ACL – ${redisAclModal.domain ?? activeDomain}`}
+        width={580}
       >
-        <Space direction="vertical" style={{ width: "100%" }}>
-          <Typography.Text strong>Use these for workers in this domain. Credentials will not be shown again.</Typography.Text>
-          <Input.Password
-            readOnly
-            value={redisAclModal.acl?.password ?? ""}
-            addonBefore="REDIS_PASSWORD"
-            style={{ fontFamily: "monospace" }}
-          />
-          <Button onClick={() => { navigator.clipboard.writeText(redisAclModal.acl?.password ?? ""); message.success("Password copied"); }}>
+        <Space direction="vertical" style={{ width: "100%" }} size={12}>
+          <Typography.Text strong>
+            Use these credentials for workers in this domain. They will not be shown again.
+          </Typography.Text>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            <div>
+              <Typography.Text type="secondary" style={{ fontSize: 12, display: "block", marginBottom: 4 }}>
+                REDIS_PASSWORD
+              </Typography.Text>
+              <Input.Password
+                readOnly
+                value={redisAclModal.acl?.password ?? ""}
+                style={{ fontFamily: "monospace" }}
+              />
+            </div>
+            <div>
+              <Typography.Text type="secondary" style={{ fontSize: 12, display: "block", marginBottom: 4 }}>
+                Redis Username
+              </Typography.Text>
+              <Input
+                readOnly
+                value={redisAclModal.acl?.username ?? redisAclModal.domain ?? activeDomain}
+                style={{ fontFamily: "monospace" }}
+              />
+            </div>
+          </div>
+          <Button
+            icon={<CopyOutlined />}
+            onClick={() => {
+              navigator.clipboard?.writeText(redisAclModal.acl?.password ?? "");
+              message.success("Redis password copied");
+            }}
+          >
             Copy Password
           </Button>
-          <Typography.Text type="secondary">Worker startup example:</Typography.Text>
-          <Typography.Paragraph style={{ marginBottom: 0 }}>
-            <pre style={{ margin: 0, whiteSpace: "pre-wrap" }}>
-{`DOMAIN=${redisAclModal.domain ?? activeDomain} API_TOKEN=<domain_token> \\
-REDIS_URL=redis://localhost:6379/0 \\
-REDIS_PASSWORD=<worker_redis_acl_password> \\
-docker compose -f docker-compose.worker.yml up --build`}
-            </pre>
-          </Typography.Paragraph>
+          <Divider style={{ margin: "4px 0" }} />
+          <Typography.Text type="secondary">
+            Ready-to-run startup command — Redis password is substituted in:
+          </Typography.Text>
+          <CopyableCode code={`DOMAIN=${redisAclModal.domain ?? activeDomain} API_TOKEN=<domain_token> \\
+REDIS_URL=redis://<redis-host>:6379/0 \\
+REDIS_PASSWORD=${redisAclModal.acl?.password ?? "<redis_password>"} \\
+docker compose -f docker-compose.worker.yml up -d --build`} />
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            Replace <Typography.Text code>{"<domain_token>"}</Typography.Text> with your domain token from above. The Redis username is automatically derived from <Typography.Text code>DOMAIN</Typography.Text>.
+          </Typography.Text>
         </Space>
       </Modal>
       <Modal

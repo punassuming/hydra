@@ -1,10 +1,12 @@
-import { Button, Card, Table, Tag, Space, Segmented, Row, Col, Tooltip } from "antd";
-import { CopyOutlined } from "@ant-design/icons";
+import { Button, Card, Table, Tag, Space, Segmented, Row, Col, Tooltip, Input, Select, Switch, Popconfirm, Typography } from "antd";
+import { CopyOutlined, DeleteOutlined, SearchOutlined, PauseCircleOutlined, PlayCircleOutlined, DownloadOutlined } from "@ant-design/icons";
 import { Link } from "react-router-dom";
 import { JobDefinition } from "../types";
 import { JobCard } from "./JobCard";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { AppstoreOutlined, UnorderedListOutlined } from "@ant-design/icons";
+import { toExportPayload } from "../api/jobs";
+import { downloadJson } from "../utils/download";
 
 interface Props {
   jobs?: JobDefinition[];
@@ -14,18 +16,87 @@ interface Props {
   onEdit?: () => void;
   onRun?: (jobId: string) => void;
   onClone?: (job: JobDefinition) => void;
+  onToggleEnabled?: (job: JobDefinition, enabled: boolean) => void;
+  onDelete?: (job: JobDefinition) => void;
+  togglingJobId?: string | null;
+  onBulkPause?: (jobs: JobDefinition[]) => void;
+  onBulkResume?: (jobs: JobDefinition[]) => void;
+  onBulkDelete?: (jobs: JobDefinition[]) => void;
+  bulkActionPending?: boolean;
 }
 
-export function JobList({ jobs, onSelect, selectedId, loading, onEdit, onRun, onClone }: Props) {
+export function JobList({
+  jobs,
+  onSelect,
+  selectedId,
+  loading,
+  onEdit,
+  onRun,
+  onClone,
+  onToggleEnabled,
+  onDelete,
+  togglingJobId,
+  onBulkPause,
+  onBulkResume,
+  onBulkDelete,
+  bulkActionPending,
+}: Props) {
   const [viewMode, setViewMode] = useState<"table" | "card">("table");
-  
-  const dataSource = (jobs ?? []).map((job) => ({ ...job, key: job._id }));
+  const [searchText, setSearchText] = useState("");
+  const [tagFilter, setTagFilter] = useState<string[]>([]);
+  const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
+
+  const availableTags = useMemo(
+    () => Array.from(new Set((jobs ?? []).flatMap((j) => j.tags ?? []))).sort(),
+    [jobs],
+  );
+
+  const filteredJobs = useMemo(() => {
+    let result = jobs ?? [];
+    const needle = searchText.trim().toLowerCase();
+    if (needle) {
+      result = result.filter(
+        (j) =>
+          j.name.toLowerCase().includes(needle) ||
+          j._id.toLowerCase().includes(needle) ||
+          j.user.toLowerCase().includes(needle) ||
+          (j.tags ?? []).some((t) => t.toLowerCase().includes(needle)),
+      );
+    }
+    if (tagFilter.length) {
+      result = result.filter((j) => tagFilter.every((t) => (j.tags ?? []).includes(t)));
+    }
+    return result;
+  }, [jobs, searchText, tagFilter]);
+
+  const dataSource = filteredJobs.map((job) => ({ ...job, key: job._id }));
+  const bulkEnabled = Boolean(onBulkPause || onBulkResume || onBulkDelete);
+  const selectedJobs = useMemo(
+    () => dataSource.filter((j) => selectedRowKeys.includes(j.key)),
+    [dataSource, selectedRowKeys],
+  );
+
+  const clearSelection = () => setSelectedRowKeys([]);
+
   const columns = [
     {
       title: "Name",
       dataIndex: "name",
       key: "name",
-      render: (_: unknown, record: JobDefinition) => <Link to={`/jobs/${record._id}`}>{record.name}</Link>,
+      render: (_: unknown, record: JobDefinition) => (
+        <Space direction="vertical" size={0}>
+          <Link to={`/jobs/${record._id}`}>{record.name}</Link>
+          {(record.tags ?? []).length > 0 && (
+            <Space size={2} wrap>
+              {(record.tags ?? []).map((t) => (
+                <Tag key={t} style={{ fontSize: 11, lineHeight: "16px", marginRight: 0 }}>
+                  {t}
+                </Tag>
+              ))}
+            </Space>
+          )}
+        </Space>
+      ),
     },
     { title: "Domain", dataIndex: "domain", key: "domain", render: (value?: string) => value ?? "prod" },
     { title: "User", dataIndex: "user", key: "user" },
@@ -44,7 +115,7 @@ export function JobList({ jobs, onSelect, selectedId, loading, onEdit, onRun, on
           <br />
           <small>
             {!record.schedule.enabled
-              ? "disabled"
+              ? "paused"
               : record.schedule.next_run_at
                 ? new Date(record.schedule.next_run_at).toLocaleString()
                 : record.schedule.mode === "immediate"
@@ -54,6 +125,29 @@ export function JobList({ jobs, onSelect, selectedId, loading, onEdit, onRun, on
         </div>
       ),
     },
+    ...(onToggleEnabled
+      ? [
+          {
+            title: "Enabled",
+            key: "enabled",
+            width: 80,
+            render: (_: unknown, record: JobDefinition) => (
+              <Tooltip title={record.schedule.enabled ? "Pause scheduling" : "Resume scheduling"}>
+                <Switch
+                  size="small"
+                  checked={record.schedule.enabled}
+                  loading={togglingJobId === record._id}
+                  onChange={(checked, e) => {
+                    e?.stopPropagation();
+                    onToggleEnabled(record, checked);
+                  }}
+                  onClick={(_checked, e) => e?.stopPropagation()}
+                />
+              </Tooltip>
+            ),
+          },
+        ]
+      : []),
     { title: "Retries", dataIndex: "retries", key: "retries" },
     {
       title: "Updated",
@@ -61,23 +155,49 @@ export function JobList({ jobs, onSelect, selectedId, loading, onEdit, onRun, on
       key: "updated_at",
       render: (value: string) => new Date(value).toLocaleString(),
     },
-    ...(onClone
+    ...(onClone || onDelete
       ? [
           {
             title: "",
             key: "actions",
-            width: 48,
+            width: 88,
             render: (_: unknown, record: JobDefinition) => (
-              <Tooltip title="Duplicate job">
-                <Button
-                  size="small"
-                  icon={<CopyOutlined />}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onClone(record);
-                  }}
-                />
-              </Tooltip>
+              <Space size={4}>
+                {onClone && (
+                  <Tooltip title="Duplicate job">
+                    <Button
+                      size="small"
+                      icon={<CopyOutlined />}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onClone(record);
+                      }}
+                    />
+                  </Tooltip>
+                )}
+                {onDelete && (
+                  <Popconfirm
+                    title={`Delete job "${record.name}"?`}
+                    description="The definition and pending queue entries are removed. Run history is preserved."
+                    okText="Delete"
+                    okButtonProps={{ danger: true }}
+                    onConfirm={(e) => {
+                      e?.stopPropagation();
+                      onDelete(record);
+                    }}
+                    onCancel={(e) => e?.stopPropagation()}
+                  >
+                    <Tooltip title="Delete job">
+                      <Button
+                        size="small"
+                        danger
+                        icon={<DeleteOutlined />}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    </Tooltip>
+                  </Popconfirm>
+                )}
+              </Space>
             ),
           },
         ]
@@ -85,23 +205,126 @@ export function JobList({ jobs, onSelect, selectedId, loading, onEdit, onRun, on
   ];
 
   return (
-    <Card 
+    <Card
       title={
         <Space style={{ justifyContent: "space-between", width: "100%", flexWrap: "wrap" }}>
           <span>Jobs</span>
-          <Segmented
-            value={viewMode}
-            onChange={(value) => setViewMode(value as "table" | "card")}
-            options={[
-              { label: "Table", value: "table", icon: <UnorderedListOutlined /> },
-              { label: "Cards", value: "card", icon: <AppstoreOutlined /> },
-            ]}
-          />
+          <Space wrap>
+            <Input
+              allowClear
+              placeholder="Search name, id, user, tag…"
+              prefix={<SearchOutlined style={{ opacity: 0.5 }} />}
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+              style={{ width: 220 }}
+              size="small"
+            />
+            <Select
+              mode="multiple"
+              allowClear
+              placeholder="Filter tags"
+              value={tagFilter}
+              onChange={setTagFilter}
+              options={availableTags.map((t) => ({ label: t, value: t }))}
+              style={{ minWidth: 140 }}
+              size="small"
+              maxTagCount="responsive"
+            />
+            <Tooltip title="Export the jobs currently shown as re-importable JSON">
+              <Button
+                size="small"
+                icon={<DownloadOutlined />}
+                disabled={!filteredJobs.length}
+                onClick={() =>
+                  downloadJson(
+                    `hydra-jobs-export-${new Date().toISOString().slice(0, 10)}.json`,
+                    filteredJobs.map(toExportPayload),
+                  )
+                }
+              >
+                Export All
+              </Button>
+            </Tooltip>
+            <Segmented
+              value={viewMode}
+              onChange={(value) => setViewMode(value as "table" | "card")}
+              options={[
+                { label: "Table", value: "table", icon: <UnorderedListOutlined /> },
+                { label: "Cards", value: "card", icon: <AppstoreOutlined /> },
+              ]}
+            />
+          </Space>
         </Space>
       }
       bordered={false}
       loading={loading}
     >
+      {(searchText || tagFilter.length > 0) && (
+        <div style={{ marginBottom: 8, fontSize: 12, opacity: 0.65 }}>
+          Showing {filteredJobs.length} of {(jobs ?? []).length} jobs
+        </div>
+      )}
+      {bulkEnabled && viewMode === "table" && selectedRowKeys.length > 0 && (
+        <Space
+          style={{
+            marginBottom: 12,
+            padding: "8px 12px",
+            background: "rgba(37, 99, 235, 0.08)",
+            borderRadius: 6,
+            width: "100%",
+          }}
+          wrap
+        >
+          <Typography.Text strong style={{ marginRight: 8 }}>
+            {selectedRowKeys.length} selected
+          </Typography.Text>
+          {onBulkPause && (
+            <Button
+              size="small"
+              icon={<PauseCircleOutlined />}
+              loading={bulkActionPending}
+              onClick={() => {
+                onBulkPause(selectedJobs);
+                clearSelection();
+              }}
+            >
+              Pause
+            </Button>
+          )}
+          {onBulkResume && (
+            <Button
+              size="small"
+              icon={<PlayCircleOutlined />}
+              loading={bulkActionPending}
+              onClick={() => {
+                onBulkResume(selectedJobs);
+                clearSelection();
+              }}
+            >
+              Resume
+            </Button>
+          )}
+          {onBulkDelete && (
+            <Popconfirm
+              title={`Delete ${selectedRowKeys.length} job(s)?`}
+              description="The definitions and pending queue entries are removed. Run history is preserved."
+              okText="Delete"
+              okButtonProps={{ danger: true }}
+              onConfirm={() => {
+                onBulkDelete(selectedJobs);
+                clearSelection();
+              }}
+            >
+              <Button size="small" danger icon={<DeleteOutlined />} loading={bulkActionPending}>
+                Delete
+              </Button>
+            </Popconfirm>
+          )}
+          <Button size="small" type="text" onClick={clearSelection}>
+            Clear
+          </Button>
+        </Space>
+      )}
       {viewMode === "table" ? (
         <Table
           dataSource={dataSource}
@@ -110,6 +333,14 @@ export function JobList({ jobs, onSelect, selectedId, loading, onEdit, onRun, on
           pagination={{ pageSize: 10 }}
           size="small"
           rowClassName={(record) => (record._id === selectedId ? "job-row-selected" : "job-row")}
+          rowSelection={
+            bulkEnabled
+              ? {
+                  selectedRowKeys,
+                  onChange: (keys) => setSelectedRowKeys(keys),
+                }
+              : undefined
+          }
           onRow={(record) => ({
             onClick: () => onSelect(record),
             onDoubleClick: () => {

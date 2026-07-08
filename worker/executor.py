@@ -249,21 +249,20 @@ def _execute_sql(executor: dict, timeout, merged_env, workdir,
             )
 
     # Write to temp file and execute
-    tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False, prefix="hydra-sql-",
-                                     dir=_get_temp_dir())
+    fd, tmp_path = tempfile.mkstemp(suffix=".py", prefix="hydra-sql-", dir=_get_temp_dir())
     try:
-        tmp.write(driver_code)
-        tmp.close()
+        with os.fdopen(fd, "w") as tmp:
+            tmp.write(driver_code)
         interp = _find_python()
         if not interp:
             return 1, "", "No Python interpreter found to run SQL driver script"
-        cmd = [interp, tmp.name]
+        cmd = [interp, tmp_path]
         if log_callback_out or log_callback_err:
             return _run_cmd(cmd)
         return run_external(binary=cmd[0], args=cmd[1:], timeout=timeout, env=merged_env, workdir=workdir)
     finally:
         try:
-            os.unlink(tmp.name)
+            os.unlink(tmp_path)
         except OSError:
             pass
 
@@ -463,6 +462,7 @@ def execute_job(
             )
         return run_external(binary=cmd[0], args=cmd[1:], timeout=timeout, env=merged_env, workdir=workdir)
 
+    _krb_ccache = kerberos.get("ccache") if (kerberos and kerberos.get("principal") and kerberos.get("keytab")) else None
     if kerberos and kerberos.get("principal") and kerberos.get("keytab"):
         kinit_cmd = _with_impersonation(["kinit", "-kt", str(kerberos.get("keytab")), str(kerberos.get("principal"))])
         rc_k, out_k, err_k = _run_cmd(kinit_cmd)
@@ -607,3 +607,8 @@ def execute_job(
     finally:
         if source_cleanup:
             source_cleanup()
+        if _krb_ccache:
+            try:
+                run_external(binary="kdestroy", args=["-c", str(_krb_ccache)], timeout=5)
+            except Exception:
+                pass

@@ -8,9 +8,10 @@ import { JobRuns } from "../components/JobRuns";
 import { EventsFeed } from "../components/EventsFeed";
 import { TemplateDrawer } from "../components/TemplateDrawer";
 import { useSchedulerEvents } from "../hooks/useEvents";
-import { createJob, fetchJobs, fetchQueueOverview, JobPayload, runAdhocJob, runJobNow, updateJob, validateJob } from "../api/jobs";
+import { createJob, deleteJob, fetchJobs, fetchQueueOverview, JobPayload, runAdhocJob, runJobNow, setJobEnabled, updateJob, validateJob } from "../api/jobs";
 import { useActiveDomain } from "../context/ActiveDomainContext";
 import { JobsDashboard } from "../components/JobsDashboard";
+import { QueueHealth } from "../components/QueueHealth";
 import { JobDefinition, QueueJobItem } from "../types";
 
 export function HomePage() {
@@ -80,6 +81,52 @@ export function HomePage() {
     onError: (err: Error) => setStatusMessage(err.message),
   });
 
+  const toggleEnabledMutation = useMutation({
+    mutationFn: ({ job, enabled }: { job: JobDefinition; enabled: boolean }) => setJobEnabled(job, enabled),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["jobs", domain] });
+      setStatusMessage(`Job ${data.name} ${data.schedule.enabled ? "resumed" : "paused"}`);
+    },
+    onError: (err: Error) => setStatusMessage(err.message),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (job: JobDefinition) => deleteJob(job._id),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["jobs", domain] });
+      queryClient.invalidateQueries({ queryKey: ["queue-overview", domain] });
+      if (selectedJobId === data.job_id) setSelectedJobId(null);
+      setStatusMessage("Job deleted");
+    },
+    onError: (err: Error) => setStatusMessage(err.message),
+  });
+
+  const bulkSetEnabledMutation = useMutation({
+    mutationFn: async ({ jobs: targets, enabled }: { jobs: JobDefinition[]; enabled: boolean }) => {
+      const results = await Promise.allSettled(targets.map((job) => setJobEnabled(job, enabled)));
+      return { total: results.length, failed: results.filter((r) => r.status === "rejected").length, enabled };
+    },
+    onSuccess: ({ total, failed, enabled }) => {
+      queryClient.invalidateQueries({ queryKey: ["jobs", domain] });
+      const verb = enabled ? "resumed" : "paused";
+      setStatusMessage(failed ? `${total - failed}/${total} jobs ${verb} (${failed} failed)` : `${total} job(s) ${verb}`);
+    },
+    onError: (err: Error) => setStatusMessage(err.message),
+  });
+
+  const bulkDeleteMutation = useMutation({
+    mutationFn: async (targets: JobDefinition[]) => {
+      const results = await Promise.allSettled(targets.map((job) => deleteJob(job._id)));
+      return { total: results.length, failed: results.filter((r) => r.status === "rejected").length };
+    },
+    onSuccess: ({ total, failed }) => {
+      queryClient.invalidateQueries({ queryKey: ["jobs", domain] });
+      queryClient.invalidateQueries({ queryKey: ["queue-overview", domain] });
+      setStatusMessage(failed ? `${total - failed}/${total} jobs deleted (${failed} failed)` : `${total} job(s) deleted`);
+    },
+    onError: (err: Error) => setStatusMessage(err.message),
+  });
+
   const handleSubmit = (payload: JobPayload) => {
     setStatusMessage("Saving job…");
     if (selectedJobId) {
@@ -132,9 +179,9 @@ export function HomePage() {
       name: `${job.name} (copy)`,
       user: job.user || "default",
       executor: job.executor as JobPayload["executor"],
-      affinity: job.affinity ?? {},
+      affinity: job.affinity,
       schedule: scheduleRest,
-      completion: job.completion ?? {},
+      completion: job.completion,
       tags: job.tags ?? [],
       depends_on: job.depends_on ?? [],
       retries: job.retries,
@@ -189,6 +236,8 @@ export function HomePage() {
       </Card>
 
       <JobsDashboard />
+
+      <QueueHealth />
 
       <Row gutter={[16, 16]}>
         <Col xs={24} xl={12}>
@@ -254,6 +303,13 @@ export function HomePage() {
           onSelect={(job) => setSelectedJobId(job._id)}
           onEdit={() => setModalVisible(true)}
           onClone={handleClone}
+          onToggleEnabled={(job, enabled) => toggleEnabledMutation.mutate({ job, enabled })}
+          onDelete={(job) => deleteMutation.mutate(job)}
+          togglingJobId={toggleEnabledMutation.isPending ? toggleEnabledMutation.variables?.job._id : null}
+          onBulkPause={(targets) => bulkSetEnabledMutation.mutate({ jobs: targets, enabled: false })}
+          onBulkResume={(targets) => bulkSetEnabledMutation.mutate({ jobs: targets, enabled: true })}
+          onBulkDelete={(targets) => bulkDeleteMutation.mutate(targets)}
+          bulkActionPending={bulkSetEnabledMutation.isPending || bulkDeleteMutation.isPending}
         />
       </Card>
 
