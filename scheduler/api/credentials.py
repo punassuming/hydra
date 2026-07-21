@@ -10,8 +10,8 @@ from typing import Dict
 
 from fastapi import APIRouter, HTTPException, Request
 
-from ..mongo_client import get_db
 from ..models.credentials import CredentialCreate, CredentialReference
+from ..mongo_client import get_db
 from ..utils.encryption import encrypt_payload
 
 router = APIRouter(prefix="/credentials", tags=["credentials"])

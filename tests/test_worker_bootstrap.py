@@ -26,10 +26,10 @@ IS_WINDOWS = platform.system().lower().startswith("win")
 
 from worker.windows_tasks import (
     _quote_arg,
+    _require_windows,
     build_schtasks_create_command,
     build_schtasks_delete_command,
     build_schtasks_query_command,
-    _require_windows,
 )
 
 
@@ -347,11 +347,11 @@ class TestBootstrapConfig:
 # ---------------------------------------------------------------------------
 
 from worker.bootstrap import (
-    _read_lock_pid,
-    _write_lock,
-    _remove_lock,
-    acquire_bootstrap_lock,
     _is_pid_alive,
+    _read_lock_pid,
+    _remove_lock,
+    _write_lock,
+    acquire_bootstrap_lock,
 )
 
 
@@ -576,7 +576,6 @@ class TestWatchdogDuplicatePrevention:
         import worker.bootstrap as bootstrap_mod
 
         # Run one iteration then stop
-        original_sleep = bootstrap_mod.time.sleep
         iteration_count = [0]
 
         def fake_sleep(seconds):

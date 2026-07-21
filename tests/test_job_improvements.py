@@ -1,15 +1,15 @@
 """Test the new job management improvements"""
-from scheduler.models.job_definition import JobDefinition, Affinity
-from scheduler.models.executor import (
-    ShellExecutor,
-    PowerShellExecutor,
-    SqlExecutor,
-    ExternalExecutor,
-)
 from scheduler.api.jobs import _validate_job_definition
-from scheduler.utils.affinity import passes_affinity, executor_types_match
-from scheduler.utils.encryption import encrypt_payload, decrypt_payload
-from worker.executor import _detect_shells, _detect_capabilities
+from scheduler.models.executor import (
+    ExternalExecutor,
+    PowerShellExecutor,
+    ShellExecutor,
+    SqlExecutor,
+)
+from scheduler.models.job_definition import Affinity, JobDefinition
+from scheduler.utils.affinity import executor_types_match, passes_affinity
+from scheduler.utils.encryption import decrypt_payload, encrypt_payload
+from worker.executor import _detect_capabilities, _detect_shells
 
 
 def test_job_definition_with_tags():
@@ -243,6 +243,7 @@ def test_encrypt_produces_different_tokens():
 def test_resolve_credential_refs_with_connection_uri():
     """credential_ref is resolved to connection_uri from encrypted payload."""
     import os
+
     from scheduler.scheduler import _resolve_credential_refs
     os.environ["ADMIN_TOKEN"] = "test-admin-token"
     try:
@@ -270,6 +271,7 @@ def test_resolve_credential_refs_with_connection_uri():
 def test_resolve_credential_refs_from_discrete_fields():
     """credential_ref with host/user/password fields constructs a connection_uri."""
     import os
+
     from scheduler.scheduler import _resolve_credential_refs
     os.environ["ADMIN_TOKEN"] = "test-admin-token"
     try:
@@ -328,8 +330,8 @@ def test_resolve_credential_refs_skips_inline_uri():
 
 def test_retry_count_maps_to_max_retries():
     """retry_count on JobCreate should map to max_retries when max_retries is 0."""
-    from scheduler.models.job_definition import JobCreate
     from scheduler.api.jobs import _apply_retry_count
+    from scheduler.models.job_definition import JobCreate
 
     job = JobCreate(
         name="retry-test",
@@ -343,8 +345,8 @@ def test_retry_count_maps_to_max_retries():
 
 def test_retry_count_does_not_override_explicit_max_retries():
     """If max_retries is explicitly set, retry_count should not override it."""
-    from scheduler.models.job_definition import JobCreate
     from scheduler.api.jobs import _apply_retry_count
+    from scheduler.models.job_definition import JobCreate
 
     job = JobCreate(
         name="retry-test",
@@ -359,8 +361,8 @@ def test_retry_count_does_not_override_explicit_max_retries():
 
 def test_retry_count_none_leaves_max_retries_unchanged():
     """When retry_count is None, max_retries defaults should be preserved."""
-    from scheduler.models.job_definition import JobCreate
     from scheduler.api.jobs import _apply_retry_count
+    from scheduler.models.job_definition import JobCreate
 
     job = JobCreate(
         name="no-retry",

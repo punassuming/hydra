@@ -222,7 +222,10 @@ def install_task(
     if schedule_type == "ONSTART":
         trigger_expr = "New-ScheduledTaskTrigger -AtStartup"
     elif schedule_type == "MINUTE":
-        trigger_expr = f"New-ScheduledTaskTrigger -RepetitionInterval (New-TimeSpan -Minutes {interval_minutes}) -Once -At '00:00'"
+        trigger_expr = (
+            f"New-ScheduledTaskTrigger -RepetitionInterval (New-TimeSpan -Minutes {interval_minutes}) "
+            "-Once -At '00:00'"
+        )
     else:
         raise ValueError(f"Unsupported schedule_type {schedule_type!r}; expected 'ONSTART' or 'MINUTE'.")
 

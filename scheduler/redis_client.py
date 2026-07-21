@@ -1,7 +1,7 @@
 import os
+
 import redis
 from redis.sentinel import Sentinel
-
 
 _redis_client = None
 

@@ -1,15 +1,17 @@
-from fastapi import APIRouter, Request, HTTPException
-from typing import List, Dict
-import secrets
 import hashlib
 import re
+import secrets
 from datetime import datetime, timezone
-from ..redis_client import get_redis
-from ..mongo_client import get_db
+from typing import Dict, List
+
+from fastapi import APIRouter, HTTPException, Request
+
 from ..examples.templates import TEMPLATES
-from ..utils.redis_acl import ensure_worker_acl_user, delete_worker_acl_user, worker_acl_username
 from ..models.credentials import CredentialCreate, CredentialReference
+from ..mongo_client import get_db
+from ..redis_client import get_redis
 from ..utils.encryption import encrypt_payload
+from ..utils.redis_acl import delete_worker_acl_user, ensure_worker_acl_user, worker_acl_username
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 DOMAIN_NAME_RE = re.compile(r"^[a-z0-9](?:[a-z0-9_-]{0,61}[a-z0-9])$")

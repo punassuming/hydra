@@ -1,12 +1,13 @@
 """Security-focused tests for domain isolation and credential management."""
 import os
-import pytest
-from scheduler.utils.encryption import encrypt_payload, decrypt_payload
-from scheduler.models.credentials import CredentialCreate, CredentialReference
-from scheduler.api.jobs import _sanitize_job_response, MASKED_SECRET
-from scheduler.models.job_definition import JobDefinition, Affinity
-from scheduler.models.executor import ShellExecutor, SqlExecutor
 
+import pytest
+
+from scheduler.api.jobs import MASKED_SECRET, _sanitize_job_response
+from scheduler.models.credentials import CredentialCreate, CredentialReference
+from scheduler.models.executor import ShellExecutor, SqlExecutor
+from scheduler.models.job_definition import Affinity, JobDefinition
+from scheduler.utils.encryption import decrypt_payload, encrypt_payload
 
 # --- Domain-scoped credential resolution ---
 
@@ -166,7 +167,8 @@ def test_encryption_produces_unique_tokens():
 def test_admin_token_uses_constant_time_comparison():
     """Admin token comparison must use hmac.compare_digest for timing-attack resistance."""
     import hmac
-    from unittest.mock import patch, AsyncMock, MagicMock
+    from unittest.mock import AsyncMock, MagicMock, patch
+
     from scheduler.utils.auth import enforce_api_key
 
     os.environ["ADMIN_TOKEN"] = "secret-admin"
@@ -191,7 +193,8 @@ def test_admin_token_uses_constant_time_comparison():
 
 def test_no_admin_token_env_rejects_unauthenticated():
     """When ADMIN_TOKEN is not set, unauthenticated requests must be rejected."""
-    from unittest.mock import patch, AsyncMock, MagicMock
+    from unittest.mock import AsyncMock, MagicMock, patch
+
     from scheduler.utils.auth import enforce_api_key
 
     os.environ.pop("ADMIN_TOKEN", None)

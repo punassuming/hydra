@@ -9,18 +9,17 @@ Verifies:
 """
 
 import json
-import time
 import threading
+import time
 import unittest
 from unittest.mock import MagicMock, patch
 
 from scheduler.orchestrator import (
+    HEARTBEAT_TTL,
+    ORCHESTRATOR_HEARTBEAT_KEY,
     OrchestratorManager,
     create_standard_orchestrator,
-    ORCHESTRATOR_HEARTBEAT_KEY,
-    HEARTBEAT_TTL,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helper: a trivial loop that blocks on the stop_event.
@@ -185,10 +184,12 @@ class TestCreateStandardOrchestrator(unittest.TestCase):
 class TestOrchestrationHealthEndpoint(unittest.TestCase):
 
     def setUp(self):
-        from fastapi.testclient import TestClient
-        from scheduler.main import app
         # Use a fixed admin token so the auth middleware is satisfied.
         import os
+
+        from fastapi.testclient import TestClient
+
+        from scheduler.main import app
         os.environ.setdefault("ADMIN_TOKEN", "test_token")
         self.client = TestClient(app, raise_server_exceptions=True)
         self.headers = {"X-Admin-Token": "test_token"}

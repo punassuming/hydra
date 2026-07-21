@@ -25,8 +25,8 @@ import threading
 import time
 from typing import Callable, List, Tuple
 
-from .utils.logging import setup_logging
 from .redis_client import get_redis
+from .utils.logging import setup_logging
 
 log = setup_logging("scheduler.orchestrator")
 
@@ -149,6 +149,7 @@ def create_standard_orchestrator() -> OrchestratorManager:
     * **sla** — check SLA deadlines and emit alerts
     * **backfill** — dispatch historical backfill runs
     """
+    from .run_events import run_event_loop
     from .scheduler import (
         backfill_dispatch_loop,
         failover_loop,
@@ -157,7 +158,6 @@ def create_standard_orchestrator() -> OrchestratorManager:
         sla_monitoring_loop,
         timeout_enforcement_loop,
     )
-    from .run_events import run_event_loop
 
     mgr = OrchestratorManager()
     mgr.register("scheduling", scheduling_loop)

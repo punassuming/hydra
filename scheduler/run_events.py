@@ -16,7 +16,6 @@ from .utils.encryption import decrypt_payload
 from .utils.logging import setup_logging
 from .utils.worker_ops import append_worker_op
 
-
 log = setup_logging("scheduler.run_events")
 # Maximum length of error_message sent in webhook payloads
 _WEBHOOK_MAX_ERROR_LEN = 2000
@@ -190,7 +189,9 @@ def _fire_email_alert(db, domain: str, credential_ref: str, recipients: list[str
         log.warning("Email alert send failed for job %s: %s", job_id, exc)
 
 
-def _fire_email_alert_async(db, domain: str, credential_ref: str, recipients: list[str], job_id: str, run_id: str, error_message: str):
+def _fire_email_alert_async(
+    db, domain: str, credential_ref: str, recipients: list[str], job_id: str, run_id: str, error_message: str
+):
     if not recipients or not credential_ref:
         return
     t = threading.Thread(

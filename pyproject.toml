@@ -18,3 +18,17 @@ dependencies = [
 
 [tool.setuptools.packages.find]
 include = ["worker*"]
+
+[tool.ruff]
+line-length = 130
+target-version = "py311"
+exclude = [".venv", "ui", "go-worker"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+ignore = [
+    "E402", # module-level import not at top of file — used deliberately for lazy/conditional imports
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["F401"] # test files sometimes import fixtures/symbols for their side effects

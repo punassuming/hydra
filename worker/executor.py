@@ -1,15 +1,14 @@
-from typing import Tuple, Callable, Optional, Dict
-import tempfile
-import shutil
+import json
 import os
 import platform
-import json
+import tempfile
 import time
+from typing import Callable, Dict, Optional, Tuple
 
-from .utils.os_exec import run_external, _run_with_callbacks
-from .utils.python_env import prepare_python_command
-from .utils.git import fetch_git_source
 from .utils.copy import fetch_copy_source
+from .utils.git import fetch_git_source
+from .utils.os_exec import _run_with_callbacks, run_external
+from .utils.python_env import prepare_python_command
 from .utils.rsync import fetch_rsync_source
 from .utils.workspace_cache import get_workspace_cache
 
@@ -58,8 +57,8 @@ def _get_temp_dir() -> Optional[str]:
 
 def _find_python() -> str:
     """Locate a Python interpreter, honouring HYDRA_PYTHON_PATH."""
-    import subprocess
     import logging
+    import subprocess
     configured = _get_python_path()
     if configured:
         try:
@@ -230,7 +229,8 @@ def _execute_sql(executor: dict, timeout, merged_env, workdir,
                 f"            rows = rows[:{max_rows}]\n"
                 '            print(json.dumps({"rows": rows, "row_count": len(rows), "truncated": truncated}, default=str))\n'
                 "        except Exception:\n"
-                '            print(json.dumps({"rows": [], "row_count": 0, "truncated": False, "message": "query executed (no result set)"}, default=str))\n'
+                '            print(json.dumps({"rows": [], "row_count": 0, "truncated": False, '
+                '"message": "query executed (no result set)"}, default=str))\n'
                 "        trans.commit()\n"
                 "    except Exception as e:\n"
                 "        trans.rollback()\n"
@@ -245,7 +245,8 @@ def _execute_sql(executor: dict, timeout, merged_env, workdir,
                 f"        rows = rows[:{max_rows}]\n"
                 '        print(json.dumps({"rows": rows, "row_count": len(rows), "truncated": truncated}, default=str))\n'
                 "    except Exception:\n"
-                '        print(json.dumps({"rows": [], "row_count": 0, "truncated": False, "message": "query executed (no result set)"}, default=str))\n'
+                '        print(json.dumps({"rows": [], "row_count": 0, "truncated": False, '
+                '"message": "query executed (no result set)"}, default=str))\n'
             )
 
     # Write to temp file and execute
@@ -269,8 +270,8 @@ def _execute_sql(executor: dict, timeout, merged_env, workdir,
 
 def _execute_http(executor: dict, timeout, log_callback_out, log_callback_err):
     """Execute an HTTP request and return the response."""
-    import urllib.request
     import urllib.error
+    import urllib.request
 
     url = executor.get("url", "")
     if not url:
@@ -314,8 +315,8 @@ def _execute_http(executor: dict, timeout, log_callback_out, log_callback_err):
 
 def _check_http_sensor(executor: dict) -> bool:
     """Return True if the HTTP sensor condition is met (expected status received)."""
-    import urllib.request
     import urllib.error
+    import urllib.request
 
     url = executor.get("target", "")
     if not url:
@@ -435,7 +436,12 @@ def execute_job(
     supports_impersonation = current_os in ("linux", "darwin")
 
     if (impersonate_user or kerberos) and not supports_impersonation:
-        return 1, "", f"impersonation/kerberos executor settings are supported only on Linux/macOS workers (current: {platform.system()})"
+        return (
+            1,
+            "",
+            f"impersonation/kerberos executor settings are supported only on Linux/macOS workers "
+            f"(current: {platform.system()})",
+        )
 
     # Sensor executor: delegate entirely to the sensor polling loop.
     # Runs on the worker — no external polling in the scheduler control plane.
@@ -483,7 +489,13 @@ def execute_job(
                 fetch_rsync_source(src_cfg["url"], dest_dir, credential_ref_token=src_cfg.get("token") or "")
             else:
                 sparse_path = src_cfg.get("path", "") if src_cfg.get("sparse") else ""
-                fetch_git_source(src_cfg["url"], src_cfg.get("ref", "main"), dest_dir, token=src_cfg.get("token") or "", sparse_path=sparse_path)
+                fetch_git_source(
+                    src_cfg["url"],
+                    src_cfg.get("ref", "main"),
+                    dest_dir,
+                    token=src_cfg.get("token") or "",
+                    sparse_path=sparse_path,
+                )
 
         try:
             _source_fetch_start = time.time()

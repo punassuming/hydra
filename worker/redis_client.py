@@ -1,9 +1,10 @@
 import os
-import redis
 from urllib.parse import urlparse
-from redis.sentinel import Sentinel
-from .config import get_domain
 
+import redis
+from redis.sentinel import Sentinel
+
+from .config import get_domain
 
 _redis_client = None
 

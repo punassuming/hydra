@@ -1,26 +1,24 @@
+import json
 import os
 import threading
 import time
-import hashlib
-import json
 from datetime import datetime, timezone
 from typing import Dict, List
 
 from pymongo import ReturnDocument
 
-from .redis_client import get_redis
-from .mongo_client import get_db
-from .utils.auth import get_domain_token_hash
-from .utils.affinity import normalize_affinity, passes_affinity
-from .utils.selectors import select_best_worker
-from .utils.failover import failover_once
-from .utils.logging import setup_logging
-from .utils.worker_ops import append_worker_op
 from .event_bus import event_bus
 from .models.job_definition import ScheduleConfig
-from .utils.schedule import advance_schedule
+from .mongo_client import get_db
+from .redis_client import get_redis
+from .utils.affinity import normalize_affinity, passes_affinity
+from .utils.auth import get_domain_token_hash
 from .utils.encryption import decrypt_payload
-
+from .utils.failover import failover_once
+from .utils.logging import setup_logging
+from .utils.schedule import advance_schedule
+from .utils.selectors import select_best_worker
+from .utils.worker_ops import append_worker_op
 
 log = setup_logging("scheduler")
 
@@ -102,7 +100,9 @@ def _resolve_credential_refs(job: dict, db) -> dict:
         if credential_ref:
             cred_doc = db.credentials.find_one({"name": credential_ref, "domain": job_domain})
             if not cred_doc:
-                log.warning("credential_ref '%s' not found for http job %s in domain %s", credential_ref, job.get("_id"), job_domain)
+                log.warning(
+                    "credential_ref '%s' not found for http job %s in domain %s", credential_ref, job.get("_id"), job_domain
+                )
             else:
                 try:
                     decrypted = decrypt_payload(cred_doc["encrypted_payload"])
@@ -126,7 +126,9 @@ def _resolve_credential_refs(job: dict, db) -> dict:
     if src_credential_ref and not source.get("token"):
         cred_doc = db.credentials.find_one({"name": src_credential_ref, "domain": job_domain})
         if not cred_doc:
-            log.warning("source credential_ref '%s' not found for job %s in domain %s", src_credential_ref, job.get("_id"), job_domain)
+            log.warning(
+                "source credential_ref '%s' not found for job %s in domain %s", src_credential_ref, job.get("_id"), job_domain
+            )
         else:
             try:
                 decrypted = decrypt_payload(cred_doc["encrypted_payload"])
@@ -145,7 +147,9 @@ def _resolve_credential_refs(job: dict, db) -> dict:
             sensor_type = executor.get("sensor_type", "http")
             cred_doc = db.credentials.find_one({"name": credential_ref, "domain": job_domain})
             if not cred_doc:
-                log.warning("sensor credential_ref '%s' not found for job %s in domain %s", credential_ref, job.get("_id"), job_domain)
+                log.warning(
+                    "sensor credential_ref '%s' not found for job %s in domain %s", credential_ref, job.get("_id"), job_domain
+                )
             else:
                 try:
                     decrypted = decrypt_payload(cred_doc["encrypted_payload"])
@@ -439,7 +443,7 @@ def schedule_trigger_loop(stop_event: threading.Event):
 
 
 def sla_monitoring_loop(stop_event: threading.Event):
-    from .run_events import _fire_webhooks_async, _fire_email_alert_async
+    from .run_events import _fire_email_alert_async, _fire_webhooks_async
     db = get_db()
     log.info("SLA monitoring loop started")
     while not stop_event.is_set():
@@ -464,7 +468,12 @@ def sla_monitoring_loop(stop_event: threading.Event):
                 elapsed = (now - start_ts).total_seconds()
                 job_doc = db.job_definitions.find_one(
                     {"_id": job_id},
-                    {"sla_max_duration_seconds": 1, "on_failure_webhooks": 1, "on_failure_email_to": 1, "on_failure_email_credential_ref": 1},
+                    {
+                        "sla_max_duration_seconds": 1,
+                        "on_failure_webhooks": 1,
+                        "on_failure_email_to": 1,
+                        "on_failure_email_credential_ref": 1,
+                    },
                 )
                 if not job_doc:
                     continue
@@ -563,7 +572,6 @@ def backfill_dispatch_loop(stop_event: threading.Event):
             job_id = item.get("job_id", "")
             execution_date = item.get("execution_date", "")
             domain = item.get("domain", "prod")
-            priority = float(item.get("priority", 5))
 
             if not job_id or not execution_date:
                 log.warning("Backfill item missing job_id or execution_date; skipping")

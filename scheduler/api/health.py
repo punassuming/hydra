@@ -2,8 +2,9 @@ import json
 import time
 
 from fastapi import APIRouter, Request
+
+from ..orchestrator import HEARTBEAT_TTL, ORCHESTRATOR_HEARTBEAT_KEY
 from ..redis_client import get_redis
-from ..orchestrator import ORCHESTRATOR_HEARTBEAT_KEY, HEARTBEAT_TTL
 
 router = APIRouter()
 

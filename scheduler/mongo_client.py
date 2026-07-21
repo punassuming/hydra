@@ -3,7 +3,6 @@ from typing import Any
 
 from pymongo import MongoClient
 
-
 _mongo_client: MongoClient | None = None
 
 
