@@ -44,6 +44,18 @@ spec:
             limits:
               cpu: "1"
               memory: "1Gi"
+          # The heartbeat loop touches this file every ~2s regardless of Redis
+          # reachability, so a stale/missing file means the process is hung —
+          # matches worker/Dockerfile's HEALTHCHECK.
+          livenessProbe:
+            exec:
+              command:
+                - python
+                - -c
+                - "import os,sys,time; p=os.getenv('WORKER_HEARTBEAT_FILE','/tmp/hydra_worker_heartbeat'); sys.exit(0 if os.path.exists(p) and time.time()-os.path.getmtime(p)<30 else 1)"
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            failureThreshold: 3
 ---
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler

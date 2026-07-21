@@ -1,10 +1,10 @@
 import platform
-from worker.utils.os_exec import run_command, run_python
+
 from worker.executor import execute_job
-from worker.utils.completion import evaluate_completion, evaluate_file_criteria
+from worker.utils.completion import _contains_all, _contains_none, evaluate_completion, evaluate_file_criteria
+from worker.utils.heartbeat import _ensure_worker_registration, _touch_heartbeat_file
+from worker.utils.os_exec import run_command, run_python
 from worker.utils.python_env import prepare_python_command
-from worker.utils.completion import _contains_all, _contains_none
-from worker.utils.heartbeat import _ensure_worker_registration
 
 
 def test_os_exec_echo():
@@ -107,7 +107,9 @@ def test_completion_helpers_are_strict():
 
 
 def test_file_criteria_require_file_exists_passes():
-    import tempfile, os, time
+    import os
+    import tempfile
+    import time
     with tempfile.NamedTemporaryFile(delete=False) as f:
         path = f.name
     try:
@@ -127,7 +129,9 @@ def test_file_criteria_require_file_exists_fails_missing():
 
 
 def test_file_criteria_require_file_updated_since_start_passes():
-    import tempfile, os, time
+    import os
+    import tempfile
+    import time
     start = time.time() - 1  # file written after this
     with tempfile.NamedTemporaryFile(delete=False) as f:
         f.write(b"data")
@@ -141,7 +145,9 @@ def test_file_criteria_require_file_updated_since_start_passes():
 
 
 def test_file_criteria_require_file_updated_since_start_fails_old_file():
-    import tempfile, os, time
+    import os
+    import tempfile
+    import time
     with tempfile.NamedTemporaryFile(delete=False) as f:
         f.write(b"old data")
         path = f.name
@@ -211,6 +217,31 @@ def test_ensure_worker_registration_skips_when_registry_is_present():
     refresh.assert_not_called()
 
 
+def test_touch_heartbeat_file_writes_current_timestamp(tmp_path, monkeypatch):
+    import time
+
+    from worker.utils import heartbeat as heartbeat_mod
+
+    heartbeat_path = tmp_path / "hydra_worker_heartbeat"
+    monkeypatch.setattr(heartbeat_mod, "HEARTBEAT_FILE", str(heartbeat_path))
+
+    before = time.time()
+    _touch_heartbeat_file()
+    after = time.time()
+
+    assert heartbeat_path.exists()
+    written_ts = float(heartbeat_path.read_text())
+    assert before <= written_ts <= after
+
+
+def test_touch_heartbeat_file_survives_unwritable_path(monkeypatch):
+    """A liveness file write failure must never raise — it's best-effort."""
+    from worker.utils import heartbeat as heartbeat_mod
+
+    monkeypatch.setattr(heartbeat_mod, "HEARTBEAT_FILE", "/nonexistent-dir/heartbeat")
+    _touch_heartbeat_file()  # should not raise
+
+
 def test_ensure_worker_registration_handles_refresh_failure():
     from unittest.mock import MagicMock
 
@@ -238,7 +269,9 @@ def test_git_token_injection_empty_token():
 
 
 def test_copy_source_directory():
-    import tempfile, os
+    import os
+    import tempfile
+
     from worker.utils.copy import fetch_copy_source
     with tempfile.TemporaryDirectory() as src_dir:
         open(os.path.join(src_dir, "run.sh"), "w").write("echo hello")
@@ -252,7 +285,9 @@ def test_copy_source_directory():
 
 
 def test_copy_source_single_file():
-    import tempfile, os
+    import os
+    import tempfile
+
     from worker.utils.copy import fetch_copy_source
     with tempfile.NamedTemporaryFile(suffix=".sh", delete=False) as f:
         f.write(b"echo hi")
@@ -266,7 +301,10 @@ def test_copy_source_single_file():
 
 
 def test_copy_source_missing_raises():
-    import tempfile, pytest
+    import tempfile
+
+    import pytest
+
     from worker.utils.copy import fetch_copy_source
     with tempfile.TemporaryDirectory() as dest_dir:
         with pytest.raises(FileNotFoundError):
@@ -274,7 +312,10 @@ def test_copy_source_missing_raises():
 
 
 def test_copy_source_rejects_relative_path():
-    import tempfile, pytest
+    import tempfile
+
+    import pytest
+
     from worker.utils.copy import fetch_copy_source
     with tempfile.TemporaryDirectory() as dest_dir:
         with pytest.raises(ValueError, match="absolute"):
@@ -284,6 +325,7 @@ def test_copy_source_rejects_relative_path():
 def test_rsync_source_builds_command(monkeypatch):
     """Verify fetch_rsync_source builds the correct rsync command."""
     import subprocess
+
     from worker.utils.rsync import fetch_rsync_source
 
     captured = {}
@@ -302,6 +344,7 @@ def test_rsync_source_builds_command(monkeypatch):
 def test_rsync_source_with_ssh_key(monkeypatch):
     """Verify SSH key is passed via -e flag when credential_ref_token is provided."""
     import subprocess
+
     from worker.utils.rsync import fetch_rsync_source
 
     captured = {}
@@ -317,6 +360,7 @@ def test_rsync_source_with_ssh_key(monkeypatch):
 def test_git_sparse_clone_calls(monkeypatch):
     """Verify that fetch_git_source with sparse_path uses sparse-checkout commands."""
     import subprocess
+
     from worker.utils.git import fetch_git_source
 
     calls = []
@@ -470,8 +514,9 @@ def test_impersonation_supported_on_linux():
 
 def test_workspace_cache_basic(tmp_path):
     """Workspace cache should create and reuse cache entries."""
-    from worker.utils.workspace_cache import WorkspaceCache
     import os
+
+    from worker.utils.workspace_cache import WorkspaceCache
 
     cache = WorkspaceCache(cache_root=str(tmp_path / "cache"), max_mb=100, ttl_seconds=3600)
 
@@ -498,8 +543,9 @@ def test_workspace_cache_basic(tmp_path):
 
 def test_workspace_cache_never_mode(tmp_path):
     """cache='never' should always create a fresh temp directory."""
-    from worker.utils.workspace_cache import WorkspaceCache
     import os
+
+    from worker.utils.workspace_cache import WorkspaceCache
 
     cache = WorkspaceCache(cache_root=str(tmp_path / "cache"), max_mb=100, ttl_seconds=3600)
 
@@ -525,8 +571,9 @@ def test_workspace_cache_never_mode(tmp_path):
 
 def test_workspace_cache_always_mode_miss(tmp_path):
     """cache='always' should raise FileNotFoundError if cache doesn't exist."""
-    from worker.utils.workspace_cache import WorkspaceCache
     import pytest
+
+    from worker.utils.workspace_cache import WorkspaceCache
 
     cache = WorkspaceCache(cache_root=str(tmp_path / "cache"), max_mb=100, ttl_seconds=3600)
 
@@ -581,9 +628,10 @@ def test_affinity_impersonation_check():
         "executor": {"impersonate_user": "bob"},
         "affinity": {},
     }
-    worker_linux = {"os": "linux", "allowed_users": [], "tags": [], "hostname": "", "subnet": "", "deployment_type": "", "capabilities": []}
-    worker_darwin = {"os": "darwin", "allowed_users": [], "tags": [], "hostname": "", "subnet": "", "deployment_type": "", "capabilities": []}
-    worker_windows = {"os": "windows", "allowed_users": [], "tags": [], "hostname": "", "subnet": "", "deployment_type": "", "capabilities": []}
+    base_worker = {"allowed_users": [], "tags": [], "hostname": "", "subnet": "", "deployment_type": "", "capabilities": []}
+    worker_linux = {**base_worker, "os": "linux"}
+    worker_darwin = {**base_worker, "os": "darwin"}
+    worker_windows = {**base_worker, "os": "windows"}
 
     assert passes_affinity(job_with_impersonation, worker_linux)
     assert passes_affinity(job_with_impersonation, worker_darwin)
@@ -600,9 +648,10 @@ def test_affinity_impersonation_check():
 
 def test_hydra_python_path_used_by_find_python(monkeypatch):
     """_find_python() should honour HYDRA_PYTHON_PATH when set."""
-    from worker.executor import _find_python
     # Point to a known-good interpreter
     import sys
+
+    from worker.executor import _find_python
     monkeypatch.setenv("HYDRA_PYTHON_PATH", sys.executable)
     result = _find_python()
     assert result == sys.executable
@@ -765,6 +814,7 @@ def test_artifact_stdout_intercepted_by_handle_stdout():
 def test_execute_job_emits_artifact_via_stdout():
     """A shell job that prints an artifact marker emits the correct artifact event."""
     import json as _json
+
     from worker.executor import execute_job
 
     captured_stdout_lines = []
@@ -830,6 +880,7 @@ def test_sensor_http_timeout(monkeypatch):
 def test_sensor_kill_event_stops_loop(monkeypatch):
     """Setting kill_event stops the sensor loop immediately."""
     import threading
+
     from worker.executor import _execute_sensor
 
     monkeypatch.setattr("worker.executor._check_http_sensor", lambda executor: False)
@@ -889,6 +940,7 @@ def test_execute_job_sensor_executor(monkeypatch):
 def test_detect_capabilities_shell_requires_working_shell(monkeypatch):
     """shell/external should not be advertised when all shell binaries fail."""
     import subprocess
+
     from worker.executor import _detect_capabilities
 
     def reject_all(cmd, **kwargs):
@@ -920,6 +972,7 @@ def test_detect_capabilities_sensor_always_present():
 def test_detect_capabilities_no_false_positive_sql_without_driver(monkeypatch):
     """sql should not be advertised when sqlalchemy and pymongo are both absent."""
     import builtins
+
     import worker.executor as executor_mod
     from worker.executor import _detect_capabilities
 
@@ -944,6 +997,7 @@ def test_detect_capabilities_no_false_positive_sql_without_driver(monkeypatch):
 def test_process_start_ts_is_set():
     """_PROCESS_START_TS should be set at module import, before any registration."""
     import time
+
     import worker.worker as worker_mod
 
     assert hasattr(worker_mod, "_PROCESS_START_TS")
@@ -954,8 +1008,8 @@ def test_process_start_ts_is_set():
 
 def test_execute_job_records_source_fetch_timing(monkeypatch, tmp_path):
     """execute_job should populate timings["source_fetch_ms"] when source is fetched."""
-    from worker.utils.copy import fetch_copy_source as real_fetch
     from worker.executor import execute_job
+    from worker.utils.copy import fetch_copy_source as real_fetch
 
     src_dir = tmp_path / "src"
     src_dir.mkdir()
