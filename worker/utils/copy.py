@@ -15,7 +15,9 @@ def fetch_copy_source(src: str, dest: str) -> None:
     Raises ValueError when *src* is not absolute.
     Raises FileNotFoundError when *src* does not exist.
     """
-    if not os.path.isabs(src):
+    # Accept POSIX-style absolute paths on Windows as well. Hydra job
+    # definitions are commonly shared between Linux and Windows workers.
+    if not (os.path.isabs(src) or src.startswith(("/", "\\"))):
         raise ValueError(f"Copy source path must be absolute, got: {src!r}")
     if not os.path.exists(src):
         raise FileNotFoundError(f"Copy source path not found: {src}")

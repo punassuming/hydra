@@ -379,7 +379,9 @@ def execute_job(
             if source.get("path"):
                 base_path = os.path.join(base_path, source["path"])
             if workdir:
-                if os.path.isabs(workdir):
+                # A source-relative POSIX path such as /scripts must retain
+                # that meaning when the job runs on Windows.
+                if os.path.isabs(workdir) or workdir.startswith(("/", "\\")):
                     workdir = os.path.join(base_path, workdir.lstrip("/\\"))
                 else:
                     workdir = os.path.join(base_path, workdir)
