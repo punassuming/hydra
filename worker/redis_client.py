@@ -67,12 +67,10 @@ def get_redis() -> redis.Redis:
                 "decode_responses": True,
                 "socket_timeout": socket_timeout,
             }
-            redis_username = get_domain()
+            redis_username = get_domain() if require_acl else os.getenv("REDIS_USERNAME")
             redis_password = os.getenv("REDIS_PASSWORD")
             if require_acl and not (redis_username and redis_password):
-                raise RuntimeError(
-                    "WORKER_REQUIRE_REDIS_ACL=true requires REDIS_PASSWORD with DOMAIN when using Sentinel"
-                )
+                raise RuntimeError("WORKER_REQUIRE_REDIS_ACL=true requires REDIS_PASSWORD with DOMAIN when using Sentinel")
             if redis_username:
                 master_kwargs["username"] = redis_username
             if redis_password:
@@ -81,12 +79,11 @@ def get_redis() -> redis.Redis:
             _redis_client = sentinel.master_for(sentinel_master, **master_kwargs)
         else:
             url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-            redis_username = get_domain()
+            redis_username = get_domain() if require_acl else os.getenv("REDIS_USERNAME")
             redis_password = os.getenv("REDIS_PASSWORD")
             if require_acl and not ((redis_username and redis_password) or _url_has_credentials(url)):
                 raise RuntimeError(
-                    "WORKER_REQUIRE_REDIS_ACL=true requires REDIS_PASSWORD with DOMAIN, "
-                    "or REDIS_URL with embedded credentials"
+                    "WORKER_REQUIRE_REDIS_ACL=true requires REDIS_PASSWORD with DOMAIN, or REDIS_URL with embedded credentials"
                 )
             kwargs = {"decode_responses": True}
             if redis_username:

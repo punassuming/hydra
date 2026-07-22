@@ -1,8 +1,8 @@
 services:
   worker:
     build:
-      context: ./worker
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: worker/Dockerfile
     restart: unless-stopped
     env_file:
       - .env

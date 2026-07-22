@@ -1,4 +1,6 @@
 """Test the new job management improvements"""
+import platform
+
 from scheduler.api.jobs import _validate_job_definition
 from scheduler.models.executor import (
     ExternalExecutor,
@@ -9,7 +11,7 @@ from scheduler.models.executor import (
 from scheduler.models.job_definition import Affinity, JobDefinition
 from scheduler.utils.affinity import executor_types_match, passes_affinity
 from scheduler.utils.encryption import decrypt_payload, encrypt_payload
-from worker.executor import _detect_capabilities, _detect_shells
+from worker.runtime import _detect_capabilities, _detect_shells
 
 
 def test_job_definition_with_tags():
@@ -196,8 +198,10 @@ def test_passes_affinity_with_executor_types():
 def test_detect_shells():
     shells = _detect_shells()
     assert isinstance(shells, list)
-    # bash should be detected on Linux CI
-    assert "bash" in shells
+    if platform.system().lower().startswith("win"):
+        assert any(shell in shells for shell in ("cmd", "powershell", "pwsh"))
+    else:
+        assert "bash" in shells
 
 
 def test_detect_capabilities():

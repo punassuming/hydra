@@ -27,11 +27,9 @@ def ensure_admin_token() -> None:
             "Set ADMIN_TOKEN in production to avoid losing access on restart.",
             admin_token,
         )
-    try:
-        from .utils import auth
-        auth.ADMIN_TOKEN = admin_token
-    except Exception:
-        pass
+    from .utils import auth
+
+    auth.ADMIN_TOKEN = admin_token
 
 
 def warn_credential_encryption_key() -> None:

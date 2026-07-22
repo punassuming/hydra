@@ -46,7 +46,7 @@ def register_worker(worker_id: str, max_concurrency: int):
     import platform
     import socket
 
-    from .executor import _detect_capabilities, _detect_shells
+    from .runtime import _detect_capabilities, _detect_shells
 
     hostname = socket.gethostname()
     try:
@@ -414,8 +414,13 @@ def worker_main():
         _, raw_payload = item
         try:
             envelope = json.loads(raw_payload)
-        except Exception:
-            # Legacy queue payloads carried only job_id and require Mongo lookups; skip in Redis-only worker mode.
+        except (json.JSONDecodeError, TypeError):
+            # A BLPOP is destructive, so retain malformed payloads for operator
+            # inspection instead of silently losing them.
+            dead_letter_key = f"job_queue:{domain}:dead_letter"
+            r.rpush(dead_letter_key, raw_payload)
+            r.expire(dead_letter_key, 7 * 24 * 3600)
+            print(f"Malformed queue payload moved to {dead_letter_key}")
             continue
         bypass_concurrency = bool(((envelope.get("job") or {}).get("bypass_concurrency", False)))
         if bypass_concurrency:

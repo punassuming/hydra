@@ -5,6 +5,8 @@ import threading
 import time
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
+from ..runtime import _resolve_shell
+
 
 def _merged_env(extra: Optional[Dict[str, str]]) -> Dict[str, str]:
     merged = os.environ.copy()
@@ -94,42 +96,57 @@ def _run_with_callbacks(
     return proc.returncode, "".join(stdout_lines), "".join(stderr_lines)
 
 
-def run_command(command: str, shell: str = "bash", timeout: Optional[int] = None,
-                env: Optional[Dict[str, str]] = None, workdir: Optional[str] = None) -> Tuple[int, str, str]:
+def run_command(
+    command: str,
+    shell: str = "bash",
+    timeout: Optional[int] = None,
+    env: Optional[Dict[str, str]] = None,
+    workdir: Optional[str] = None,
+) -> Tuple[int, str, str]:
     system = platform.system().lower()
     shell_lc = (shell or "bash").lower()
-    # Honour HYDRA_SHELL_PATH for non-containerized environments where
-    # bash may not live at /bin/bash (e.g. macOS Homebrew, NixOS, etc.).
-    bash_path = os.environ.get("HYDRA_SHELL_PATH", "").strip() or "/bin/bash"
+    shell_path = _resolve_shell(shell_lc)
     if system.startswith("linux") or system == "darwin":
         if shell_lc in ("bash", "cmd", "powershell"):
-            cmd = [bash_path, "-lc", command]
+            cmd = [shell_path, "-lc", command]
         else:
-            cmd = [bash_path, "-lc", command]
+            cmd = [shell_path, "-lc", command]
     elif system.startswith("win"):
         if shell_lc == "powershell":
-            cmd = ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", command]
+            cmd = [shell_path, "-NoProfile", "-NonInteractive", "-Command", command]
         elif shell_lc == "cmd":
-            cmd = ["cmd.exe", "/c", command]
+            cmd = [shell_path, "/c", command]
+        elif shell_lc == "bash":
+            cmd = [shell_path, "-lc", command]
         else:
-            cmd = ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", command]
+            cmd = [_resolve_shell("powershell"), "-NoProfile", "-NonInteractive", "-Command", command]
     else:
-        cmd = [bash_path, "-lc", command]
+        cmd = [shell_path, "-lc", command]
 
     return _run(cmd, timeout, env, workdir)
 
 
-def run_python(code: str, interpreter: str = "python3", args: Optional[List[str]] = None,
-               timeout: Optional[int] = None, env: Optional[Dict[str, str]] = None,
-               workdir: Optional[str] = None) -> Tuple[int, str, str]:
+def run_python(
+    code: str,
+    interpreter: str = "python3",
+    args: Optional[List[str]] = None,
+    timeout: Optional[int] = None,
+    env: Optional[Dict[str, str]] = None,
+    workdir: Optional[str] = None,
+) -> Tuple[int, str, str]:
     cmd = [interpreter, "-c", code]
     if args:
         cmd.extend(args)
     return _run(cmd, timeout, env, workdir)
 
 
-def run_external(binary: str, args: Optional[List[str]] = None, timeout: Optional[int] = None,
-                 env: Optional[Dict[str, str]] = None, workdir: Optional[str] = None) -> Tuple[int, str, str]:
+def run_external(
+    binary: str,
+    args: Optional[List[str]] = None,
+    timeout: Optional[int] = None,
+    env: Optional[Dict[str, str]] = None,
+    workdir: Optional[str] = None,
+) -> Tuple[int, str, str]:
     cmd = [binary]
     if args:
         cmd.extend(args)

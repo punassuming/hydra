@@ -1,6 +1,6 @@
 """Tests for the DELETE /jobs/{job_id} endpoint."""
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from unittest.mock import patch
 
 import pytest
@@ -27,7 +27,7 @@ def _admin_headers():
 
 
 def _job_doc(job_id="job-1", domain="prod"):
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     return {
         "_id": job_id,
         "name": "test-job",

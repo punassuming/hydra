@@ -87,13 +87,20 @@ def requeue_jobs_for_worker(domain_and_worker: str):
     queue_key = f"job_queue:{domain}:{worker_id}"
     queued_items = r.lrange(queue_key, 0, -1) or []
     drained_count = 0
+    dead_letter_key = f"{queue_key}:dead_letter"
     for raw in queued_items:
         try:
             envelope = json.loads(raw)
-        except Exception:
+        except (json.JSONDecodeError, TypeError):
+            log.error("Malformed envelope moved to %s during failover: %r", dead_letter_key, raw)
+            r.rpush(dead_letter_key, raw)
+            r.expire(dead_letter_key, 7 * 24 * 3600)
             continue
         job_id = envelope.get("job_id")
         if not job_id:
+            log.error("Envelope without job_id moved to %s during failover: %r", dead_letter_key, raw)
+            r.rpush(dead_letter_key, raw)
+            r.expire(dead_letter_key, 7 * 24 * 3600)
             continue
         priority = float((envelope.get("job") or {}).get("priority", 5))
         r.zadd(f"job_queue:{domain}:pending", {job_id: priority})

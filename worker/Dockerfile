@@ -1,16 +1,17 @@
-FROM python:3.11-slim
+FROM python:3.13-slim
 
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt /tmp/requirements.txt
-RUN pip install --no-cache-dir -r /tmp/requirements.txt && rm /tmp/requirements.txt
+RUN pip install --no-cache-dir uv==0.5.13
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev --no-install-project
 
-COPY . /app/worker
-WORKDIR /app
+COPY worker /app/worker
 
 ENV PYTHONUNBUFFERED=1
+ENV PATH="/app/.venv/bin:$PATH"
 
 # Liveness check: the heartbeat loop touches WORKER_HEARTBEAT_FILE every
 # ~2s regardless of Redis reachability, so a stale/missing file means the

@@ -861,6 +861,29 @@ def test_failover_drains_queue_empty_running_set():
     mock_r.delete.assert_any_call("job_queue:prod:worker-b")
 
 
+def test_failover_preserves_malformed_envelopes_in_dead_letter_queue():
+    """Failover must not silently discard a corrupted dispatched envelope."""
+    from unittest.mock import MagicMock, patch
+
+    from scheduler.utils.failover import requeue_jobs_for_worker
+
+    mock_r = MagicMock()
+    mock_r.smembers.return_value = set()
+    mock_r.lrange.return_value = ["not-json"]
+
+    with (
+        patch("scheduler.utils.failover.get_redis", return_value=mock_r),
+        patch("scheduler.utils.failover.get_db", return_value=MagicMock()),
+        patch("scheduler.utils.failover.append_worker_op"),
+        patch("scheduler.utils.failover.event_bus"),
+    ):
+        requeue_jobs_for_worker("prod:worker-c")
+
+    dead_letter_key = "job_queue:prod:worker-c:dead_letter"
+    mock_r.rpush.assert_called_once_with(dead_letter_key, "not-json")
+    mock_r.expire.assert_any_call(dead_letter_key, 7 * 24 * 3600)
+
+
 def test_no_worker_count_increments_on_miss():
     """scheduling_loop increments no_worker_count each time no eligible worker is found."""
     import json

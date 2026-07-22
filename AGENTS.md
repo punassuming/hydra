@@ -92,6 +92,7 @@ Hydra Jobs is a distributed job runner designed for flexibility and scalability.
 - `worker/utils/*` contain shell/exec helpers, python env prep (`uv`/venv/system), completion criteria evaluation, concurrency counters, and heartbeats.
 - `worker/utils/git.py` — Git clone/checkout logic. PAT is injected for the network operation only; the remote URL is rewritten to strip credentials before the workspace is cached.
 - `worker/executor.py` — Job execution engine (shell/python/batch/external) with git source support.
+- `worker/runtime.py` — Host runtime discovery, configured tool paths, and fail-closed capability detection.
 - `worker/executor.py` — also handles Linux impersonation + Kerberos pre-auth when configured.
 - `worker/__main__.py` — CLI entry point; dispatches to `worker_main()` (default) or `bootstrap.main()` when the first argument is `bootstrap`.
 - `worker/bootstrap.py` — Windows worker bootstrap/watchdog: `BootstrapConfig` model, PID-lock helpers, watchdog loop, and `action_install`/`action_remove`/`action_run`/`action_validate` functions. CLI: `python -m worker bootstrap <install|remove|run|validate>`.
@@ -178,76 +179,23 @@ Located in `scripts/`:
 *   `start-domain-workers.sh`: Agentic worker bring-up for Docker/Kubernetes/Bare deployments.
 *   `diagnose-domain-admin.sh`: Agentic diagnostics for domain auth and worker visibility (with optional Redis deep checks).
 
-## Command-Line Interface (`hydra-ctl`)
-
-`hydra-ctl` is a standalone Python CLI (like `gh` for GitHub) that lets operators interact with the scheduler from any machine with network access. It is **completely independent of the worker** — it does not connect to Redis, run jobs, or require any worker configuration.
-
-### Package location
-
-`cli/` at the repo root. Entry point registered in `pyproject.toml`:
-
-```toml
-[project.scripts]
-hydra-ctl = "cli.__main__:main"
-```
-
-Install: `pip install -e .` (dev) or `pip install hydra-jobs` (release).
-
-### Authentication
-
-Uses the same domain token as the worker, resolved in order:
-
-1. `--token` flag
-2. `API_TOKEN` environment variable
-
-Similarly `--domain` / `DOMAIN` and `--api-url` / `HYDRA_API_URL`.
-
-### Module structure
-
-| File | Purpose |
-|---|---|
-| `cli/__main__.py` | `argparse` command tree + all command handler functions |
-| `cli/_client.py` | `HydraClient` — thin `urllib`-only HTTP wrapper, no third-party deps |
-| `cli/_output.py` | `print_table()`, `fmt_duration()`, `fmt_ts()`, `fmt_status()` helpers |
-
-### Command surface
-
-```
-hydra-ctl jobs list [--search TEXT] [--tags t1,t2]
-hydra-ctl jobs show <name-or-id>
-hydra-ctl jobs trigger <name-or-id> [--param k=v …]
-hydra-ctl jobs enable <name-or-id>
-hydra-ctl jobs disable <name-or-id>
-hydra-ctl jobs runs <name-or-id> [--limit N]
-
-hydra-ctl runs list [--limit N]
-hydra-ctl runs show <run-id>
-hydra-ctl runs logs <run-id>          # streams live if run is active
-hydra-ctl runs kill <run-id>
-
-hydra-ctl workers list
-hydra-ctl workers show <worker-id>
-hydra-ctl workers state <worker-id> online|draining|offline
-
-hydra-ctl overview
-hydra-ctl overview queue [--limit N]
-```
-
-All commands accept `--json` for machine-readable output (exit codes: `0` success, `1` API/network error, `2` usage error).
-
-Name resolution: `jobs show/trigger/enable/disable/runs` accept either a UUID or a job name; the client resolves name → ID via `GET /jobs/?search=<arg>`.
-
-SSE log streaming: `runs logs` reads `GET /runs/{id}/stream` line-by-line; falls back to `stdout_tail`/`stderr_tail` from `GET /runs/{id}` when the run is no longer active.
-
 ## Testing
 
 ### Backend (Python)
 
 *   Uses `pytest` for testing.
-*   Run tests: `./scripts/test.sh` or `pytest tests/`
-*   Specific tests: `pytest tests/test_scheduler.py tests/test_worker.py`
+*   Install dependencies: `uv sync --dev`
+*   Run tests: `./scripts/test.sh` or `uv run pytest tests/`
+*   Specific tests: `uv run pytest tests/test_scheduler.py tests/test_worker.py`
 *   Test files located in `tests/`
 *   Note: The end-to-end test is skipped unless the full stack is running.
+
+### Operator CLI
+
+*   Run `uv run hydra-ctl --help` for the resource-oriented API client.
+*   Configure it with `HYDRA_API_URL`, `HYDRA_TOKEN`, and `HYDRA_DOMAIN`; the
+    token and domain also fall back to the worker-compatible `API_TOKEN` and
+    `DOMAIN` variables.
 
 ### Frontend (React)
 
@@ -295,7 +243,7 @@ SSE log streaming: `runs logs` reads `GET /runs/{id}/stream` line-by-line; falls
 
 ### Additional Notes
 
-- Docker images target Python 3.13 slim; `uv` is optional but must be present in the image to use the `uv` python environment.
+- Python CI covers 3.11 and 3.13 across Linux, macOS, and Windows. Python container images use 3.13 slim and install the locked environment with `uv`.
 - Environment variables can be configured via `.env` file (see `.env.example`).
 - MongoDB uses a named volume `mongo-data` for persistence.
 - Redis connection precedence: if both `REDIS_SENTINELS` and `REDIS_SENTINEL_MASTER` are set, scheduler/worker use Sentinel discovery; otherwise they use `REDIS_URL`.
@@ -329,7 +277,7 @@ The worker will clone the repo to a temporary directory, switch to `path` (if pr
 
 *   **Location:** `scheduler/` and `worker/`
 *   **Style:** Adheres to standard Python 3.13 practices. Type hints are encouraged. All datetime values use timezone-aware UTC (`datetime.now(timezone.utc)`).
-*   **Formatting:** Linting/formatting are not configured; match existing style (4-space indent, type hints where present).
+*   **Linting:** Run `uv run ruff check .`; match existing 4-space indentation and type-hint style.
 
 ### Frontend (React)
 

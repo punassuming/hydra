@@ -7,11 +7,11 @@ export PYTHONPATH="$ROOT:${PYTHONPATH:-}"
 
 cd "$ROOT"
 echo "==> pytest (scheduler/worker)"
-pytest ${PYTEST_ARGS:-} tests/test_scheduler.py tests/test_worker.py
+uv run --frozen pytest ${PYTEST_ARGS:-} tests/test_scheduler.py tests/test_worker.py
 
 if [ "${E2E:-0}" -eq 1 ]; then
   echo "==> pytest (end-to-end)"
-  pytest ${PYTEST_ARGS:-} tests/test_end_to_end.py
+  uv run --frozen pytest ${PYTEST_ARGS:-} tests/test_end_to_end.py
 else
   echo "==> skipping end-to-end tests (set E2E=1 to enable)"
 fi

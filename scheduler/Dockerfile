@@ -1,16 +1,17 @@
-FROM python:3.11-slim
+FROM python:3.13-slim
 
 WORKDIR /app
 
-COPY requirements.txt /tmp/requirements.txt
-RUN pip install --no-cache-dir -r /tmp/requirements.txt && rm /tmp/requirements.txt
+RUN pip install --no-cache-dir uv==0.5.13
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev --no-install-project
 
-COPY . /app/scheduler
-WORKDIR /app
+COPY scheduler /app/scheduler
 
 EXPOSE 8000
 
 ENV PYTHONUNBUFFERED=1
+ENV PATH="/app/.venv/bin:$PATH"
 
 # /health bypasses auth (see scheduler/utils/auth.py::_is_allowed_path) and
 # touches Mongo/Redis, so a failing check means the API is up but can't

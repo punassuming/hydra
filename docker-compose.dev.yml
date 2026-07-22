@@ -10,8 +10,8 @@ services:
 
   worker:
     build:
-      context: ./worker
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: worker/Dockerfile
     env_file:
       - .env
     environment:

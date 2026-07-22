@@ -3,21 +3,35 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "hydra-worker"
+name = "hydra-jobs"
 version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
-    "croniter>=6.2.2",
-    "cryptography>=46.0.6",
-    "fastapi>=0.135.2",
-    "pydantic>=2.12.5",
-    "pymongo>=4.16.0",
-    "pytest>=9.0.2",
+    "croniter==2.0.5",
+    "cryptography>=46.0.5",
+    "fastapi==0.115.0",
+    "google-generativeai==0.3.2",
+    "openai==1.12.0",
+    "pydantic==2.9.2",
+    "pymongo==4.10.1",
+    "python-dotenv==1.0.1",
     "redis==5.0.8",
+    "PyYAML==6.0.3",
+    "sse-starlette==2.0.0",
+    "uvicorn[standard]==0.30.1",
 ]
 
+[project.scripts]
+hydra-ctl = "cli.__main__:entrypoint"
+
 [tool.setuptools.packages.find]
-include = ["worker*"]
+include = ["cli*", "scheduler*", "worker*"]
+
+[dependency-groups]
+dev = [
+    "pytest==8.3.5",
+    "ruff==0.15.22",
+]
 
 [tool.ruff]
 line-length = 130
