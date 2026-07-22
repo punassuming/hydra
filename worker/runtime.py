@@ -119,12 +119,7 @@ def _detect_capabilities() -> list[str]:
         try:
             import sqlalchemy  # noqa: F401
         except ImportError:
-            try:
-                import pymongo  # noqa: F401
-            except ImportError:
-                pass
-            else:
-                capabilities.append("sql")
+            pass
         else:
             capabilities.append("sql")
 

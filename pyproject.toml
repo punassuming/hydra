@@ -17,6 +17,7 @@ dependencies = [
     "python-dotenv==1.0.1",
     "redis==5.0.8",
     "PyYAML==6.0.3",
+    "SQLAlchemy==2.0.36",
     "sse-starlette==2.0.0",
     "uvicorn[standard]==0.30.1",
 ]

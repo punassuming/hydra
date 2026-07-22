@@ -116,6 +116,7 @@ def test_file_criteria_require_file_exists_passes():
     import os
     import tempfile
     import time
+
     with tempfile.NamedTemporaryFile(delete=False) as f:
         path = f.name
     try:
@@ -128,6 +129,7 @@ def test_file_criteria_require_file_exists_passes():
 
 def test_file_criteria_require_file_exists_fails_missing():
     import time
+
     job = {"completion": {"require_file_exists": ["/nonexistent/hydra_test_file_xyz.txt"]}}
     ok, reason = evaluate_file_criteria(job, time.time())
     assert not ok
@@ -138,6 +140,7 @@ def test_file_criteria_require_file_updated_since_start_passes():
     import os
     import tempfile
     import time
+
     start = time.time() - 1  # file written after this
     with tempfile.NamedTemporaryFile(delete=False) as f:
         f.write(b"data")
@@ -154,6 +157,7 @@ def test_file_criteria_require_file_updated_since_start_fails_old_file():
     import os
     import tempfile
     import time
+
     with tempfile.NamedTemporaryFile(delete=False) as f:
         f.write(b"old data")
         path = f.name
@@ -170,6 +174,7 @@ def test_file_criteria_require_file_updated_since_start_fails_old_file():
 
 def test_file_criteria_require_file_updated_since_start_fails_missing():
     import time
+
     job = {"completion": {"require_file_updated_since_start": ["/nonexistent/hydra_test_xyz.txt"]}}
     ok, reason = evaluate_file_criteria(job, time.time())
     assert not ok
@@ -178,10 +183,12 @@ def test_file_criteria_require_file_updated_since_start_fails_missing():
 
 def test_file_criteria_no_criteria_passes():
     import time
+
     job = {"completion": {}}
     ok, reason = evaluate_file_criteria(job, time.time())
     assert ok
     from worker.utils.git import _inject_token_into_url
+
     url = "https://github.com/user/repo.git"
     result = _inject_token_into_url(url, "mytoken")
     assert "x-oauth-token:mytoken@github.com" in result
@@ -190,6 +197,7 @@ def test_file_criteria_no_criteria_passes():
 
 def test_git_token_injection_ssh_passthrough():
     from worker.utils.git import _inject_token_into_url
+
     url = "git@github.com:user/repo.git"
     result = _inject_token_into_url(url, "mytoken")
     # SSH URLs should pass through unchanged
@@ -269,6 +277,7 @@ def test_ensure_worker_registration_handles_refresh_failure():
 
 def test_git_token_injection_empty_token():
     from worker.utils.git import _inject_token_into_url
+
     url = "https://github.com/user/repo.git"
     result = _inject_token_into_url(url, "")
     assert result == url
@@ -312,6 +321,7 @@ def test_copy_source_directory():
     import tempfile
 
     from worker.utils.copy import fetch_copy_source
+
     with tempfile.TemporaryDirectory() as src_dir:
         open(os.path.join(src_dir, "run.sh"), "w").write("echo hello")
         sub = os.path.join(src_dir, "subdir")
@@ -328,6 +338,7 @@ def test_copy_source_single_file():
     import tempfile
 
     from worker.utils.copy import fetch_copy_source
+
     with tempfile.NamedTemporaryFile(suffix=".sh", delete=False) as f:
         f.write(b"echo hi")
         src_file = f.name
@@ -345,6 +356,7 @@ def test_copy_source_missing_raises():
     import pytest
 
     from worker.utils.copy import fetch_copy_source
+
     with tempfile.TemporaryDirectory() as dest_dir:
         with pytest.raises(FileNotFoundError):
             fetch_copy_source("/nonexistent/path/that/does/not/exist", dest_dir)
@@ -356,6 +368,7 @@ def test_copy_source_rejects_relative_path():
     import pytest
 
     from worker.utils.copy import fetch_copy_source
+
     with tempfile.TemporaryDirectory() as dest_dir:
         with pytest.raises(ValueError, match="absolute"):
             fetch_copy_source("relative/path", dest_dir)
@@ -368,6 +381,7 @@ def test_rsync_source_builds_command(monkeypatch):
     from worker.utils.rsync import fetch_rsync_source
 
     captured = {}
+
     def mock_run(cmd, **kwargs):
         captured["cmd"] = cmd
         return subprocess.CompletedProcess(cmd, 0)
@@ -387,6 +401,7 @@ def test_rsync_source_with_ssh_key(monkeypatch):
     from worker.utils.rsync import fetch_rsync_source
 
     captured = {}
+
     def mock_run(cmd, **kwargs):
         captured["cmd"] = cmd
         return subprocess.CompletedProcess(cmd, 0)
@@ -403,6 +418,7 @@ def test_git_sparse_clone_calls(monkeypatch):
     from worker.utils.git import fetch_git_source
 
     calls = []
+
     def mock_run(cmd, **kwargs):
         calls.append(cmd)
         return subprocess.CompletedProcess(cmd, 0)
@@ -480,6 +496,7 @@ def test_absolute_workdir_treated_as_relative_to_source(monkeypatch, tmp_path):
 # SQL executor improvements
 # ---------------------------------------------------------------------------
 
+
 def test_sql_executor_requires_query():
     """SQL executor should fail with empty query."""
     job = {"executor": {"type": "sql", "dialect": "postgres", "connection_uri": "postgresql://localhost/test", "query": ""}}
@@ -499,6 +516,7 @@ def test_sql_executor_requires_connection_uri():
 def test_detect_capabilities_includes_http():
     """Worker capabilities should always include 'http'."""
     from worker.runtime import _detect_capabilities
+
     caps = _detect_capabilities()
     assert "http" in caps
     assert "shell" in caps
@@ -506,16 +524,18 @@ def test_detect_capabilities_includes_http():
 
 
 def test_detect_capabilities_sql_depends_on_drivers():
-    """SQL should only be advertised if sqlalchemy or pymongo is available."""
+    """SQL should only be advertised when the relational executor can run."""
     from worker.runtime import _detect_capabilities
+
     caps = _detect_capabilities()
-    # pymongo is installed from scheduler requirements, so sql should be present
+    # SQLAlchemy is a worker runtime dependency for the relational executor.
     assert "sql" in caps
 
 
 # ---------------------------------------------------------------------------
 # HTTP executor
 # ---------------------------------------------------------------------------
+
 
 def test_http_executor_requires_url():
     """HTTP executor should fail with empty URL."""
@@ -536,6 +556,7 @@ def test_http_executor_connection_refused():
 # ---------------------------------------------------------------------------
 # Impersonation
 # ---------------------------------------------------------------------------
+
 
 def test_impersonation_supported_on_linux():
     """On Linux, impersonation should be accepted (though sudo may fail without config)."""
@@ -559,6 +580,7 @@ def test_impersonation_supported_on_linux():
 # Workspace cache
 # ---------------------------------------------------------------------------
 
+
 def test_workspace_cache_basic(tmp_path):
     """Workspace cache should create and reuse cache entries."""
     import os
@@ -568,6 +590,7 @@ def test_workspace_cache_basic(tmp_path):
     cache = WorkspaceCache(cache_root=str(tmp_path / "cache"), max_mb=100, ttl_seconds=3600)
 
     fetch_count = [0]
+
     def mock_fetch(dest, src_cfg):
         fetch_count[0] += 1
         with open(os.path.join(dest, "file.txt"), "w") as f:
@@ -634,9 +657,11 @@ def test_workspace_cache_always_mode_miss(tmp_path):
 # Scheduler model updates
 # ---------------------------------------------------------------------------
 
+
 def test_sql_executor_model_new_fields():
     """SqlExecutor model should accept max_rows and autocommit."""
     from scheduler.models.executor import SqlExecutor
+
     sql = SqlExecutor(query="SELECT 1", dialect="postgres", max_rows=500, autocommit=False)
     assert sql.max_rows == 500
     assert sql.autocommit is False
@@ -649,6 +674,7 @@ def test_sql_executor_model_new_fields():
 def test_http_executor_model():
     """HttpExecutor model should validate required fields."""
     from scheduler.models.executor import HttpExecutor
+
     http = HttpExecutor(url="https://example.com", method="POST", body='{"key": "value"}')
     assert http.method == "POST"
     assert http.url == "https://example.com"
@@ -659,6 +685,7 @@ def test_http_executor_model():
 def test_source_config_cache_field():
     """SourceConfig should have a cache field defaulting to 'auto'."""
     from scheduler.models.job_definition import SourceConfig
+
     src = SourceConfig(url="https://github.com/test/repo.git")
     assert src.cache == "auto"
 
@@ -693,12 +720,14 @@ def test_affinity_impersonation_check():
 # Non-containerized environment configuration
 # ---------------------------------------------------------------------------
 
+
 def test_hydra_python_path_used_by_find_python(monkeypatch):
     """_find_python() should honour HYDRA_PYTHON_PATH when set."""
     # Point to a known-good interpreter
     import sys
 
     from worker.runtime import _find_python
+
     monkeypatch.setenv("HYDRA_PYTHON_PATH", sys.executable)
     result = _find_python()
     assert result == sys.executable
@@ -707,6 +736,7 @@ def test_hydra_python_path_used_by_find_python(monkeypatch):
 def test_hydra_python_path_fallback(monkeypatch):
     """_find_python() should fall back to PATH when HYDRA_PYTHON_PATH is unset."""
     from worker.runtime import _find_python
+
     monkeypatch.delenv("HYDRA_PYTHON_PATH", raising=False)
     result = _find_python()
     assert result in ("python3", "python", "")
@@ -715,6 +745,7 @@ def test_hydra_python_path_fallback(monkeypatch):
 def test_hydra_shell_path_default(monkeypatch):
     """_get_shell_path() should return empty string when env is unset."""
     from worker.runtime import _get_shell_path
+
     monkeypatch.delenv("HYDRA_SHELL_PATH", raising=False)
     assert _get_shell_path() == ""
 
@@ -722,6 +753,7 @@ def test_hydra_shell_path_default(monkeypatch):
 def test_hydra_shell_path_configured(monkeypatch):
     """_get_shell_path() should return configured path."""
     from worker.runtime import _get_shell_path
+
     monkeypatch.setenv("HYDRA_SHELL_PATH", "/usr/local/bin/bash")
     assert _get_shell_path() == "/usr/local/bin/bash"
 
@@ -729,6 +761,7 @@ def test_hydra_shell_path_configured(monkeypatch):
 def test_hydra_git_path_default(monkeypatch):
     """_get_git_path() should return empty string when env is unset."""
     from worker.runtime import _get_git_path
+
     monkeypatch.delenv("HYDRA_GIT_PATH", raising=False)
     assert _get_git_path() == ""
 
@@ -736,6 +769,7 @@ def test_hydra_git_path_default(monkeypatch):
 def test_hydra_git_path_configured(monkeypatch):
     """_get_git_path() should return configured path."""
     from worker.runtime import _get_git_path
+
     monkeypatch.setenv("HYDRA_GIT_PATH", "/usr/local/bin/git")
     assert _get_git_path() == "/usr/local/bin/git"
 
@@ -743,6 +777,7 @@ def test_hydra_git_path_configured(monkeypatch):
 def test_hydra_temp_dir_default(monkeypatch):
     """_get_temp_dir() should return None when env is unset."""
     from worker.runtime import _get_temp_dir
+
     monkeypatch.delenv("HYDRA_TEMP_DIR", raising=False)
     assert _get_temp_dir() is None
 
@@ -750,6 +785,7 @@ def test_hydra_temp_dir_default(monkeypatch):
 def test_hydra_temp_dir_configured(monkeypatch):
     """_get_temp_dir() should return configured path."""
     from worker.runtime import _get_temp_dir
+
     monkeypatch.setenv("HYDRA_TEMP_DIR", "/var/tmp/hydra")
     assert _get_temp_dir() == "/var/tmp/hydra"
 
@@ -770,6 +806,7 @@ def test_shell_executor_uses_hydra_shell_path(monkeypatch):
 def test_git_uses_hydra_git_path(monkeypatch):
     """git.py should use HYDRA_GIT_PATH when set."""
     from worker.utils.git import _git_bin
+
     monkeypatch.setenv("HYDRA_GIT_PATH", "/usr/local/bin/git")
     assert _git_bin() == "/usr/local/bin/git"
 
@@ -777,6 +814,7 @@ def test_git_uses_hydra_git_path(monkeypatch):
 def test_git_default_path(monkeypatch):
     """git.py should default to 'git' when HYDRA_GIT_PATH is unset."""
     from worker.utils.git import _git_bin
+
     monkeypatch.delenv("HYDRA_GIT_PATH", raising=False)
     assert _git_bin() == "git"
 
@@ -786,6 +824,7 @@ def test_os_exec_uses_hydra_shell_path(monkeypatch):
     if IS_WINDOWS:
         pytest.skip("HYDRA_SHELL_PATH configures bash-like shells, not Windows PowerShell")
     from worker.utils.os_exec import run_command
+
     monkeypatch.setenv("HYDRA_SHELL_PATH", "/bin/bash")
     rc, out, _ = run_command("echo env-shell-ok", shell="bash")
     assert rc == 0
@@ -795,6 +834,7 @@ def test_os_exec_uses_hydra_shell_path(monkeypatch):
 def test_python_env_honours_hydra_python_path(monkeypatch):
     """Python executor should use HYDRA_PYTHON_PATH when executor.interpreter is not set."""
     import sys
+
     monkeypatch.setenv("HYDRA_PYTHON_PATH", sys.executable)
     job = {"executor": {"type": "python", "code": "print('env-python-ok')"}, "timeout": 5}
     rc, out, err = execute_job(job)
@@ -822,20 +862,22 @@ def test_artifact_stdout_intercepted_by_handle_stdout():
     def handle_stdout(text):
         stripped = text.strip()
         if stripped.startswith(_ARTIFACT_PREFIX):
-            raw_json = stripped[len(_ARTIFACT_PREFIX):].strip()
+            raw_json = stripped[len(_ARTIFACT_PREFIX) :].strip()
             try:
                 artifact_payload = _json.loads(raw_json)
                 artifact_name = str(artifact_payload.get("name") or "").strip()
                 metadata = artifact_payload.get("metadata") or {}
                 if artifact_name:
-                    fake_publish_run_event({
-                        "type": "artifact_emitted",
-                        "run_id": "run-1",
-                        "job_id": "job-1",
-                        "domain": "prod",
-                        "artifact_name": artifact_name,
-                        "metadata": metadata,
-                    })
+                    fake_publish_run_event(
+                        {
+                            "type": "artifact_emitted",
+                            "run_id": "run-1",
+                            "job_id": "job-1",
+                            "domain": "prod",
+                            "artifact_name": artifact_name,
+                            "metadata": metadata,
+                        }
+                    )
             except Exception:
                 fake_stream_log("stdout", text)
             return
@@ -891,6 +933,7 @@ def test_execute_job_emits_artifact_via_stdout():
 # ---------------------------------------------------------------------------
 # Sensor executor (worker-side)
 # ---------------------------------------------------------------------------
+
 
 def test_sensor_http_condition_met(monkeypatch):
     """Sensor executor returns success immediately when HTTP check succeeds on first poll."""
@@ -987,6 +1030,7 @@ def test_execute_job_sensor_executor(monkeypatch):
 # Capability detection: fail-closed correctness
 # ---------------------------------------------------------------------------
 
+
 def test_detect_capabilities_shell_requires_working_shell(monkeypatch):
     """shell/external should not be advertised when all shell binaries fail."""
     import subprocess
@@ -1015,12 +1059,13 @@ def test_detect_capabilities_sql_requires_python(monkeypatch):
 def test_detect_capabilities_sensor_always_present():
     """sensor capability should always be advertised (HTTP sensor uses stdlib)."""
     from worker.runtime import _detect_capabilities
+
     caps = _detect_capabilities()
     assert "sensor" in caps
 
 
 def test_detect_capabilities_no_false_positive_sql_without_driver(monkeypatch):
-    """sql should not be advertised when sqlalchemy and pymongo are both absent."""
+    """sql should not be advertised when the relational executor is unavailable."""
     import builtins
 
     import worker.runtime as runtime_mod
@@ -1029,7 +1074,7 @@ def test_detect_capabilities_no_false_positive_sql_without_driver(monkeypatch):
     original_import = builtins.__import__
 
     def import_blocker(name, *args, **kwargs):
-        if name in ("sqlalchemy", "pymongo"):
+        if name == "sqlalchemy":
             raise ImportError(f"mocked: {name} unavailable")
         return original_import(name, *args, **kwargs)
 
@@ -1037,12 +1082,13 @@ def test_detect_capabilities_no_false_positive_sql_without_driver(monkeypatch):
     monkeypatch.setattr(runtime_mod, "_find_python", lambda: "python3")
 
     caps = _detect_capabilities()
-    assert "sql" not in caps, "sql should not be advertised without sqlalchemy/pymongo"
+    assert "sql" not in caps, "sql should not be advertised without sqlalchemy"
 
 
 # ---------------------------------------------------------------------------
 # Startup timing instrumentation
 # ---------------------------------------------------------------------------
+
 
 def test_process_start_ts_is_set():
     """_PROCESS_START_TS should be set at module import, before any registration."""
@@ -1100,6 +1146,7 @@ def test_execute_job_records_env_prep_timing():
 def test_execute_job_no_timings_when_not_provided():
     """execute_job should work fine without a timings dict (backwards compatible)."""
     from worker.executor import execute_job
+
     job = {"executor": {"type": "shell", "script": "echo ok", "shell": "bash"}, "timeout": 5}
     rc, out, err = execute_job(job)
     assert rc == 0
