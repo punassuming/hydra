@@ -1,3 +1,5 @@
+import hashlib
+import secrets
 from typing import Dict
 
 from fastapi import APIRouter, HTTPException, Request
@@ -5,9 +7,6 @@ from fastapi import APIRouter, HTTPException, Request
 from ..mongo_client import get_db
 from ..redis_client import get_redis
 from ..utils.redis_acl import ensure_worker_acl_user, worker_acl_username
-import hashlib
-import secrets
-
 
 router = APIRouter(prefix="/domain", tags=["domain"])
 
@@ -45,7 +44,13 @@ def update_domain_settings(payload: Dict, request: Request) -> Dict:
         {"$set": {"display_name": display_name, "description": description, "global_lock_limits": global_lock_limits}},
         upsert=True,
     )
-    return {"ok": True, "domain": domain, "display_name": display_name, "description": description, "global_lock_limits": global_lock_limits}
+    return {
+        "ok": True,
+        "domain": domain,
+        "display_name": display_name,
+        "description": description,
+        "global_lock_limits": global_lock_limits,
+    }
 
 
 @router.post("/token/rotate")

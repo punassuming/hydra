@@ -24,7 +24,9 @@ services:
       - WORKER_REQUIRE_REDIS_ACL=${WORKER_REQUIRE_REDIS_ACL:-true}
       - REDIS_PASSWORD=${REDIS_PASSWORD:-}
     depends_on:
-      - redis
-      - scheduler
+      redis:
+        condition: service_healthy
+      scheduler:
+        condition: service_healthy
     volumes:
       - ./worker:/app/worker

@@ -3,7 +3,7 @@ import platform
 import shutil
 import subprocess
 import tempfile
-from typing import Dict, List, Optional, Tuple, Callable
+from typing import Callable, Dict, List, Optional, Tuple
 
 
 def _venv_python_path(venv_dir: str) -> str:

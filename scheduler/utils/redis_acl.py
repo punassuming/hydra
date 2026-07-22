@@ -1,5 +1,6 @@
 import hashlib
 import secrets
+
 from redis.exceptions import ResponseError
 
 from ..redis_client import get_redis

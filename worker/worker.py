@@ -1,29 +1,30 @@
+import json
 import os
 import threading
 import time
-import json
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+
 from redis.exceptions import RedisError
 
 # Capture process start time before any significant work occurs so that
 # worker_startup_duration_ms can be accurately recorded at registration.
 _PROCESS_START_TS: float = time.time()
 
-from .redis_client import get_redis
 from .config import (
-    get_worker_id,
-    get_tags,
     get_allowed_users,
-    get_max_concurrency,
-    get_initial_state,
     get_domain,
     get_domain_token,
+    get_initial_state,
+    get_max_concurrency,
+    get_tags,
+    get_worker_id,
 )
-from .utils.heartbeat import start_heartbeat
-from .utils.concurrency import incr_running, add_active_job, remove_active_job
-from .utils.completion import evaluate_completion, evaluate_file_criteria
 from .executor import execute_job
+from .redis_client import get_redis
+from .utils.completion import evaluate_completion, evaluate_file_criteria
+from .utils.concurrency import add_active_job, incr_running, remove_active_job
+from .utils.heartbeat import start_heartbeat
 
 
 def append_worker_op(r, domain: str, worker_id: str, op_type: str, message: str, details: dict | None = None):
@@ -41,10 +42,11 @@ def append_worker_op(r, domain: str, worker_id: str, op_type: str, message: str,
 
 def register_worker(worker_id: str, max_concurrency: int):
     r = get_redis()
+    import getpass
     import platform
     import socket
-    import getpass
-    from .executor import _detect_shells, _detect_capabilities
+
+    from .executor import _detect_capabilities, _detect_shells
 
     hostname = socket.gethostname()
     try:

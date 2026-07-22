@@ -1,5 +1,5 @@
-from ..redis_client import get_redis
 from ..config import get_domain
+from ..redis_client import get_redis
 
 
 def incr_running(worker_id: str, delta: int) -> int:

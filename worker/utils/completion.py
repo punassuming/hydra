@@ -1,5 +1,5 @@
-from typing import Dict, Optional, Tuple
 import os
+from typing import Dict, Tuple
 
 
 def _contains_all(text: str, needles: list) -> Tuple[bool, str]:

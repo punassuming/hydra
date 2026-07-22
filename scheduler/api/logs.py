@@ -1,14 +1,13 @@
 import asyncio
-import json
 from typing import Dict, Optional
-from bson import ObjectId
 
+from bson import ObjectId
 from fastapi import APIRouter, HTTPException, Request
 from sse_starlette.sse import EventSourceResponse
 
-from ..redis_client import get_redis
-from ..mongo_client import get_db
 from ..models.job_run import JobRun
+from ..mongo_client import get_db
+from ..redis_client import get_redis
 
 router = APIRouter()
 

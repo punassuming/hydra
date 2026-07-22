@@ -1,11 +1,13 @@
-import os
 import json
+import os
 from enum import Enum
 from typing import Optional
-from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, Field
+
 import google.generativeai as genai
 import openai
+from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel, Field
+
 from ..models.job_definition import JobCreate
 from ..mongo_client import get_db
 
@@ -44,7 +46,8 @@ class PredictDurationRequest(BaseModel):
     domain: Optional[str] = None
 
 SYSTEM_PROMPT_JOB = """
-You are an expert job scheduler assistant. Convert the user's natural language request into a JSON object matching the JobCreate schema.
+You are an expert job scheduler assistant. Convert the user's natural language request into a JSON
+object matching the JobCreate schema.
 Ensure valid JSON. Do not include markdown formatting (```json).
 
 Only include fields that differ from defaults. A minimal job needs just name, executor, and schedule.

@@ -19,7 +19,6 @@ Environment variables are identical to the scheduler API service
 the orchestration loops.
 """
 
-import os
 import signal
 import sys
 

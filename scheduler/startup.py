@@ -8,10 +8,10 @@ import hashlib
 import os
 import secrets
 
+from .mongo_client import get_db
+from .redis_client import get_redis
 from .utils.logging import setup_logging
 from .utils.redis_acl import ensure_worker_acl_user
-from .redis_client import get_redis
-from .mongo_client import get_db
 
 log = setup_logging("scheduler.startup")
 

@@ -6,7 +6,6 @@ from sse_starlette.sse import EventSourceResponse
 
 from ..event_bus import event_bus
 
-
 router = APIRouter()
 
 

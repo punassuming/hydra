@@ -1,23 +1,23 @@
 import os
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .api.jobs import router as jobs_router
-from .api.workers import router as workers_router
-from .api.health import router as health_router
-from .api.events import router as events_router
-from .api.history import router as history_router
-from .api.logs import router as logs_router
 from .api.admin import router as admin_router
+from .api.ai import router as ai_router
 from .api.credentials import router as credentials_router
 from .api.domain import router as domain_router
-from .api.ai import router as ai_router
+from .api.events import router as events_router
+from .api.health import router as health_router
+from .api.history import router as history_router
+from .api.jobs import router as jobs_router
+from .api.logs import router as logs_router
+from .api.workers import router as workers_router
 from .orchestrator import OrchestratorManager, create_standard_orchestrator
 from .startup import ensure_admin_token, ensure_domains_seeded, warn_credential_encryption_key
-from .utils.logging import setup_logging
 from .utils.auth import enforce_api_key
-
+from .utils.logging import setup_logging
 
 log = setup_logging("scheduler.main")
 

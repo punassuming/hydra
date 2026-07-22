@@ -9,19 +9,18 @@ import json
 import threading
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
+from scheduler.models.job_run import TERMINAL_STATES
 from scheduler.run_events import (
-    _handle_run_start,
-    _handle_run_end,
     _handle_event,
+    _handle_run_end,
+    _handle_run_start,
     _recover_staging_events,
     run_event_loop,
 )
-from scheduler.models.job_run import TERMINAL_STATES
-
 
 # ---------------------------------------------------------------------------
 # Helpers

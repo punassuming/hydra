@@ -46,6 +46,23 @@ spec:
             limits:
               cpu: "500m"
               memory: "512Mi"
+          # /health bypasses auth and touches Mongo/Redis, so it fails fast
+          # if the API is up but can't actually serve requests.
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
 ---
 apiVersion: v1
 kind: Service
@@ -80,6 +97,18 @@ spec:
           env:
             - name: VITE_API_BASE_URL
               value: http://hydra-scheduler:8000
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 10
+            periodSeconds: 15
 ---
 apiVersion: v1
 kind: Service

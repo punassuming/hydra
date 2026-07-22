@@ -9,18 +9,17 @@ Verifies:
 """
 
 import json
-import time
 import threading
+import time
 import unittest
 from unittest.mock import MagicMock, patch
 
 from scheduler.orchestrator import (
+    HEARTBEAT_TTL,
+    ORCHESTRATOR_HEARTBEAT_KEY,
     OrchestratorManager,
     create_standard_orchestrator,
-    ORCHESTRATOR_HEARTBEAT_KEY,
-    HEARTBEAT_TTL,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helper: a trivial loop that blocks on the stop_event.
@@ -185,10 +184,12 @@ class TestCreateStandardOrchestrator(unittest.TestCase):
 class TestOrchestrationHealthEndpoint(unittest.TestCase):
 
     def setUp(self):
-        from fastapi.testclient import TestClient
-        from scheduler.main import app
         # Use a fixed admin token so the auth middleware is satisfied.
         import os
+
+        from fastapi.testclient import TestClient
+
+        from scheduler.main import app
         os.environ.setdefault("ADMIN_TOKEN", "test_token")
         self.client = TestClient(app, raise_server_exceptions=True)
         self.headers = {"X-Admin-Token": "test_token"}
@@ -244,6 +245,59 @@ class TestOrchestrationHealthEndpoint(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
         self.assertEqual(data["status"], "unknown")
+
+
+# ---------------------------------------------------------------------------
+# /health endpoint — must check Mongo, not just Redis
+# ---------------------------------------------------------------------------
+
+class TestHealthEndpoint(unittest.TestCase):
+
+    def setUp(self):
+        import os
+
+        from fastapi.testclient import TestClient
+
+        from scheduler.main import app
+        os.environ.setdefault("ADMIN_TOKEN", "test_token")
+        self.headers = {"X-Admin-Token": "test_token"}
+        # raise_server_exceptions=False so an unhandled exception in the handler
+        # comes back as a real 500 response, matching production (uvicorn) behavior,
+        # instead of propagating as a Python exception in the test itself.
+        self.client = TestClient(app, raise_server_exceptions=False)
+
+    def _mock_redis(self):
+        fake = MagicMock()
+        fake.scan_iter.return_value = iter([])
+        fake.zcard.return_value = 0
+        return fake
+
+    def test_health_ok_when_redis_and_mongo_reachable(self):
+        fake_redis = self._mock_redis()
+        fake_db = MagicMock()
+        with patch("scheduler.api.health.get_redis", return_value=fake_redis), \
+             patch("scheduler.api.health.get_db", return_value=fake_db):
+            resp = self.client.get("/health", headers=self.headers)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["status"], "ok")
+        fake_db.command.assert_called_once_with("ping")
+
+    def test_health_fails_when_mongo_unreachable(self):
+        """A Redis-only check would report healthy here; it must not."""
+        fake_redis = self._mock_redis()
+        fake_db = MagicMock()
+        fake_db.command.side_effect = Exception("mongo unreachable")
+        with patch("scheduler.api.health.get_redis", return_value=fake_redis), \
+             patch("scheduler.api.health.get_db", return_value=fake_db):
+            resp = self.client.get("/health", headers=self.headers)
+        self.assertEqual(resp.status_code, 500)
+
+    def test_health_fails_when_redis_unreachable(self):
+        fake_db = MagicMock()
+        with patch("scheduler.api.health.get_redis", side_effect=Exception("redis unreachable")), \
+             patch("scheduler.api.health.get_db", return_value=fake_db):
+            resp = self.client.get("/health", headers=self.headers)
+        self.assertEqual(resp.status_code, 500)
 
 
 # ---------------------------------------------------------------------------

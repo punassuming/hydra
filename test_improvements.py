@@ -4,12 +4,12 @@ Test script to validate the new job management improvements.
 This script creates test jobs with tags and verifies the new API endpoints.
 """
 import sys
-import json
+
+from scheduler.api.jobs import _validate_job_definition
+from scheduler.models.executor import ShellExecutor
 
 # Test that the new fields are properly defined
-from scheduler.models.job_definition import JobDefinition, Affinity
-from scheduler.models.executor import ShellExecutor
-from scheduler.api.jobs import _validate_job_definition
+from scheduler.models.job_definition import Affinity, JobDefinition
 
 
 def test_tags_functionality():

@@ -1,9 +1,11 @@
 import os
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
-from scheduler.main import app
+
 from scheduler.api.ai import AIProvider
+from scheduler.main import app
 
 _TEST_ADMIN_TOKEN = "test-admin-token-ai"
 
@@ -30,7 +32,9 @@ def mock_gemini():
 def mock_openai():
     with patch("scheduler.api.ai.openai") as mock:
         completion_mock = MagicMock()
-        completion_mock.choices[0].message.content = '{"name": "mock-job-openai", "executor": {"type": "shell", "script": "echo hi"}}'
+        completion_mock.choices[0].message.content = (
+            '{"name": "mock-job-openai", "executor": {"type": "shell", "script": "echo hi"}}'
+        )
         mock.OpenAI.return_value.chat.completions.create.return_value = completion_mock
         yield mock
 

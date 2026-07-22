@@ -2,7 +2,6 @@ from fastapi import APIRouter, Request
 
 from ..mongo_client import get_db
 
-
 router = APIRouter(prefix="/history", tags=["history"])
 
 

@@ -2,8 +2,10 @@ import json
 import time
 
 from fastapi import APIRouter, Request
+
+from ..mongo_client import get_db
+from ..orchestrator import HEARTBEAT_TTL, ORCHESTRATOR_HEARTBEAT_KEY
 from ..redis_client import get_redis
-from ..orchestrator import ORCHESTRATOR_HEARTBEAT_KEY, HEARTBEAT_TTL
 
 router = APIRouter()
 
@@ -12,6 +14,11 @@ router = APIRouter()
 def health(request: Request):
     r = get_redis()
     domain = getattr(request.state, "domain", "prod")
+    # Ping Mongo too — job/admin APIs depend on it, so a Redis-only check would
+    # keep reporting "ok" (and keep passing Docker/k8s readiness) during a Mongo
+    # outage. Letting this raise on failure is intentional: FastAPI turns it into
+    # a 500, which is what marks the container/pod unhealthy.
+    get_db().command("ping")
     # Return lightweight health stats
     workers_count = len(list(r.scan_iter(f"workers:{domain}:*")))
     pending = r.zcard(f"job_queue:{domain}:pending")

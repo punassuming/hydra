@@ -1,16 +1,35 @@
+import json
+import os
 import platform
 import subprocess
 import threading
 import time
-import json
-import os
 from typing import Callable
+
 from redis.exceptions import RedisError
 
-from ..redis_client import get_redis
 from ..config import get_domain
+from ..redis_client import get_redis
 
 _IS_WINDOWS = platform.system().lower().startswith("win")
+
+HEARTBEAT_FILE = os.getenv("WORKER_HEARTBEAT_FILE", "/tmp/hydra_worker_heartbeat")
+
+
+def _touch_heartbeat_file() -> None:
+    """Update the local liveness file used by the container HEALTHCHECK.
+
+    This reflects only "is the heartbeat loop thread still executing" —
+    intentionally independent of Redis reachability, which the loop already
+    tolerates and retries on its own. It is a narrow liveness signal for
+    catching a hung/deadlocked process, not a readiness check.
+    """
+    try:
+        with open(HEARTBEAT_FILE, "w", encoding="utf-8") as f:
+            f.write(str(time.time()))
+    except OSError:
+        # Liveness file is best-effort; never let it take down the worker.
+        pass
 
 
 def _collect_process_metrics_linux() -> dict:
@@ -108,7 +127,7 @@ def _collect_process_metrics_windows() -> dict:
             capture_output=True, text=True, timeout=5,
         )
         # Output: header "ProcessId\n" + one line per child PID + trailing blank line
-        child_pids = [l.strip() for l in result.stdout.splitlines() if l.strip().isdigit()]
+        child_pids = [line.strip() for line in result.stdout.splitlines() if line.strip().isdigit()]
         process_count = 1 + len(child_pids)
     except Exception:
         pass
@@ -193,6 +212,8 @@ def start_heartbeat(
             except RedisError as exc:
                 # Transient Redis/network errors must not terminate heartbeat.
                 print(f"Heartbeat Redis error for {worker_id}: {exc}")
+            # Runs regardless of Redis outcome above — proves the loop thread is alive.
+            _touch_heartbeat_file()
             time.sleep(interval)
 
     t = threading.Thread(target=_beat, daemon=True)

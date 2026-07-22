@@ -1,15 +1,14 @@
-import os
 import json
+import os
 import time
 from datetime import datetime, timezone
 from typing import List, Tuple
 
-from ..redis_client import get_redis
+from ..event_bus import event_bus
 from ..mongo_client import get_db
+from ..redis_client import get_redis
 from .logging import setup_logging
 from .worker_ops import append_worker_op
-from ..event_bus import event_bus
-
 
 log = setup_logging("scheduler.failover")
 

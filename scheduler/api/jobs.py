@@ -1,14 +1,13 @@
-from datetime import datetime, date, timedelta, timezone
-from typing import List, Dict, Any, Optional
 import json
 import os
 import time
+from datetime import date, datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Request, Body
+from fastapi import APIRouter, Body, HTTPException, Request
 from pydantic import BaseModel
 
-from ..mongo_client import get_db
-from ..redis_client import get_redis
+from ..event_bus import event_bus
 from ..models.job_definition import (
     JobCreate,
     JobDefinition,
@@ -17,9 +16,9 @@ from ..models.job_definition import (
     ScheduleConfig,
 )
 from ..models.job_run import JobRun
-from ..event_bus import event_bus
+from ..mongo_client import get_db
+from ..redis_client import get_redis
 from ..utils.schedule import initialize_schedule
-
 
 router = APIRouter()
 
@@ -77,7 +76,15 @@ def _normalize_run_doc(doc: Dict[str, Any]) -> Dict[str, Any]:
     return normalized
 
 
-def _enqueue_job(job_id: str, reason: str, extra_payload: dict | None = None, priority: int | None = None, domain: str = "prod", params: dict | None = None, retry_attempt: int = 0):
+def _enqueue_job(
+    job_id: str,
+    reason: str,
+    extra_payload: dict | None = None,
+    priority: int | None = None,
+    domain: str = "prod",
+    params: dict | None = None,
+    retry_attempt: int = 0,
+):
     r = get_redis()
     score = float(priority if priority is not None else 5)
     r.sadd("hydra:domains", domain)
@@ -638,7 +645,9 @@ def queue_overview(request: Request):
                     "schedule_mode": ((job or {}).get("schedule") or {}).get("mode", "immediate"),
                     "next_run_at": _serialize_ts(((job or {}).get("schedule") or {}).get("next_run_at")),
                     "queue_score": score,
-                    "enqueued_ts": _serialize_ts(datetime.fromtimestamp(float(enqueued_ts), tz=timezone.utc)) if enqueued_ts else None,
+                    "enqueued_ts": (
+                        _serialize_ts(datetime.fromtimestamp(float(enqueued_ts), tz=timezone.utc)) if enqueued_ts else None
+                    ),
                     "reason": meta.get("reason"),
                     "no_worker_count": int(meta.get("no_worker_count", 0)),
                 }
@@ -935,7 +944,6 @@ def job_graph(job_id: str, request: Request):
 def jobs_statistics(request: Request):
     """Get aggregate statistics across all jobs"""
     db = get_db()
-    r = get_redis()
     domain = getattr(request.state, "domain", "prod")
     is_admin = getattr(request.state, "is_admin", False)
     force_domain = request.query_params.get("domain")

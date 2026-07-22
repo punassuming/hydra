@@ -1,11 +1,12 @@
-from scheduler.utils.affinity import normalize_affinity, passes_affinity
-from scheduler.utils.selectors import select_best_worker
-from scheduler.models.job_definition import JobDefinition, Affinity, ScheduleConfig
-from scheduler.models.executor import ShellExecutor, PythonExecutor
-from scheduler.api.jobs import _validate_job_definition, _build_dependency_graph
-from scheduler.utils.schedule import initialize_schedule, advance_schedule
 from datetime import datetime, timezone
+
+from scheduler.api.jobs import _build_dependency_graph, _validate_job_definition
+from scheduler.models.executor import PythonExecutor, ShellExecutor
+from scheduler.models.job_definition import Affinity, JobDefinition, ScheduleConfig
 from scheduler.models.worker_info import WorkerInfo
+from scheduler.utils.affinity import normalize_affinity, passes_affinity
+from scheduler.utils.schedule import advance_schedule, initialize_schedule
+from scheduler.utils.selectors import select_best_worker
 
 
 def test_affinity_matching():
@@ -136,6 +137,7 @@ def test_build_dependency_graph_includes_missing_dependency_node():
 def test_list_online_workers_recovers_expected_token_hash_from_persistence():
     import time
     from unittest.mock import MagicMock, patch
+
     from scheduler.scheduler import list_online_workers
 
     mock_r = MagicMock()
@@ -173,8 +175,8 @@ def test_source_config_model_fields():
 
 
 def test_job_definition_with_source():
-    from scheduler.models.job_definition import JobDefinition, SourceConfig
     from scheduler.models.executor import ShellExecutor
+    from scheduler.models.job_definition import JobDefinition, SourceConfig
     job = JobDefinition(
         name="sourced-job",
         user="tester",
@@ -213,8 +215,8 @@ def test_source_config_git_sparse():
 
 def test_job_definition_triggers_on_artifacts_field():
     """JobDefinition, JobCreate, and JobUpdate all accept triggers_on_artifacts."""
-    from scheduler.models.job_definition import JobDefinition, JobCreate, JobUpdate, Affinity
     from scheduler.models.executor import ShellExecutor
+    from scheduler.models.job_definition import Affinity, JobCreate, JobDefinition, JobUpdate
 
     job = JobDefinition(
         name="consumer",
@@ -245,6 +247,7 @@ def test_handle_artifact_emitted_upserts_and_triggers(monkeypatch):
     """_handle_artifact_emitted upserts the artifact doc and enqueues triggered jobs."""
     import time
     from unittest.mock import MagicMock, patch
+
     from scheduler.run_events import _handle_artifact_emitted
 
     mock_db = MagicMock()
@@ -296,6 +299,7 @@ def test_handle_artifact_emitted_upserts_and_triggers(monkeypatch):
 def test_handle_artifact_emitted_no_triggered_jobs(monkeypatch):
     """When no jobs subscribe to an artifact, no queue writes happen."""
     from unittest.mock import MagicMock, patch
+
     from scheduler.run_events import _handle_artifact_emitted
 
     mock_db = MagicMock()
@@ -319,6 +323,7 @@ def test_handle_artifact_emitted_no_triggered_jobs(monkeypatch):
 def test_handle_artifact_emitted_missing_name(monkeypatch):
     """Events with no artifact_name are silently ignored (no DB writes)."""
     from unittest.mock import MagicMock, patch
+
     from scheduler.run_events import _handle_artifact_emitted
 
     mock_db = MagicMock()
@@ -380,8 +385,8 @@ def test_sla_miss_fires_alerts():
 
     # Verify the update_one call marks sla_miss_alerted
     with patch("scheduler.scheduler.get_db", return_value=mock_db), \
-         patch("scheduler.run_events._fire_webhooks_async") as mock_webhook, \
-         patch("scheduler.run_events._fire_email_alert_async") as mock_email:
+         patch("scheduler.run_events._fire_webhooks_async"), \
+         patch("scheduler.run_events._fire_email_alert_async"):
         mock_db.job_runs.update_one(
             {"_id": "run-sla-1", "sla_miss_alerted": {"$ne": True}},
             {"$set": {"sla_miss_alerted": True}},
@@ -398,7 +403,6 @@ def test_sla_no_miss_when_under_limit():
     from unittest.mock import MagicMock
 
     mock_db = MagicMock()
-    start_ts = datetime.now(timezone.utc) - timedelta(seconds=50)
 
     job_doc = {
         "_id": "job-sla-fast",
@@ -420,8 +424,8 @@ def test_sla_no_miss_when_under_limit():
 
 def test_sla_model_field_present():
     """JobDefinition and JobCreate accept sla_max_duration_seconds."""
-    from scheduler.models.job_definition import JobDefinition, JobCreate, JobUpdate, Affinity
     from scheduler.models.executor import ShellExecutor
+    from scheduler.models.job_definition import Affinity, JobCreate, JobDefinition, JobUpdate
 
     job = JobDefinition(
         name="sla-test",
@@ -456,8 +460,10 @@ def test_jobrun_sla_miss_alerted_default():
 def test_backfill_queues_one_item_per_day():
     """backfill_job pushes exactly one item per day between start and end."""
     from unittest.mock import MagicMock, patch
+
     from fastapi import Request
-    from scheduler.api.jobs import backfill_job, BackfillRequest
+
+    from scheduler.api.jobs import BackfillRequest, backfill_job
 
     mock_db = MagicMock()
     mock_r = MagicMock()
@@ -491,8 +497,10 @@ def test_backfill_queues_one_item_per_day():
 def test_backfill_single_day():
     """A single-day backfill queues exactly one run."""
     from unittest.mock import MagicMock, patch
+
     from fastapi import Request
-    from scheduler.api.jobs import backfill_job, BackfillRequest
+
+    from scheduler.api.jobs import BackfillRequest, backfill_job
 
     mock_db = MagicMock()
     mock_r = MagicMock()
@@ -523,11 +531,12 @@ def test_backfill_single_day():
 
 def test_backfill_rejects_end_before_start():
     """backfill_job raises 422 when end_date < start_date."""
-    import pytest
-    from fastapi import HTTPException
     from unittest.mock import MagicMock, patch
-    from fastapi import Request
-    from scheduler.api.jobs import backfill_job, BackfillRequest
+
+    import pytest
+    from fastapi import HTTPException, Request
+
+    from scheduler.api.jobs import BackfillRequest, backfill_job
 
     mock_db = MagicMock()
     mock_r = MagicMock()
@@ -553,11 +562,12 @@ def test_backfill_rejects_end_before_start():
 
 def test_backfill_rejects_exceeding_max_days():
     """backfill_job raises 422 when the range exceeds the 366-day limit."""
-    import pytest
-    from fastapi import HTTPException
     from unittest.mock import MagicMock, patch
-    from fastapi import Request
-    from scheduler.api.jobs import backfill_job, BackfillRequest
+
+    import pytest
+    from fastapi import HTTPException, Request
+
+    from scheduler.api.jobs import BackfillRequest, backfill_job
 
     mock_db = MagicMock()
     mock_r = MagicMock()
@@ -583,11 +593,12 @@ def test_backfill_rejects_exceeding_max_days():
 
 def test_backfill_rejects_missing_job():
     """backfill_job raises 404 when the job does not exist."""
-    import pytest
-    from fastapi import HTTPException
     from unittest.mock import MagicMock, patch
-    from fastapi import Request
-    from scheduler.api.jobs import backfill_job, BackfillRequest
+
+    import pytest
+    from fastapi import HTTPException, Request
+
+    from scheduler.api.jobs import BackfillRequest, backfill_job
 
     mock_db = MagicMock()
     mock_r = MagicMock()
@@ -611,9 +622,11 @@ def test_backfill_rejects_missing_job():
 def test_backfill_items_contain_execution_date():
     """Each backfill item pushed to Redis contains the correct execution_date."""
     import json
-    from unittest.mock import MagicMock, patch, call
+    from unittest.mock import MagicMock, call, patch
+
     from fastapi import Request
-    from scheduler.api.jobs import backfill_job, BackfillRequest
+
+    from scheduler.api.jobs import BackfillRequest, backfill_job
 
     mock_db = MagicMock()
     mock_r = MagicMock()
@@ -766,7 +779,8 @@ def test_failover_drains_worker_queue():
     envelopes from the per-worker dispatch queue."""
     import json
     import time
-    from unittest.mock import MagicMock, patch, call
+    from unittest.mock import MagicMock, call, patch
+
     from scheduler.utils.failover import requeue_jobs_for_worker
 
     mock_r = MagicMock()
@@ -813,6 +827,7 @@ def test_failover_drains_queue_empty_running_set():
     import json
     import time
     from unittest.mock import MagicMock, patch
+
     from scheduler.utils.failover import requeue_jobs_for_worker
 
     mock_r = MagicMock()
@@ -849,9 +864,10 @@ def test_failover_drains_queue_empty_running_set():
 def test_no_worker_count_increments_on_miss():
     """scheduling_loop increments no_worker_count each time no eligible worker is found."""
     import json
-    import time
     import threading
+    import time
     from unittest.mock import MagicMock, patch
+
     from scheduler.scheduler import scheduling_loop
 
     mock_r = MagicMock()
@@ -864,7 +880,7 @@ def test_no_worker_count_increments_on_miss():
     # First pop: job_id with existing no_worker_count=2
     mock_r.smembers.return_value = ["prod"]
     mock_r.bzpopmax.side_effect = [
-        (f"job_queue:prod:pending", job_id, 5.0),
+        ("job_queue:prod:pending", job_id, 5.0),
         None,  # stop after second iteration
     ]
     mock_r.hgetall.return_value = {
@@ -879,12 +895,11 @@ def test_no_worker_count_increments_on_miss():
 
     # Run two iterations then stop
     call_count = [0]
-    original_bzpopmax = mock_r.bzpopmax.side_effect
 
     def controlled_bzpopmax(keys, timeout):
         call_count[0] += 1
         if call_count[0] == 1:
-            return (f"job_queue:prod:pending", job_id, 5.0)
+            return ("job_queue:prod:pending", job_id, 5.0)
         stop.set()
         return None
 
@@ -913,7 +928,9 @@ def test_no_worker_count_increments_on_miss():
 def test_no_worker_count_in_queue_overview():
     """queue_overview includes no_worker_count in each pending item."""
     from unittest.mock import MagicMock, patch
+
     from fastapi import Request
+
     from scheduler.api.jobs import queue_overview
 
     mock_db = MagicMock()
@@ -947,7 +964,9 @@ def test_no_worker_count_in_queue_overview():
 def test_queue_overview_includes_pending_total():
     """queue_overview includes pending_total per domain in the response."""
     from unittest.mock import MagicMock, patch
+
     from fastapi import Request
+
     from scheduler.api.jobs import queue_overview
 
     mock_db = MagicMock()
@@ -978,6 +997,7 @@ def test_bypass_concurrency_guardrail_filters_overloaded_worker():
     import threading
     import time
     from unittest.mock import MagicMock, patch
+
     from scheduler.scheduler import scheduling_loop
 
     mock_r = MagicMock()
@@ -995,7 +1015,7 @@ def test_bypass_concurrency_guardrail_filters_overloaded_worker():
     def controlled_bzpopmax(keys, timeout):
         call_count[0] += 1
         if call_count[0] == 1:
-            return (f"job_queue:prod:pending", job_id, 5.0)
+            return ("job_queue:prod:pending", job_id, 5.0)
         stop.set()
         return None
 
