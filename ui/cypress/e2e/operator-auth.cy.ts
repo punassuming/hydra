@@ -9,12 +9,12 @@ describe("Domain operator journey", () => {
     cy.contains("Hydra Jobs Control Plane").should("be.visible");
     cy.contains("Queue Health").should("be.visible");
 
-    cy.contains("Observe").click();
-    cy.url().should("include", "/observe");
-    cy.contains("Run History").should("be.visible");
+    cy.get(".header-nav-tabs").contains("Observe").click();
+    cy.location("pathname").should("eq", "/observe");
+    cy.contains("Job Status").should("be.visible");
 
-    cy.contains("Workers").click();
-    cy.url().should("include", "/workers");
+    cy.get(".header-nav-tabs").contains("Workers").click();
+    cy.location("pathname").should("eq", "/workers");
     cy.contains("Workers Online").should("be.visible");
   });
 });
