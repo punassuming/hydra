@@ -41,7 +41,14 @@ def prepare_python_command(executor: Dict, job_id: str) -> Tuple[List[str], Opti
     # Resolve interpreter: explicit executor setting > HYDRA_PYTHON_PATH > default
     interpreter = executor.get("interpreter") or ""
     if not interpreter:
-        interpreter = os.environ.get("HYDRA_PYTHON_PATH", "").strip() or "python3"
+        interpreter = os.environ.get("HYDRA_PYTHON_PATH", "").strip()
+    if not interpreter:
+        interpreter = "python" if platform.system().lower().startswith("win") else "python3"
+    # ``python3`` is the API model default, but the Windows launcher is named
+    # ``python.exe``. Preserve explicit custom interpreter paths while making
+    # the default portable for native Windows workers.
+    if platform.system().lower().startswith("win") and interpreter == "python3":
+        interpreter = "python"
     requirements = env_cfg.get("requirements") or []
     requirements_file = env_cfg.get("requirements_file") or None
     venv_path = env_cfg.get("venv_path") or None

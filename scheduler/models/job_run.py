@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 # ---------------------------------------------------------------------------
 # Run lifecycle state constants
@@ -36,6 +36,8 @@ TERMINAL_STATES: frozenset[str] = frozenset({"success", "failed", "timed_out"})
 
 
 class JobRun(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     id: Optional[str] = Field(default=None, alias="_id")
     job_id: str
     user: str
@@ -61,6 +63,3 @@ class JobRun(BaseModel):
     duration: Optional[float] = None
     bypass_concurrency: Optional[bool] = None
     sla_miss_alerted: bool = False
-
-    class Config:
-        populate_by_name = True

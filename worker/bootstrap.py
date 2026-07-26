@@ -251,15 +251,19 @@ def _is_pid_alive(pid: int) -> bool:
     """Return ``True`` if a process with *pid* is currently running."""
     if _IS_WINDOWS:
         try:
-            # os.kill with signal 0 checks process existence on POSIX.
-            # On Windows, use tasklist for a reliable check.
-            result = subprocess.run(
-                ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
-                capture_output=True,
-                text=True,
-                timeout=10,
+            # Avoid shelling out to tasklist: it is not guaranteed to be on
+            # PATH for a service account, while OpenProcess is always present.
+            import ctypes
+
+            process_query_limited_information = 0x1000
+            handle = ctypes.windll.kernel32.OpenProcess(
+                process_query_limited_information, False, pid
             )
-            return str(pid) in result.stdout
+            if handle:
+                ctypes.windll.kernel32.CloseHandle(handle)
+                return True
+            # A protected process can deny inspection but still holds the PID.
+            return ctypes.get_last_error() == 5  # ERROR_ACCESS_DENIED
         except Exception:
             return False
     else:

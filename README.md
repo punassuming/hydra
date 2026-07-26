@@ -50,7 +50,7 @@ flowchart LR
         W2["Go Worker"]
     end
 
-    CLI -- HTTP --> API
+    CLI -- HTTP/SSE --> API
     UI  -- HTTP/SSE --> API
     API --- Orch
     API <--> MongoDB
@@ -63,7 +63,7 @@ flowchart LR
 - **Scheduler** owns orchestration and persistence: dispatches jobs to Redis queues, handles failover, advances cron/interval schedules, and persists run events consumed from Redis into MongoDB.
 - **Workers** are Redis-only at runtime: register metadata, heartbeat with rolling metrics (memory/CPU/load), execute jobs, stream logs, and emit lifecycle events — they never connect to MongoDB.
 - **MongoDB** stores durable state: `domains`, `job_definitions`, `job_runs`, `credentials`.
-- **hydra-ctl** is a standalone CLI that talks only to the scheduler API — no Redis or MongoDB dependency.
+- **hydra-ctl** is a standalone API client for operators; it does not connect to Redis or MongoDB.
 
 > See [`docs/architecture.md`](docs/architecture.md) for detailed diagrams covering the job dispatch sequence, state machine, multi-domain security model, failover flow, and worker deployment options.
 
@@ -85,6 +85,55 @@ ADMIN_TOKEN=my_secret docker compose up --build
 | MongoDB | localhost:27017 |
 
 > Set `GEMINI_API_KEY` or `OPENAI_API_KEY` to enable AI features.
+
+---
+
+## Command-line client
+
+Install the project and its `hydra-ctl` executable with [uv](https://docs.astral.sh/uv/):
+
+```bash
+uv sync
+```
+
+Point the CLI at a Hydra deployment. `HYDRA_TOKEN` may also be supplied as the
+existing `API_TOKEN` variable, and `HYDRA_DOMAIN` may be supplied as `DOMAIN`.
+
+```bash
+export HYDRA_API_URL=http://localhost:8000
+export HYDRA_TOKEN=my_secret
+export HYDRA_DOMAIN=prod
+
+uv run hydra-ctl get jobs
+uv run hydra-ctl describe job nightly-report
+uv run hydra-ctl run nightly-report --param date=2026-07-22
+uv run hydra-ctl logs RUN_ID --follow
+```
+
+The resource-oriented commands cover common operator workflows:
+
+```bash
+# List jobs, runs, and workers; JSON and YAML are available for scripts.
+uv run hydra-ctl get workers
+uv run hydra-ctl get runs -o json
+
+# Submit a job definition from YAML or JSON (use -f - for stdin).
+uv run hydra-ctl apply -f job.yaml
+
+# Trigger, backfill, stop, and remove work.
+uv run hydra-ctl run JOB_NAME --param key=value
+uv run hydra-ctl backfill JOB_NAME --from 2026-07-01 --to 2026-07-07
+uv run hydra-ctl kill RUN_ID
+uv run hydra-ctl delete job JOB_NAME
+
+# Control worker dispatch and inspect cluster health.
+uv run hydra-ctl worker state WORKER_ID draining
+uv run hydra-ctl worker detach WORKER_ID
+uv run hydra-ctl overview pressure -o yaml
+```
+
+Global flags (`--api-url`, `--token`, `--domain`, and `--timeout`) override the
+environment. Job-taking commands accept either a job ID or an exact job name.
 
 ---
 
@@ -338,52 +387,6 @@ Manifests are in `deploy/k8s/`:
 
 ---
 
-## Command-Line Interface (`hydra-ctl`)
-
-`hydra-ctl` is a standalone CLI for interacting with the Hydra scheduler — think `gh` for Hydra. Install it on any machine that can reach the scheduler; it does not run jobs and has no dependency on Redis.
-
-```bash
-pip install hydra-jobs   # hydra-ctl is included
-```
-
-Authenticate via environment variables (same token the worker uses):
-
-```bash
-export API_TOKEN=<domain-token>
-export DOMAIN=prod                          # default: prod
-export HYDRA_API_URL=http://localhost:8000  # default: http://localhost:8000
-```
-
-Or pass flags directly:
-
-```bash
-hydra-ctl --token <TOKEN> --domain prod --api-url http://scheduler:8000 jobs list
-```
-
-### Commands
-
-| Command | Description |
-|---|---|
-| `jobs list [--search TEXT] [--tags t1,t2]` | List jobs with schedule mode and last-run status |
-| `jobs show <name-or-id>` | Full job definition |
-| `jobs trigger <name-or-id> [--param k=v …]` | Manually trigger a job; prints run ID |
-| `jobs enable <name-or-id>` | Enable schedule |
-| `jobs disable <name-or-id>` | Disable schedule |
-| `jobs runs <name-or-id> [--limit N]` | Run history for a job |
-| `runs list [--limit N]` | Recent runs across all jobs |
-| `runs show <run-id>` | Run metadata and outcome |
-| `runs logs <run-id>` | Print logs (streams live if run is active) |
-| `runs kill <run-id>` | Kill an active run |
-| `workers list` | Worker list with state and running-job count |
-| `workers show <worker-id>` | Worker detail (capabilities, tags, metrics) |
-| `workers state <worker-id> online\|draining\|offline` | Change worker dispatch state |
-| `overview` | Domain summary: job totals, success rate, active workers |
-| `overview queue [--limit N]` | Pending + upcoming scheduled jobs |
-
-Add `--json` to any command for machine-readable output.
-
----
-
 ## Worker Status
 
 | Dimension | Values |
@@ -411,14 +414,17 @@ Add `--json` to any command for machine-readable output.
 ## Development
 
 ```bash
+# Install the locked Python environment
+uv sync --dev
+
 # Scheduler (hot-reload)
-uvicorn scheduler.main:app --reload --host 0.0.0.0 --port 8000
+uv run uvicorn scheduler.main:app --reload --host 0.0.0.0 --port 8000
 
 # UI (Vite dev server)
 cd ui && npm install && npm run dev
 
 # Backend tests
-python -m pytest tests/ --ignore=tests/test_end_to_end.py -v
+uv run pytest tests/ --ignore=tests/test_end_to_end.py -v
 
 # UI unit tests
 cd ui && npx vitest run

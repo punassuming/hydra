@@ -128,7 +128,7 @@ class OrchestratorManager:
         try:
             get_redis().delete(ORCHESTRATOR_HEARTBEAT_KEY)
         except Exception:
-            pass
+            log.exception("Failed to clear orchestrator heartbeat during shutdown")
 
 
 # ---------------------------------------------------------------------------

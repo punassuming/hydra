@@ -60,7 +60,6 @@ docker compose -f docker-compose.yml -f docker-compose.separated.yml up --build
 
 ```mermaid
 flowchart TB
-    CLI["hydra-ctl CLI\n(standalone, no Redis)"]
     UI["React UI\n(Vite + Ant Design)"]
 
     subgraph APIService["Scheduler API (FastAPI)"]
@@ -88,7 +87,6 @@ flowchart TB
     end
 
     %% Clients ↔ Scheduler API
-    CLI -- "HTTP (urllib)" --> API
     UI  -- "HTTP / SSE" --> API
     API -- "read / write" --> MongoDB
 

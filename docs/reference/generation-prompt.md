@@ -49,7 +49,6 @@ hydra-jobs/
 │   │   ├── jobs.py
 │   │   ├── workers.py
 │   │   ├── health.py
-│   └── requirements.txt
 ├── worker/
 │   ├── worker.py
 │   ├── executor.py
@@ -60,7 +59,8 @@ hydra-jobs/
 │   │   ├── os_exec.py
 │   │   ├── heartbeat.py
 │   │   ├── concurrency.py
-│   └── requirements.txt
+├── pyproject.toml
+├── uv.lock
 ├── examples/
 │   ├── submit_job.sh
 │   ├── submit_job.py

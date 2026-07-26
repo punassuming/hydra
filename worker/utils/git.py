@@ -28,11 +28,14 @@ def _inject_token_into_url(url: str, token: str) -> str:
 def _strip_credentials_from_remote(dest: str, clean_url: str) -> None:
     """Rewrite git remote URL to remove embedded credentials from .git/config."""
     git = _git_bin()
-    try:
-        subprocess.run([git, "remote", "set-url", "origin", clean_url],
-                       cwd=dest, check=False, capture_output=True)
-    except Exception:
-        pass
+    # Failure is fatal: continuing could cache or execute a checkout whose
+    # .git/config still contains a personal access token.
+    subprocess.run(
+        [git, "remote", "set-url", "origin", clean_url],
+        cwd=dest,
+        check=True,
+        capture_output=True,
+    )
 
 
 def fetch_git_source(url: str, ref: str, dest: str, token: str = "", sparse_path: str = "") -> None:

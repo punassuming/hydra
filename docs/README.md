@@ -33,6 +33,8 @@ Hydra's documentation is organized by topic so the `docs/` directory stays easy 
 ## UI
 
 - [`ui/theming.md`](ui/theming.md) — UI theming conventions and usage
+- [`ui/operator-journey.md`](ui/operator-journey.md) — sign-in, job execution,
+  logs, worker operations, and the browser-coverage boundary
 
 ## Archive
 

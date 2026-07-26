@@ -1,0 +1,22 @@
+services:
+  scheduler:
+    environment:
+      ADMIN_TOKEN: ci-admin-token
+      SEED_DOMAIN: ci
+      SEED_DOMAIN_TOKEN: ci-domain-token
+
+  worker:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    environment:
+      API_TOKEN: ci-domain-token
+      DOMAIN: ci
+      REDIS_URL: redis://redis:6379/0
+      WORKER_ID: ci-worker
+      WORKER_REQUIRE_REDIS_ACL: "false"
+    depends_on:
+      redis:
+        condition: service_healthy
+      scheduler:
+        condition: service_healthy

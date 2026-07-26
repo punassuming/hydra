@@ -27,8 +27,8 @@ services:
 
   scheduler:
     build:
-      context: ./scheduler
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: scheduler/Dockerfile
     restart: unless-stopped
     env_file:
       - .env
