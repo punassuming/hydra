@@ -366,11 +366,17 @@ If Sentinel vars are not set, `REDIS_URL` is used.
 
 ## Kubernetes
 
-Manifests are in `deploy/k8s/`:
-- `scheduler-deployment.yaml`
-- `worker-deployment.yaml`
-- `worker-job-template.yaml`
-- `hydra.yaml` (full stack)
+A Helm chart in `deploy/helm/hydra/` deploys the full stack — Redis, MongoDB,
+scheduler, one or more worker pools (Python and/or Go), and the UI — with
+persistence, health probes, optional Ingress, and multi-domain worker
+support. See `deploy/helm/hydra/README.md` for the full home-lab deployment
+guide, including how to build and load images onto a cluster without a
+registry.
+
+```bash
+helm install hydra deploy/helm/hydra -n hydra --create-namespace \
+  --set ui.apiBaseUrl=http://localhost:8000
+```
 
 ---
 

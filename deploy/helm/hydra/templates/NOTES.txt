@@ -1,0 +1,70 @@
+Hydra has been deployed as release "{{ .Release.Name }}" in namespace "{{ .Release.Namespace }}".
+
+1. Get the domain token the UI/workers use to authenticate (same value that
+   was auto-seeded into MongoDB on the scheduler's first boot):
+
+   kubectl get secret -n {{ .Release.Namespace }} {{ include "hydra.secretName" . }} \
+     -o jsonpath='{.data.SEED_DOMAIN_TOKEN}' | base64 -d && echo
+
+   Domain: {{ .Values.domainSeed.defaultDomain }}
+
+   The admin token (for the Admin tab / domain management) is in the same
+   Secret under ADMIN_TOKEN.
+
+2. Reach the UI and scheduler API:
+{{- if .Values.ingress.enabled }}
+{{- if .Values.ui.enabled }}
+
+   UI:        http://{{ .Values.ingress.ui.host }}
+{{- end }}
+{{- if .Values.scheduler.enabled }}
+   Scheduler: http://{{ .Values.ingress.scheduler.host }}
+{{- end }}
+
+   (Ingress is enabled — make sure these hostnames resolve to your ingress
+   controller, e.g. via /etc/hosts or your home-lab DNS.)
+{{- else }}
+
+   No Ingress configured. Port-forward both services:
+
+   kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "hydra.scheduler.fullname" . }} 8000:{{ .Values.scheduler.service.port }}
+   kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "hydra.ui.fullname" . }} 5173:{{ .Values.ui.service.port }}
+
+   Then open http://localhost:5173 — but see note 3 below first, the UI
+   needs to know where to reach the API from your BROWSER.
+{{- end }}
+
+3. IMPORTANT — ui.apiBaseUrl:
+{{- if not .Values.ui.apiBaseUrl }}
+
+   ui.apiBaseUrl is currently EMPTY. The UI won't be able to reach the
+   scheduler until you set it to a URL reachable from your browser (not a
+   cluster-internal DNS name) and upgrade, e.g.:
+
+     helm upgrade {{ .Release.Name }} <chart> --reuse-values \
+       --set ui.apiBaseUrl=http://localhost:8000        # if port-forwarding
+     # or, with ingress enabled:
+       --set ui.apiBaseUrl=http://{{ .Values.ingress.scheduler.host }}
+{{- else }}
+
+   ui.apiBaseUrl is set to: {{ .Values.ui.apiBaseUrl }}
+   Double-check this is reachable from your BROWSER, not just from inside
+   the cluster.
+{{- end }}
+
+4. Worker pools deployed:
+{{- range .Values.workers }}
+   - {{ .name }} ({{ .flavor }}, domain={{ .domain }}, replicas={{ .replicas }})
+{{- end }}
+
+{{- if .Values.domainSeed.extraDomains }}
+
+5. Extra domains {{ .Values.domainSeed.extraDomains }} were provisioned by the
+   domain-seed Job. Check its logs if a worker pool targeting one of them
+   isn't coming online:
+
+   kubectl logs -n {{ .Release.Namespace }} job/{{ include "hydra.fullname" . }}-domain-seed
+{{- end }}
+
+See deploy/helm/hydra/README.md for the full home-lab deployment guide,
+including how to build and load images onto your cluster without a registry.

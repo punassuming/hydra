@@ -101,7 +101,7 @@ Hydra Jobs is a distributed job runner designed for flexibility and scalability.
 - `ui/src/api/` — API client with domain-scoped token management.
 - `ui/src/components/JobForm.tsx` — Job creation form with AI generation.
 - `ui/src/components/JobRuns.tsx` — Run history with AI failure analysis.
-- `examples/` holds submission scripts/templates; `deploy/k8s` has manifests; `docker-compose*.yml` define local stacks.
+- `examples/` holds submission scripts/templates; `deploy/helm/hydra` has the Kubernetes Helm chart; `docker-compose*.yml` define local stacks.
 - `tests/` — Backend integration and unit tests.
 - `tests/test_ai.py` — AI endpoint tests.
 

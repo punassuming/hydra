@@ -56,6 +56,78 @@ jobs:
       - name: Run ruff
         run: uv run --frozen ruff check .
 
+  helm:
+    name: Helm chart lint + template
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: "v3.16.3"
+
+      - name: helm lint (strict)
+        run: helm lint deploy/helm/hydra --strict
+
+      - name: helm template — default values
+        run: helm template hydra deploy/helm/hydra
+
+      - name: helm template — separated scheduler mode + ingress enabled
+        run: |
+          helm template hydra deploy/helm/hydra \
+            --set scheduler.mode=separated \
+            --set ingress.enabled=true \
+            --set ingress.className=nginx
+
+      - name: helm template — multi-domain worker pools
+        run: |
+          cat > /tmp/multi-domain-values.yaml <<'EOF'
+          workers:
+            - name: python-default
+              flavor: python
+              replicas: 2
+              domain: prod
+              tags: "batch,data"
+              allowedUsers: ""
+              maxConcurrency: 4
+              workerState: online
+              requireRedisAcl: true
+              image: {repository: hydra-worker, tag: latest}
+              resources:
+                requests: {cpu: 100m, memory: 128Mi}
+                limits: {cpu: "1", memory: 1Gi}
+              autoscaling: {enabled: true, minReplicas: 1, maxReplicas: 10, targetCPUUtilizationPercentage: 70}
+              nodeSelector: {}
+              tolerations: []
+              affinity: {}
+            - name: ml-pool
+              flavor: go
+              replicas: 1
+              domain: ml
+              tags: "ml"
+              allowedUsers: ""
+              maxConcurrency: 2
+              workerState: online
+              requireRedisAcl: true
+              image: {repository: hydra-go-worker, tag: latest}
+              resources:
+                requests: {cpu: 50m, memory: 64Mi}
+                limits: {cpu: 500m, memory: 256Mi}
+              autoscaling: {enabled: false, minReplicas: 1, maxReplicas: 10, targetCPUUtilizationPercentage: 70}
+              nodeSelector: {}
+              tolerations: []
+              affinity: {}
+          domainSeed:
+            defaultDomain: prod
+            extraDomains: ["ml"]
+            image: {repository: hydra-scheduler, tag: latest}
+          EOF
+          helm template hydra deploy/helm/hydra -f /tmp/multi-domain-values.yaml
+
   ui:
     runs-on: ubuntu-latest
     permissions:

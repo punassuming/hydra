@@ -1,0 +1,19 @@
+apiVersion: v2
+name: hydra
+description: >-
+  Hydra Jobs — a distributed job runner with a FastAPI scheduler, Redis-backed
+  dispatch, MongoDB persistence, cross-platform workers (Python and Go), and a
+  React UI. This chart deploys the full stack for a home-lab / small-cluster
+  Kubernetes environment.
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - job-scheduler
+  - task-runner
+  - workflow
+home: https://github.com/punassuming/hydra
+sources:
+  - https://github.com/punassuming/hydra
+maintainers:
+  - name: punassuming

@@ -1,0 +1,121 @@
+{{- range $pool := .Values.workers }}
+{{- $root := $ }}
+{{- $isDefaultDomain := eq $pool.domain $root.Values.domainSeed.defaultDomain }}
+{{- $authSecretName := $isDefaultDomain | ternary (include "hydra.secretName" $root) (printf "%s-domain-%s" (include "hydra.fullname" $root) $pool.domain) }}
+{{- $tokenKey := $isDefaultDomain | ternary "SEED_DOMAIN_TOKEN" "API_TOKEN" }}
+{{- $passwordKey := $isDefaultDomain | ternary "SEED_DOMAIN_REDIS_PASSWORD" "REDIS_PASSWORD" }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "hydra.worker.fullname" (dict "root" $root "pool" $pool) }}
+  labels:
+    {{- include "hydra.componentLabels" (dict "root" $root "component" (printf "worker-%s" $pool.name)) | nindent 4 }}
+spec:
+  replicas: {{ $pool.replicas }}
+  selector:
+    matchLabels:
+      {{- include "hydra.componentSelectorLabels" (dict "root" $root "component" (printf "worker-%s" $pool.name)) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "hydra.componentSelectorLabels" (dict "root" $root "component" (printf "worker-%s" $pool.name)) | nindent 8 }}
+    spec:
+      {{- with $root.Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $pool.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $pool.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $pool.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: worker
+          image: {{ include "hydra.image" $pool.image }}
+          imagePullPolicy: {{ $root.Values.imagePullPolicy }}
+          env:
+            - name: WORKER_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: DOMAIN
+              value: {{ $pool.domain | quote }}
+            - name: API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $authSecretName }}
+                  key: {{ $tokenKey }}
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $authSecretName }}
+                  key: {{ $passwordKey }}
+            - name: REDIS_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "hydra.configMapName" $root }}
+                  key: REDIS_URL
+            - name: WORKER_TAGS
+              value: {{ $pool.tags | quote }}
+            - name: ALLOWED_USERS
+              value: {{ $pool.allowedUsers | quote }}
+            - name: MAX_CONCURRENCY
+              value: {{ $pool.maxConcurrency | quote }}
+            - name: WORKER_STATE
+              value: {{ $pool.workerState | quote }}
+            - name: DEPLOYMENT_TYPE
+              value: kubernetes
+            {{- if eq $pool.flavor "python" }}
+            - name: WORKER_REQUIRE_REDIS_ACL
+              value: {{ $pool.requireRedisAcl | quote }}
+            {{- end }}
+          resources:
+            {{- toYaml $pool.resources | nindent 12 }}
+          # The heartbeat loop touches this file every ~2s regardless of Redis
+          # reachability, so a stale/missing file means the process is hung —
+          # matches each flavor's Dockerfile HEALTHCHECK.
+          livenessProbe:
+            exec:
+              command:
+                {{- if eq $pool.flavor "go" }}
+                - python3
+                {{- else }}
+                - python
+                {{- end }}
+                - -c
+                - "import os,sys,time; p=os.getenv('WORKER_HEARTBEAT_FILE','/tmp/hydra_worker_heartbeat'); sys.exit(0 if os.path.exists(p) and time.time()-os.path.getmtime(p)<30 else 1)"
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            failureThreshold: 3
+{{- if $pool.autoscaling.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "hydra.worker.fullname" (dict "root" $root "pool" $pool) }}
+  labels:
+    {{- include "hydra.componentLabels" (dict "root" $root "component" (printf "worker-%s" $pool.name)) | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "hydra.worker.fullname" (dict "root" $root "pool" $pool) }}
+  minReplicas: {{ $pool.autoscaling.minReplicas }}
+  maxReplicas: {{ $pool.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ $pool.autoscaling.targetCPUUtilizationPercentage }}
+{{- end }}
+---
+{{- end }}

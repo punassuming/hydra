@@ -1,0 +1,96 @@
+{{- if .Values.mongodb.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "hydra.mongodb.fullname" . }}
+  labels:
+    {{- include "hydra.componentLabels" (dict "root" . "component" "mongodb") | nindent 4 }}
+spec:
+  clusterIP: None
+  selector:
+    {{- include "hydra.componentSelectorLabels" (dict "root" . "component" "mongodb") | nindent 4 }}
+  ports:
+    - name: mongodb
+      port: 27017
+      targetPort: 27017
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "hydra.mongodb.fullname" . }}
+  labels:
+    {{- include "hydra.componentLabels" (dict "root" . "component" "mongodb") | nindent 4 }}
+spec:
+  serviceName: {{ include "hydra.mongodb.fullname" . }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "hydra.componentSelectorLabels" (dict "root" . "component" "mongodb") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "hydra.componentSelectorLabels" (dict "root" . "component" "mongodb") | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.mongodb.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.mongodb.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.mongodb.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: mongodb
+          image: {{ include "hydra.image" .Values.mongodb.image }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          # Single instance, no --replSet: matches the project's
+          # docker-compose topology. Not HA; fine for a home lab.
+          args:
+            - "--bind_ip_all"
+            - "--setParameter"
+            - "diagnosticDataCollectionEnabled=false"
+          ports:
+            - name: mongodb
+              containerPort: 27017
+          resources:
+            {{- toYaml .Values.mongodb.resources | nindent 12 }}
+          readinessProbe:
+            exec:
+              command: ["mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+            initialDelaySeconds: 20
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          {{- if .Values.mongodb.persistence.enabled }}
+          volumeMounts:
+            - name: data
+              mountPath: /data/db
+          {{- end }}
+  {{- if .Values.mongodb.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if .Values.mongodb.persistence.storageClassName }}
+        storageClassName: {{ .Values.mongodb.persistence.storageClassName | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.mongodb.persistence.size | quote }}
+  {{- end }}
+{{- end }}
