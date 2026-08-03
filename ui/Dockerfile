@@ -14,9 +14,13 @@ RUN npm run build
 FROM nginx:1.25-alpine
 COPY --from=build /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
 EXPOSE 80
 
 HEALTHCHECK --interval=10s --timeout=5s --start-period=10s --retries=3 \
   CMD wget --spider -q http://localhost:80/ || exit 1
 
-CMD ["nginx", "-g", "daemon off;"]
+# Regenerates runtime-config.js from HYDRA_API_BASE_URL at container start
+# (see docker-entrypoint.sh), then execs nginx.
+ENTRYPOINT ["/docker-entrypoint.sh"]

@@ -1,4 +1,9 @@
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+// Prefer a runtime-injected base URL (set by ui/docker-entrypoint.sh from
+// HYDRA_API_BASE_URL at container start) over the Vite build-time constant,
+// so one built image can be deployed against different scheduler endpoints
+// without a rebuild — needed for the Helm chart's "build once" story.
+const runtimeApiBase = (window as Window & { __HYDRA_API_BASE__?: string }).__HYDRA_API_BASE__;
+const API_BASE = (runtimeApiBase && runtimeApiBase.trim()) || import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 
 type TokenMap = Record<string, string>;
 
