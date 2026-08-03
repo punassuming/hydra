@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/user"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -219,7 +220,30 @@ func (w *workerState) heartbeatLoop(ctx context.Context) {
 			})
 			lastSampleAt = now
 		}
+
+		// Runs every tick regardless of the Redis calls above — proves the
+		// loop goroutine is alive. Mirrors worker/utils/heartbeat.py's
+		// _touch_heartbeat_file() in the Python worker.
+		touchHeartbeatFile()
 	}
+}
+
+const defaultHeartbeatFile = "/tmp/hydra_worker_heartbeat"
+
+func heartbeatFilePath() string {
+	if p := strings.TrimSpace(os.Getenv("WORKER_HEARTBEAT_FILE")); p != "" {
+		return p
+	}
+	return defaultHeartbeatFile
+}
+
+// touchHeartbeatFile updates the local liveness file read by the container
+// HEALTHCHECK / Kubernetes livenessProbe. It is intentionally independent of
+// Redis reachability (which the heartbeat loop already tolerates) — a
+// narrow "is this goroutine hung" signal, not a readiness check. Best-effort:
+// a write failure must never take down the worker.
+func touchHeartbeatFile() {
+	_ = os.WriteFile(heartbeatFilePath(), []byte(strconv.FormatInt(time.Now().Unix(), 10)), 0o644)
 }
 
 // ---------------------------------------------------------------------------
