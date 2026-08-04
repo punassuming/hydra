@@ -11,6 +11,10 @@
   </head>
   <body>
     <div id="root"></div>
+    <!-- Runtime config (see ui/docker-entrypoint.sh) must load before the
+         module bundle so window.__HYDRA_API_BASE__ is set in time. Classic
+         scripts run in document order before deferred module scripts. -->
+    <script src="/runtime-config.js"></script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

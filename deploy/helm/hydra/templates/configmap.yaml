@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "hydra.configMapName" . }}
+  labels:
+    {{- include "hydra.labels" . | nindent 4 }}
+data:
+  REDIS_URL: {{ include "hydra.redis.url" . | quote }}
+  MONGO_URL: {{ include "hydra.mongodb.url" . | quote }}
+  MONGO_DB: {{ .Values.mongodb.database | quote }}
+  SCHEDULER_HEARTBEAT_TTL: {{ .Values.scheduler.heartbeatTtl | quote }}

@@ -29,11 +29,14 @@ services:
     env_file:
       - .env
     environment:
-      - REDIS_URL=redis://redis:6379/0
+      # Same external-infra override pattern as the base scheduler service —
+      # keep these in sync with docker-compose.yml if you point at
+      # non-bundled Redis/Mongo.
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - REDIS_PASSWORD=${SCHEDULER_REDIS_PASSWORD:-}
-      - MONGO_URL=mongodb://mongo:27017
-      - MONGO_DB=hydra_jobs
-      - SCHEDULER_HEARTBEAT_TTL=10
+      - MONGO_URL=${MONGO_URL:-mongodb://mongo:27017}
+      - MONGO_DB=${MONGO_DB:-hydra_jobs}
+      - SCHEDULER_HEARTBEAT_TTL=${SCHEDULER_HEARTBEAT_TTL:-10}
       - HYDRA_MODE=orchestrator
     command: ["python", "-m", "scheduler.orchestrator_entrypoint"]
     depends_on:

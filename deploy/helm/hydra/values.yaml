@@ -1,0 +1,256 @@
+# Default values for the hydra chart.
+# This is a home-lab / small-cluster oriented chart: single-instance Redis and
+# MongoDB with persistence (no HA/replica sets), configurable worker "pools"
+# so you can mix Python and Go workers with different scale/placement, and no
+# assumption that you push images to a registry — see the chart README for the
+# "build locally, load onto the cluster" workflow.
+
+# -- Default image pull policy for every component. "IfNotPresent" matches a
+# workflow where images are built locally and loaded directly onto cluster
+# nodes (no registry push) — change to "Always" if you do push to a registry.
+imagePullPolicy: IfNotPresent
+# -- imagePullSecrets, if your images DO live in a private registry.
+imagePullSecrets: []
+
+# -- Namespace resources are created in comes from `helm install -n <ns>`;
+# this chart does not create its own Namespace object.
+
+# ---------------------------------------------------------------------------
+# Redis — job queues, worker coordination, heartbeats, pub/sub.
+# Single instance, no Sentinel/cluster: adequate for a home lab, not HA.
+# ---------------------------------------------------------------------------
+redis:
+  enabled: true
+  image:
+    repository: redis
+    tag: "7-alpine"
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  persistence:
+    enabled: true
+    size: 2Gi
+    # -- Leave empty to use the cluster's default StorageClass.
+    storageClassName: ""
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# ---------------------------------------------------------------------------
+# MongoDB — job definitions, run history, domain metadata.
+# Single instance (no --replSet): matches the project's docker-compose
+# topology. Not HA; fine for a home lab.
+# ---------------------------------------------------------------------------
+mongodb:
+  enabled: true
+  image:
+    repository: mongo
+    tag: "6.0"
+  database: hydra_jobs
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+  persistence:
+    enabled: true
+    size: 8Gi
+    storageClassName: ""
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# ---------------------------------------------------------------------------
+# Scheduler — FastAPI control plane (API + orchestration loops).
+# ---------------------------------------------------------------------------
+scheduler:
+  enabled: true
+  # -- "combined": one Deployment runs the API and all background loops
+  #    (scheduling, failover, SLA monitoring, etc.) — simplest, good default.
+  # -- "separated": this Deployment runs HYDRA_MODE=api only, and a second
+  #    "orchestrator" Deployment (below) runs the background loops — lets you
+  #    scale/restart the API independently of the control plane.
+  mode: combined
+  replicas: 1
+  image:
+    repository: hydra-scheduler
+    tag: latest
+  service:
+    type: ClusterIP
+    port: 8000
+  heartbeatTtl: 10
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  # -- Extra env vars, e.g. AI provider keys. Prefer valueFrom.secretKeyRef
+  #    over inline values for anything sensitive.
+  #    extraEnv:
+  #      - name: GEMINI_API_KEY
+  #        valueFrom: { secretKeyRef: { name: hydra-ai-keys, key: gemini-api-key, optional: true } }
+  extraEnv: []
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# -- Only used when scheduler.mode is "separated".
+orchestrator:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# ---------------------------------------------------------------------------
+# UI — React app served by nginx.
+#
+# IMPORTANT: apiBaseUrl must be a URL reachable from your BROWSER, not from
+# inside the cluster — it's baked into a small runtime-config.js the browser
+# loads, not used pod-to-pod. Examples:
+#   - Port-forwarding only:      leave empty, then `kubectl port-forward` both
+#     the ui and scheduler services and use http://localhost:<forwarded-port>.
+#   - NodePort:                  http://<any-node-ip>:<scheduler-nodePort>
+#   - Ingress enabled:           https://<ingress.scheduler.host>
+# ---------------------------------------------------------------------------
+ui:
+  enabled: true
+  replicas: 1
+  image:
+    repository: hydra-ui
+    tag: latest
+  service:
+    type: ClusterIP
+    port: 80
+  # -- See the comment block above. Required for anything beyond
+  #    kubectl port-forward on both services simultaneously.
+  apiBaseUrl: ""
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 128Mi
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# ---------------------------------------------------------------------------
+# Worker pools — one Deployment per list entry. Mix Python and Go workers,
+# different domains, tags, resources, and node placement per pool. All pools
+# below target the chart's auto-seeded default domain (see `domainSeed`)
+# unless a pool sets `existingSecret` to point at a different one.
+# ---------------------------------------------------------------------------
+workers:
+  - name: python-default
+    # -- "python" (full feature set incl. SQL executor, Kerberos/impersonation)
+    #    or "go" (lighter footprint; no SQL executor, no impersonation).
+    flavor: python
+    replicas: 2
+    domain: prod
+    tags: "batch,data"
+    allowedUsers: ""
+    maxConcurrency: 4
+    workerState: online
+    requireRedisAcl: true
+    image:
+      repository: hydra-worker
+      tag: latest
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: "1"
+        memory: 1Gi
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 10
+      targetCPUUtilizationPercentage: 70
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}
+  - name: go-lightweight
+    flavor: go
+    replicas: 2
+    domain: prod
+    tags: "go,lightweight"
+    allowedUsers: ""
+    maxConcurrency: 8
+    workerState: online
+    requireRedisAcl: true
+    image:
+      repository: hydra-go-worker
+      tag: latest
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 10
+      targetCPUUtilizationPercentage: 70
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}
+
+# ---------------------------------------------------------------------------
+# Domain seeding.
+#
+# The scheduler seeds ONE domain automatically on its very first boot (empty
+# MongoDB) from the values below — no extra Job needed for the common case of
+# every worker pool sharing one domain. The generated token/password are
+# stored in a Secret and preserved across `helm upgrade` (never regenerated
+# once created).
+#
+# If you configure worker pools with domains OTHER than `defaultDomain`
+# below, enable `extraDomains` to run a post-install/upgrade Job that
+# provisions each additional domain via the admin API — this needs RBAC to
+# write a Secret per extra domain (see templates/domain-seed-job.yaml).
+# ---------------------------------------------------------------------------
+domainSeed:
+  defaultDomain: prod
+  # -- List of additional domain names (beyond defaultDomain) to provision
+  #    via the admin API. Leave empty if every worker pool uses defaultDomain.
+  extraDomains: []
+  image:
+    repository: hydra-scheduler
+    tag: latest
+
+# ---------------------------------------------------------------------------
+# Ingress (optional) — off by default. Turn on if you run an ingress
+# controller in your home-lab cluster (nginx-ingress, Traefik, etc.).
+# ---------------------------------------------------------------------------
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  ui:
+    host: hydra.local
+    tls: []
+  scheduler:
+    host: hydra-api.local
+    tls: []
+
+# -- Free-form extra labels applied to every resource this chart creates.
+commonLabels: {}

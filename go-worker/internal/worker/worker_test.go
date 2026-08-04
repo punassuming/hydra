@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -336,4 +337,46 @@ func TestHandleStdout_ArtifactInterception(t *testing.T) {
 	if len(emittedArtifacts) != 2 || emittedArtifacts[1].Name != "trimmed" {
 		t.Errorf("expected trimmed artifact to be emitted, got %v", emittedArtifacts)
 	}
+}
+
+func TestHeartbeatFilePath_DefaultsWhenUnset(t *testing.T) {
+	t.Setenv("WORKER_HEARTBEAT_FILE", "")
+	if got := heartbeatFilePath(); got != defaultHeartbeatFile {
+		t.Errorf("expected default %q, got %q", defaultHeartbeatFile, got)
+	}
+}
+
+func TestHeartbeatFilePath_UsesEnvOverride(t *testing.T) {
+	t.Setenv("WORKER_HEARTBEAT_FILE", "/tmp/custom-heartbeat")
+	if got := heartbeatFilePath(); got != "/tmp/custom-heartbeat" {
+		t.Errorf("expected env override, got %q", got)
+	}
+}
+
+func TestTouchHeartbeatFile_WritesCurrentTimestamp(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/heartbeat"
+	t.Setenv("WORKER_HEARTBEAT_FILE", path)
+
+	before := time.Now().Unix()
+	touchHeartbeatFile()
+	after := time.Now().Unix()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("expected heartbeat file to exist: %v", err)
+	}
+	written, err := strconv.ParseInt(strings.TrimSpace(string(data)), 10, 64)
+	if err != nil {
+		t.Fatalf("expected numeric timestamp, got %q: %v", data, err)
+	}
+	if written < before || written > after {
+		t.Errorf("expected timestamp between %d and %d, got %d", before, after, written)
+	}
+}
+
+func TestTouchHeartbeatFile_SurvivesUnwritablePath(t *testing.T) {
+	// A liveness file write failure must never panic — it's best-effort.
+	t.Setenv("WORKER_HEARTBEAT_FILE", "/nonexistent-dir/heartbeat")
+	touchHeartbeatFile()
 }

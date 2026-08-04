@@ -1,0 +1,144 @@
+{{- if .Values.scheduler.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "hydra.scheduler.fullname" . }}
+  labels:
+    {{- include "hydra.componentLabels" (dict "root" . "component" "scheduler") | nindent 4 }}
+spec:
+  type: {{ .Values.scheduler.service.type }}
+  selector:
+    {{- include "hydra.componentSelectorLabels" (dict "root" . "component" "scheduler") | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.scheduler.service.port }}
+      targetPort: 8000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "hydra.scheduler.fullname" . }}
+  labels:
+    {{- include "hydra.componentLabels" (dict "root" . "component" "scheduler") | nindent 4 }}
+spec:
+  replicas: {{ .Values.scheduler.replicas }}
+  selector:
+    matchLabels:
+      {{- include "hydra.componentSelectorLabels" (dict "root" . "component" "scheduler") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "hydra.componentSelectorLabels" (dict "root" . "component" "scheduler") | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.scheduler.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.scheduler.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.scheduler.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: scheduler
+          image: {{ include "hydra.image" .Values.scheduler.image }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: {{ include "hydra.configMapName" . }}
+            - secretRef:
+                name: {{ include "hydra.secretName" . }}
+          {{- if eq .Values.scheduler.mode "separated" }}
+          env:
+            # API-only: background loops run in the separate orchestrator
+            # Deployment below. GET /health/orchestration reports whether
+            # that Deployment is alive and making progress.
+            - name: HYDRA_MODE
+              value: "api"
+          {{- end }}
+          {{- with .Values.scheduler.extraEnv }}
+          {{- toYaml . | nindent 12 }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.scheduler.resources | nindent 12 }}
+          # /health bypasses auth and touches Mongo/Redis, so it fails fast
+          # if the API is up but can't actually serve requests.
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+---
+{{- if eq .Values.scheduler.mode "separated" }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "hydra.orchestrator.fullname" . }}
+  labels:
+    {{- include "hydra.componentLabels" (dict "root" . "component" "orchestrator") | nindent 4 }}
+spec:
+  replicas: {{ .Values.orchestrator.replicas }}
+  selector:
+    matchLabels:
+      {{- include "hydra.componentSelectorLabels" (dict "root" . "component" "orchestrator") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "hydra.componentSelectorLabels" (dict "root" . "component" "orchestrator") | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.orchestrator.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.orchestrator.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.orchestrator.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: orchestrator
+          image: {{ include "hydra.image" .Values.scheduler.image }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          command: ["python", "-m", "scheduler.orchestrator_entrypoint"]
+          envFrom:
+            - configMapRef:
+                name: {{ include "hydra.configMapName" . }}
+            - secretRef:
+                name: {{ include "hydra.secretName" . }}
+          env:
+            - name: HYDRA_MODE
+              value: "orchestrator"
+          resources:
+            {{- toYaml .Values.orchestrator.resources | nindent 12 }}
+          # No HTTP server in this process; liveness is checked via the
+          # scheduler API's /health/orchestration endpoint (external to this
+          # pod), not a local probe.
+{{- end }}
+{{- end }}

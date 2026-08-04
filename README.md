@@ -88,6 +88,46 @@ ADMIN_TOKEN=my_secret docker compose up --build
 
 ---
 
+## Docker Deployment
+
+Beyond the Quick Start above, the compose files support external
+infrastructure, custom ports, and multiple worker pools — see `.env.example`
+for the full reference.
+
+**Point at external Redis/MongoDB** instead of the bundled containers:
+```bash
+REDIS_URL=redis://redis.example.com:6379/0 MONGO_URL=mongodb://mongo.example.com:27017 \
+  docker compose up --no-deps scheduler ui
+```
+
+**Run multiple different worker pools together** (Python + Go, different
+tags/domains/concurrency) — the Docker-route equivalent of the Helm chart's
+`workers:` list:
+```bash
+docker compose -f docker-compose.yml -f docker-compose.workers.yml \
+  up -d --build --scale worker-python=4 --scale worker-go=8
+```
+See `docker-compose.workers.yml` for the full pattern, including how to copy
+its two example pools to add more (a GPU-tagged pool, a pool on a different
+domain, etc).
+
+**Run a single worker pool remotely**, pointed at an existing scheduler —
+useful for distributing workers across separate hosts:
+```bash
+WORKER_FLAVOR=go ./scripts/worker-up.sh          # or WORKER_FLAVOR=python (default)
+```
+
+**Separate the scheduler API from the control-plane orchestrator** (scale or
+restart each independently):
+```bash
+docker compose -f docker-compose.yml -f docker-compose.separated.yml up --build
+```
+
+Redis and MongoDB both persist to named volumes (`redis-data`, `mongo-data`)
+by default — `docker compose down -v` to wipe them.
+
+---
+
 ## Command-line client
 
 Install the project and its `hydra-ctl` executable with [uv](https://docs.astral.sh/uv/):
@@ -366,11 +406,17 @@ If Sentinel vars are not set, `REDIS_URL` is used.
 
 ## Kubernetes
 
-Manifests are in `deploy/k8s/`:
-- `scheduler-deployment.yaml`
-- `worker-deployment.yaml`
-- `worker-job-template.yaml`
-- `hydra.yaml` (full stack)
+A Helm chart in `deploy/helm/hydra/` deploys the full stack — Redis, MongoDB,
+scheduler, one or more worker pools (Python and/or Go), and the UI — with
+persistence, health probes, optional Ingress, and multi-domain worker
+support. See `deploy/helm/hydra/README.md` for the full home-lab deployment
+guide, including how to build and load images onto a cluster without a
+registry.
+
+```bash
+helm install hydra deploy/helm/hydra -n hydra --create-namespace \
+  --set ui.apiBaseUrl=http://localhost:8000
+```
 
 ---
 

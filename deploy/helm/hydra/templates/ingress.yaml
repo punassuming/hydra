@@ -1,0 +1,65 @@
+{{- if .Values.ingress.enabled }}
+{{- if .Values.ui.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "hydra.ui.fullname" . }}
+  labels:
+    {{- include "hydra.componentLabels" (dict "root" . "component" "ui") | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if .Values.ingress.className }}
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- end }}
+  {{- with .Values.ingress.ui.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.ingress.ui.host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "hydra.ui.fullname" . }}
+                port:
+                  number: {{ .Values.ui.service.port }}
+{{- end }}
+---
+{{- if .Values.scheduler.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "hydra.scheduler.fullname" . }}
+  labels:
+    {{- include "hydra.componentLabels" (dict "root" . "component" "scheduler") | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if .Values.ingress.className }}
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- end }}
+  {{- with .Values.ingress.scheduler.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.ingress.scheduler.host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "hydra.scheduler.fullname" . }}
+                port:
+                  number: {{ .Values.scheduler.service.port }}
+{{- end }}
+{{- end }}

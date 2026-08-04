@@ -1,0 +1,232 @@
+{{- /*
+Only needed when worker pools target domains OTHER than domainSeed.defaultDomain
+— the scheduler auto-seeds defaultDomain itself on first boot (see startup.py's
+ensure_domains_seeded()), no Job required for the common single-domain case.
+*/ -}}
+{{- if .Values.domainSeed.extraDomains }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "hydra.fullname" . }}-domain-seed
+  labels:
+    {{- include "hydra.componentLabels" (dict "root" . "component" "domain-seed") | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "hydra.fullname" . }}-domain-seed
+  labels:
+    {{- include "hydra.componentLabels" (dict "root" . "component" "domain-seed") | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation
+rules:
+  # Scoped to Secrets only, in this namespace only — enough to check whether a
+  # per-domain secret already exists (idempotency) and to create new ones.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "hydra.fullname" . }}-domain-seed
+  labels:
+    {{- include "hydra.componentLabels" (dict "root" . "component" "domain-seed") | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "hydra.fullname" . }}-domain-seed
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: Role
+  name: {{ include "hydra.fullname" . }}-domain-seed
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "hydra.fullname" . }}-domain-seed-script
+  labels:
+    {{- include "hydra.componentLabels" (dict "root" . "component" "domain-seed") | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation
+data:
+  seed.py: |
+    """Provisions extra domains (beyond the scheduler's auto-seeded default)
+    via the admin API, storing each domain's token + Redis ACL password in a
+    Secret named "<release>-domain-<domain>" for the matching worker pool(s)
+    to consume. Idempotent: skips any domain whose Secret already exists, so
+    re-running on `helm upgrade` never re-rotates existing credentials.
+    Uses only the Python standard library and the pod's own in-cluster
+    ServiceAccount token — no kubectl binary or extra image needed.
+    """
+    import base64
+    import json
+    import os
+    import ssl
+    import sys
+    import time
+    import urllib.error
+    import urllib.request
+
+    ADMIN_TOKEN = os.environ["ADMIN_TOKEN"]
+    SCHEDULER_URL = os.environ["SCHEDULER_URL"]
+    EXTRA_DOMAINS = [d.strip() for d in os.environ.get("EXTRA_DOMAINS", "").split(",") if d.strip()]
+    RELEASE_FULLNAME = os.environ["RELEASE_FULLNAME"]
+
+    SA_DIR = "/var/run/secrets/kubernetes.io/serviceaccount"
+    with open(f"{SA_DIR}/token", encoding="utf-8") as f:
+        K8S_TOKEN = f.read().strip()
+    with open(f"{SA_DIR}/namespace", encoding="utf-8") as f:
+        NAMESPACE = f.read().strip()
+
+    K8S_HOST = os.environ["KUBERNETES_SERVICE_HOST"]
+    K8S_PORT = os.environ["KUBERNETES_SERVICE_PORT"]
+    K8S_BASE = f"https://{K8S_HOST}:{K8S_PORT}"
+    K8S_SSL_CTX = ssl.create_default_context(cafile=f"{SA_DIR}/ca.crt")
+
+
+    def k8s_request(method, path, body=None):
+        url = f"{K8S_BASE}{path}"
+        data = json.dumps(body).encode() if body is not None else None
+        req = urllib.request.Request(url, data=data, method=method)
+        req.add_header("Authorization", f"Bearer {K8S_TOKEN}")
+        req.add_header("Content-Type", "application/json")
+        try:
+            with urllib.request.urlopen(req, context=K8S_SSL_CTX, timeout=10) as resp:
+                return resp.status, json.loads(resp.read() or b"{}")
+        except urllib.error.HTTPError as exc:
+            return exc.code, json.loads(exc.read() or b"{}")
+
+
+    def wait_for_scheduler():
+        for attempt in range(60):
+            try:
+                with urllib.request.urlopen(f"{SCHEDULER_URL}/health", timeout=5) as resp:
+                    if resp.status == 200:
+                        print("scheduler is healthy", flush=True)
+                        return
+            except Exception as exc:  # noqa: BLE001 - best-effort readiness poll
+                print(f"waiting for scheduler ({attempt + 1}/60): {exc}", flush=True)
+            time.sleep(5)
+        print("scheduler did not become healthy in time", file=sys.stderr, flush=True)
+        sys.exit(1)
+
+
+    def secret_exists(name):
+        status, _ = k8s_request("GET", f"/api/v1/namespaces/{NAMESPACE}/secrets/{name}")
+        return status == 200
+
+
+    def create_domain(domain):
+        url = f"{SCHEDULER_URL}/admin/domains"
+        body = json.dumps({"domain": domain, "display_name": domain}).encode()
+        req = urllib.request.Request(url, data=body, method="POST")
+        req.add_header("x-api-key", ADMIN_TOKEN)
+        req.add_header("Content-Type", "application/json")
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return json.loads(resp.read())
+
+
+    def create_secret(name, domain, token, redis_password):
+        def b64(value):
+            return base64.b64encode(value.encode()).decode()
+
+        body = {
+            "apiVersion": "v1",
+            "kind": "Secret",
+            "metadata": {"name": name, "namespace": NAMESPACE},
+            "type": "Opaque",
+            "data": {
+                "DOMAIN": b64(domain),
+                "API_TOKEN": b64(token),
+                "REDIS_PASSWORD": b64(redis_password or ""),
+            },
+        }
+        status, resp = k8s_request("POST", f"/api/v1/namespaces/{NAMESPACE}/secrets", body)
+        if status not in (200, 201):
+            print(f"failed to create secret {name}: {status} {resp}", file=sys.stderr, flush=True)
+            sys.exit(1)
+        print(f"created secret {name} for domain {domain}", flush=True)
+
+
+    def main():
+        if not EXTRA_DOMAINS:
+            print("no extra domains configured; nothing to do", flush=True)
+            return
+        wait_for_scheduler()
+        for domain in EXTRA_DOMAINS:
+            secret_name = f"{RELEASE_FULLNAME}-domain-{domain}"
+            if secret_exists(secret_name):
+                print(f"secret {secret_name} already exists; skipping (idempotent)", flush=True)
+                continue
+            print(f"provisioning domain {domain}...", flush=True)
+            result = create_domain(domain)
+            token = result["token"]
+            redis_password = (result.get("worker_redis_acl") or {}).get("password", "")
+            create_secret(secret_name, domain, token, redis_password)
+        print("domain seeding complete", flush=True)
+
+
+    main()
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "hydra.fullname" . }}-domain-seed
+  labels:
+    {{- include "hydra.componentLabels" (dict "root" . "component" "domain-seed") | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "1"
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        {{- include "hydra.componentSelectorLabels" (dict "root" . "component" "domain-seed") | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "hydra.fullname" . }}-domain-seed
+      restartPolicy: Never
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: domain-seed
+          image: {{ include "hydra.image" .Values.domainSeed.image }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          command: ["python3", "/scripts/seed.py"]
+          env:
+            - name: SCHEDULER_URL
+              value: "http://{{ include "hydra.scheduler.fullname" . }}:{{ .Values.scheduler.service.port }}"
+            - name: EXTRA_DOMAINS
+              value: {{ join "," .Values.domainSeed.extraDomains | quote }}
+            - name: RELEASE_FULLNAME
+              value: {{ include "hydra.fullname" . }}
+            - name: ADMIN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "hydra.secretName" . }}
+                  key: ADMIN_TOKEN
+          volumeMounts:
+            - name: script
+              mountPath: /scripts
+              readOnly: true
+      volumes:
+        - name: script
+          configMap:
+            name: {{ include "hydra.fullname" . }}-domain-seed-script
+{{- end }}

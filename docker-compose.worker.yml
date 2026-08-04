@@ -1,4 +1,8 @@
 services:
+  # Standalone Python worker — points at an existing scheduler/Redis stack
+  # (bundled or remote). Run with:
+  #   docker compose -f docker-compose.worker.yml up -d --build --scale worker=N
+  # See scripts/worker-up.sh and scripts/start-domain-workers.sh for wrappers.
   worker:
     build:
       context: .
@@ -10,8 +14,26 @@ services:
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - REDIS_PASSWORD=${REDIS_PASSWORD:-}
       - WORKER_REQUIRE_REDIS_ACL=${WORKER_REQUIRE_REDIS_ACL:-true}
+      # Leave WORKER_ID unset when scaling (--scale worker=N) so Docker
+      # Compose's replica-index suffix keeps each instance's ID unique;
+      # set it explicitly only when running a single named instance.
       - WORKER_ID=${WORKER_ID:-}
       - DOMAIN=${DOMAIN:-prod}
       - API_TOKEN=${API_TOKEN}
       - WORKER_TAGS=${WORKER_TAGS:-}
+      - ALLOWED_USERS=${ALLOWED_USERS:-}
       - MAX_CONCURRENCY=${MAX_CONCURRENCY:-2}
+      # online | draining | disabled
+      - WORKER_STATE=${WORKER_STATE:-online}
+      - DEPLOYMENT_TYPE=${DEPLOYMENT_TYPE:-docker}
+      - WORKER_METRICS_SAMPLE_SECONDS=${WORKER_METRICS_SAMPLE_SECONDS:-15}
+      - WORKER_METRICS_WINDOW_SECONDS=${WORKER_METRICS_WINDOW_SECONDS:-1800}
+      # Liveness file read by worker/Dockerfile's HEALTHCHECK; only useful to
+      # override if you're bind-mounting a different tmpfs/path.
+      - WORKER_HEARTBEAT_FILE=${WORKER_HEARTBEAT_FILE:-/tmp/hydra_worker_heartbeat}
+      # Non-containerized execution path overrides — only relevant if your
+      # worker image bundles alternate interpreter/shell/git locations.
+      - HYDRA_PYTHON_PATH=${HYDRA_PYTHON_PATH:-}
+      - HYDRA_SHELL_PATH=${HYDRA_SHELL_PATH:-}
+      - HYDRA_GIT_PATH=${HYDRA_GIT_PATH:-}
+      - HYDRA_TEMP_DIR=${HYDRA_TEMP_DIR:-}
