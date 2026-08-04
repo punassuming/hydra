@@ -310,27 +310,32 @@ REDIS_PASSWORD=<worker_redis_acl_password> \
 docker compose -f docker-compose.worker.yml up --build --scale worker=2
 ```
 
-### Windows Workers — Task Scheduler Bootstrap
+### Windows Workers — Task Scheduler or Windows Service
 
-On Windows hosts, use the built-in bootstrap module to register a single Task
-Scheduler task that keeps a Hydra worker alive:
+On Windows hosts, use the built-in bootstrap module to keep a Hydra worker
+alive, supervised either by Task Scheduler (no extra tools) or as a real
+Windows Service via [NSSM](https://nssm.cc/) (shows up in `services.msc`,
+easier to fold into existing service monitoring):
 
 ```powershell
 # Validate config first
 $env:DOMAIN="prod"; $env:API_TOKEN="<token>"; $env:REDIS_URL="redis://host:6379/0"
 python -m worker bootstrap validate
 
-# Install the scheduled task (requires admin)
-python -m worker bootstrap install
+# Option A: Task Scheduler (requires admin)
+python -m worker bootstrap install   # register
+python -m worker bootstrap run       # start immediately, without waiting for reboot
+python -m worker bootstrap remove    # uninstall
 
-# Start the watchdog immediately (without waiting for reboot)
-python -m worker bootstrap run
-
-# Remove the task
-python -m worker bootstrap remove
+# Option B: Windows Service via NSSM (requires admin + nssm.exe on PATH)
+nssm install HydraWorker "<path-to-python>" "-m worker bootstrap run"
+nssm set HydraWorker AppDirectory <runtime-dir>
+nssm start HydraWorker
 ```
 
-See [`docs/windows-worker-bootstrap.md`](docs/windows-worker-bootstrap.md) for a complete guide.
+See [`docs/windows-worker-bootstrap.md`](docs/windows-worker-bootstrap.md) for
+the complete guide covering both mechanisms, environment variables, service
+accounts, and troubleshooting.
 
 ---
 

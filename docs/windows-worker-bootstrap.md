@@ -1,24 +1,43 @@
-# Windows Worker Bootstrap Guide
+# Windows Worker Deployment Guide
 
-This guide explains how to install and manage a Hydra worker on a Windows host
-using a single Windows Task Scheduler entry as a bootstrap/watchdog task.
+This guide explains how to keep a Hydra worker running on a Windows host
+across reboots and crashes. Two launch mechanisms are covered — pick one:
+
+| | Task Scheduler (built-in) | Windows Service (NSSM) |
+|---|---|---|
+| Extra tooling required | None — ships with Windows | [NSSM](https://nssm.cc/) (or another service wrapper) |
+| Visible in `services.msc` / `sc query` | No | Yes |
+| Restart-on-crash | Handled by the bootstrap watchdog | Handled by NSSM/SCM **and** the watchdog (layered) |
+| Starts before any user logs on | Only with `HYDRA_BOOTSTRAP_RUN_AS_SYSTEM=true` or a "run whether user is logged on or not" trigger | Yes, by default (services start at boot) |
+| Managed by monitoring/CMDB tools that watch Windows Services | No | Yes |
+| Environment locked down by policy (Task Scheduler restricted) | May be blocked | Usually unaffected |
+| Setup effort | Lower (nothing to install) | Slightly higher (install NSSM once) |
+
+Both mechanisms launch the **same** underlying command
+(`python -m worker bootstrap run`, the watchdog described below) — they only
+differ in what supervises that command. The **Runtime directory setup** and
+**Environment Variables** sections below apply to both; jump to
+[Launch mechanism 1: Task Scheduler](#launch-mechanism-1-task-scheduler-built-in)
+or [Launch mechanism 2: Windows Service (NSSM)](#launch-mechanism-2-windows-service-nssm)
+once your `.env` is in place.
 
 ## Overview
 
-Instead of creating many per-job Task Scheduler entries, the Windows Worker
-Bootstrap lets you:
+Instead of creating many per-job Task Scheduler entries or per-job services,
+the Windows Worker Bootstrap lets you:
 
-1. Register **one** Task Scheduler task per host that launches a lightweight
-   watchdog process on system start-up.
+1. Register **one** Task Scheduler task, or **one** Windows Service, per host
+   that launches a lightweight watchdog process on start-up.
 2. The watchdog keeps the Hydra worker process alive, restarting it if it
    exits unexpectedly.
-3. All actual job scheduling is centralised in the Hydra scheduler — the Task
-   Scheduler entry is only responsible for worker lifecycle.
+3. All actual job scheduling is centralised in the Hydra scheduler — the
+   Task Scheduler entry / Windows Service is only responsible for worker
+   lifecycle.
 
 ```
-Windows Task Scheduler
-  └─ Hydra\WorkerBootstrap  (one task per host)
-       └─ python -m worker bootstrap run
+Windows Task Scheduler                    OR    Windows Service (NSSM)
+  └─ Hydra\WorkerBootstrap                         └─ HydraWorker (SCM-managed)
+       └─ python -m worker bootstrap run                └─ python -m worker bootstrap run
             └─ [watchdog loop] → starts/restarts "python -m worker"
                                        │
                                        ▼
@@ -37,7 +56,8 @@ Windows Task Scheduler
 | Hydra worker installed | See **Runtime directory setup** below |
 | Redis connection | `REDIS_URL` must be reachable from the Windows host |
 | Domain token | Obtain from a Hydra administrator (`API_TOKEN`) |
-| Administrator rights | Required only for the `install` step (to create the scheduled task) |
+| Administrator rights | Required only for the install step (to create the scheduled task or service) |
+| [NSSM](https://nssm.cc/) | Only if using **Launch mechanism 2: Windows Service** instead of Task Scheduler |
 
 ---
 
@@ -117,7 +137,7 @@ service account's user profile (or via a `.env` file loaded before running).
 
 ---
 
-## Commands
+## Launch mechanism 1: Task Scheduler (built-in)
 
 All commands below assume the runtime directory is `C:\hydra-worker\` with a
 `uv`-managed virtual environment at `C:\hydra-worker\.venv\` and credentials
@@ -199,7 +219,97 @@ Task '\Hydra\WorkerBootstrap' removed (or was not present).
 
 ---
 
-## Complete example (production)
+## Launch mechanism 2: Windows Service (NSSM)
+
+Prefer this path if you want the worker to show up in `services.msc`/`sc
+query`, be managed by the same tooling you use for other Windows services, or
+your environment restricts Task Scheduler. Hydra does not require a Python
+service framework (no `pywin32` dependency) — instead, wrap the existing
+watchdog command with [NSSM](https://nssm.cc/), a small, widely used utility
+that runs any executable as a proper Windows Service.
+
+This section assumes the same runtime directory and `.env` file from
+**Runtime directory setup** above (`C:\hydra-worker\`).
+
+### Install NSSM
+
+Download NSSM from [nssm.cc](https://nssm.cc/download) (or install via a
+package manager, e.g. `choco install nssm` / `winget install NSSM.NSSM`) and
+place `nssm.exe` somewhere on `PATH`, e.g. `C:\tools\nssm\nssm.exe`.
+
+### Register the service
+
+Run in an **elevated (administrator)** PowerShell session:
+
+```powershell
+nssm install HydraWorker "C:\hydra-worker\.venv\Scripts\python.exe" "-m worker bootstrap run"
+nssm set HydraWorker AppDirectory C:\hydra-worker
+nssm set HydraWorker DisplayName "Hydra Worker"
+nssm set HydraWorker Description "Hydra job scheduler worker (watchdog-supervised)"
+nssm set HydraWorker Start SERVICE_AUTO_START
+```
+
+`bootstrap run` is the same watchdog command used by the Task Scheduler path
+— NSSM just replaces Task Scheduler as the thing that launches and supervises
+it. The watchdog still reads credentials from `C:\hydra-worker\.env`
+automatically, so no environment variables need to be set on the service
+itself. If you'd rather skip the watchdog layer and let NSSM alone supervise
+the worker process directly (simpler, but no exponential-backoff restart
+delay), point the service at `-m worker` instead of `-m worker bootstrap run`.
+
+### Configure stdout/stderr logging
+
+NSSM can capture the process's console output directly, which is often more
+convenient than `HYDRA_BOOTSTRAP_LOG_FILE`:
+
+```powershell
+nssm set HydraWorker AppStdout C:\hydra-worker\logs\worker.log
+nssm set HydraWorker AppStderr C:\hydra-worker\logs\worker.log
+nssm set HydraWorker AppRotateFiles 1
+nssm set HydraWorker AppRotateBytes 10485760
+```
+
+### Configure restart-on-failure
+
+The bootstrap watchdog already restarts a crashed `worker` subprocess with
+backoff. Layering SCM-level recovery on top covers the (rarer) case where the
+watchdog process itself dies:
+
+```powershell
+nssm set HydraWorker AppExit Default Restart
+nssm set HydraWorker AppRestartDelay 5000
+```
+
+### Run under a dedicated service account
+
+By default NSSM runs the service as `LocalSystem`. To run as a dedicated
+service account instead (recommended — see **Service account** below):
+
+```powershell
+nssm set HydraWorker ObjectName "DOMAIN\svc_hydra" "the-account-password"
+```
+
+### Start / stop / status / remove
+
+```powershell
+nssm start HydraWorker
+nssm status HydraWorker      # SERVICE_RUNNING / SERVICE_STOPPED / ...
+nssm stop HydraWorker
+nssm remove HydraWorker confirm
+```
+
+Equivalent native commands also work once the service is registered:
+`sc start HydraWorker`, `sc stop HydraWorker`, `sc query HydraWorker`, and the
+service appears in `services.msc` as "Hydra Worker".
+
+> **Note:** `nssm remove` does **not** stop a currently running worker
+> subprocess spawned by the watchdog — stop the service first (`nssm stop
+> HydraWorker`), which sends a stop signal the watchdog's `SIGTERM`/`SIGINT`
+> handler picks up to shut down the worker cleanly before the service exits.
+
+---
+
+## Complete example (Task Scheduler, production)
 
 Below is a complete setup script suitable for copy-paste into a PowerShell
 provisioning script:
@@ -243,6 +353,57 @@ Start-Process -FilePath ".\.venv\Scripts\python.exe" `
 
 ---
 
+## Complete example (Windows Service, production)
+
+Same runtime setup as above, but registered as an NSSM-managed service
+instead of a Task Scheduler entry:
+
+```powershell
+# ── Hydra Worker — Windows Service setup (via NSSM) ────────────────────────
+
+# 1. Create the runtime directory and install the worker.
+New-Item -ItemType Directory -Force C:\hydra-worker
+New-Item -ItemType Directory -Force C:\hydra-worker\logs
+cd C:\hydra-worker
+uv venv .venv
+uv pip install -e C:\path\to\hydra
+
+# 2. Write credentials to .env (replace placeholder values).
+@"
+DOMAIN=prod
+API_TOKEN=dt_REPLACE_WITH_REAL_TOKEN
+REDIS_URL=redis://redis.internal:6379/0
+REDIS_PASSWORD=REPLACE_WITH_REDIS_ACL_PASSWORD
+HYDRA_BOOTSTRAP_WORKING_DIR=C:\hydra-worker
+WORKER_TAGS=windows,prod,batch
+MAX_CONCURRENCY=4
+PYTHONUNBUFFERED=1
+"@ | Set-Content C:\hydra-worker\.env
+
+# 3. Validate before registering the service.
+.\.venv\Scripts\python.exe -m worker bootstrap validate
+if ($LASTEXITCODE -ne 0) { exit 1 }
+
+# 4. Register the service (requires elevated shell, requires nssm.exe on PATH).
+nssm install HydraWorker "C:\hydra-worker\.venv\Scripts\python.exe" "-m worker bootstrap run"
+nssm set HydraWorker AppDirectory C:\hydra-worker
+nssm set HydraWorker DisplayName "Hydra Worker"
+nssm set HydraWorker Description "Hydra job scheduler worker (watchdog-supervised)"
+nssm set HydraWorker Start SERVICE_AUTO_START
+nssm set HydraWorker AppStdout C:\hydra-worker\logs\worker.log
+nssm set HydraWorker AppStderr C:\hydra-worker\logs\worker.log
+nssm set HydraWorker AppRotateFiles 1
+nssm set HydraWorker AppRotateBytes 10485760
+nssm set HydraWorker AppExit Default Restart
+nssm set HydraWorker AppRestartDelay 5000
+
+# 5. Start it.
+nssm start HydraWorker
+nssm status HydraWorker
+```
+
+---
+
 ## Operational notes
 
 ### Service account
@@ -262,9 +423,9 @@ Run the Hydra worker under a **dedicated service account** (e.g.
   and `REDIS_PASSWORD` into the service account's environment.
 - Set `HYDRA_BOOTSTRAP_RUN_AS_SYSTEM=false` (the default) unless you have a
   specific need.  Running as SYSTEM gives the worker elevated access.
-- The `install` command requires administrator rights to create the Task
-  Scheduler entry, but the watchdog and worker processes themselves do **not**
-  need to run elevated.
+- The `install` command (or `nssm install`) requires administrator rights to
+  create the Task Scheduler entry / service, but the watchdog and worker
+  processes themselves do **not** need to run elevated.
 
 ### Periodic watchdog trigger
 
@@ -286,7 +447,10 @@ triggers while the watchdog is already running.
 The `HYDRA_BOOTSTRAP_LOG_FILE` target is opened in **append** mode.  Use a
 tool such as [NLog](https://nlog-project.org/),
 [Serilog](https://serilog.net/), or a scheduled `copy /y` + truncate script
-to rotate the file.
+to rotate the file. If you're running as an NSSM service instead, prefer
+NSSM's own rotation (`AppRotateFiles`/`AppRotateBytes`/`AppRotateSeconds`,
+shown in the Windows Service example above) over `HYDRA_BOOTSTRAP_LOG_FILE` —
+don't set both to the same path, or two writers will contend for the file.
 
 ---
 
@@ -334,11 +498,31 @@ The bootstrap uses a PID lock file (`HYDRA_BOOTSTRAP_LOCK_FILE`) to prevent
 multiple watchdog processes from spawning.  If you see duplicate workers:
 
 1. Check that no stale lock file exists at the configured path.
-2. Ensure only one Task Scheduler task is configured for the host.
+2. Ensure only one Task Scheduler task (or one NSSM service) is configured
+   for the host — running both mechanisms for the same worker at once will
+   start two watchdogs.
 3. Delete the stale lock file manually if the watchdog process has exited:
    ```powershell
    Remove-Item $env:TEMP\hydra_bootstrap.lock -ErrorAction SilentlyContinue
    ```
+
+### Service shows "Starting" then stops immediately (NSSM)
+
+1. Run the exact command NSSM launches, interactively, to see the real error:
+   `C:\hydra-worker\.venv\Scripts\python.exe -m worker bootstrap run`.
+2. Check `nssm get HydraWorker AppDirectory` matches `C:\hydra-worker` — a
+   wrong working directory means `.env` won't be found.
+3. Check the NSSM-captured log (`AppStdout`/`AppStderr`) or, if unset, the
+   Windows Event Log (`eventvwr.msc` → Windows Logs → Application, source
+   `nssm`) for the process's exit code.
+4. Confirm the service account (`nssm get HydraWorker ObjectName`) has read
+   access to the venv and `.env`, and network access to Redis.
+
+### "The service did not respond to the start or control request in a timely fashion"
+
+NSSM waits a fixed startup window before reporting failure. This usually
+means the Python process itself errored before entering the watchdog loop —
+check `AppStdout`/`AppStderr` first; it's rarely an NSSM configuration issue.
 
 ---
 
@@ -346,6 +530,8 @@ multiple watchdog processes from spawning.  If you see duplicate workers:
 
 - [Task Scheduler documentation (Microsoft)](https://learn.microsoft.com/en-us/windows/win32/taskschd/task-scheduler-start-page)
 - [`schtasks` command reference](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/schtasks)
+- [NSSM — the Non-Sucking Service Manager](https://nssm.cc/)
+- [NSSM usage reference](https://nssm.cc/usage)
 - Hydra worker configuration: [`worker/config.py`](../worker/config.py)
 - Bootstrap source: [`worker/bootstrap.py`](../worker/bootstrap.py)
 - Task Scheduler helper: [`worker/windows_tasks.py`](../worker/windows_tasks.py)
