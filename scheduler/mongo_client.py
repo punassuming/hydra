@@ -14,7 +14,11 @@ def get_mongo_client() -> MongoClient:
         # ties up a request thread for 30s per call (including /health pings). Fail
         # fast instead so healthchecks and normal requests both surface the outage quickly.
         timeout_ms = int(os.getenv("MONGO_SERVER_SELECTION_TIMEOUT_MS", "5000"))
-        _mongo_client = MongoClient(url, serverSelectionTimeoutMS=timeout_ms)
+        # BSON datetimes carry no timezone; pymongo returns them naive by default,
+        # which crashes any arithmetic against the tz-aware datetimes used elsewhere
+        # (e.g. datetime.now(timezone.utc)). tz_aware=True makes every datetime read
+        # back from Mongo UTC-aware instead.
+        _mongo_client = MongoClient(url, serverSelectionTimeoutMS=timeout_ms, tz_aware=True)
     return _mongo_client
 
 
