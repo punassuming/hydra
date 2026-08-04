@@ -2,26 +2,27 @@
 
 ## Project Overview
 
-Hydra Jobs is a distributed job runner designed for flexibility and scalability. It features a FastAPI-based scheduler, cross-platform python workers, and a React-based user interface.
+Hydra Jobs is a distributed job runner designed for flexibility and scalability. It features a FastAPI-based scheduler, cross-platform workers (Python and Go), and a React-based user interface.
 
 **Key Components:**
 
 *   **Scheduler Service:** A Python FastAPI application that exposes a REST API for job management. It handles job submission, validation, scheduling (cron/interval), and dispatching to workers via Redis. It also supports Server-Sent Events (SSE) for real-time updates.
-    *   **AI Integration:** Uses Google Gemini or OpenAI for generating job definitions from natural language and analyzing job failures.
-*   **Worker Service:** A Python application that consumes jobs from Redis queues. It supports various execution environments (shell, python, batch), handles concurrency/heartbeats, streams logs, and emits run lifecycle events to Redis (scheduler persists them to MongoDB).
-    *   **Git Support:** Can clone and execute code directly from Git repositories.
-*   **UI:** A React application built with Vite, TypeScript, and Ant Design. It provides a visual interface for monitoring jobs, workers, and run history, with integrated AI tools.
+    *   **AI Integration:** Uses Google Gemini or OpenAI for generating job definitions from natural language, analyzing job failures, diffing a failed run against the job's last success, and estimating expected run duration. A separate, LLM-free "Investigate" set of canned checks (`scheduler/api/investigations.py`) covers common ops questions without needing a provider key.
+*   **Worker Service:** Two interchangeable implementations that speak the same Redis protocol/env-var contract, so pools of each can run side by side against one scheduler:
+    *   **Python worker** (`worker/`) — full feature set: shell/python/batch/powershell/sql/http/external/sensor executors, Git source provisioning, Linux impersonation, Kerberos pre-auth, and a Windows bootstrap/watchdog (Task Scheduler or a Windows Service via NSSM).
+    *   **Go worker** (`go-worker/`) — lighter-weight: shell/http/external executors and Git source provisioning, no SQL executor or impersonation/Kerberos.
+*   **UI:** A React application built with Vite, TypeScript, and Ant Design. It provides a visual interface for monitoring jobs, workers, and run history, with integrated AI tools and canned investigations.
 *   **Data Store:**
     *   **Redis:** Used for job queues, worker coordination, heartbeats, and pub/sub.
     *   **MongoDB:** Stores persistent data including job definitions, run history, and domain metadata.
 
 ## Architecture
 
-*   **Language:** Python 3.13 (CI target; minimum 3.11 supported), TypeScript (Frontend)
+*   **Language:** Python 3.13 (CI target; minimum 3.11 supported), Go (worker, CI target per `go-worker/go.mod`), TypeScript (Frontend)
 *   **Frameworks:** FastAPI (Scheduler), React + Vite (UI)
 *   **Database:** MongoDB (v6.0 recommended, v5.0 for broader CPU support), Redis (v7-alpine)
 *   **AI Provider:** Google Gemini (requires `GEMINI_API_KEY`) or OpenAI (requires `OPENAI_API_KEY`)
-*   **Infrastructure:** Docker & Docker Compose
+*   **Infrastructure:** Docker & Docker Compose (single or multi worker-pool), Kubernetes via the Helm chart in `deploy/helm/hydra/`, Windows Task Scheduler/Service for bare-metal workers
 
 ## Workflow & Architecture (Internal Details)
 
@@ -85,25 +86,29 @@ Hydra Jobs is a distributed job runner designed for flexibility and scalability.
 - `scheduler/orchestrator_entrypoint.py` — standalone control-plane process; run with `python -m scheduler.orchestrator_entrypoint` when `HYDRA_MODE=api`.
 - `scheduler/api/*` expose jobs, workers, health, events (SSE), logs streaming, history, and admin domain/template management.
 - `scheduler/api/workers.py` — worker list/state + metrics/timeline endpoints.
-- `scheduler/api/ai.py` — AI endpoints (Generate/Analyze).
+- `scheduler/api/ai.py` — AI endpoints: `generate_job` (NL → job JSON), `analyze_run` (single-run log analysis), `predict_duration` (historical duration percentiles, no LLM), `diagnose_regression` (diffs a failed run against the job's last success + duration baseline, returns a structured root-cause hypothesis). `_call_llm()` is the single Gemini/OpenAI dispatch point all four share where applicable; `duration_percentiles()` is shared by `predict_duration`, `diagnose_regression`, and the `long_running_outliers` investigation.
+- `scheduler/api/investigations.py` — canned, LLM-free operational checks (`failed_recent`, `long_running_outliers`, `flaky_jobs`, `never_succeeded`) exposed as `GET /investigations/` (catalog) and `GET /investigations/{key}` (run one). Deliberately does not call an LLM — every check is a fixed, whitelisted query, so it needs no provider API key and returns instantly.
 - `scheduler/models/*` define Pydantic models for jobs, runs, workers, executors, and scheduling.
 - `scheduler/utils/*` house affinity checks, worker selection, failover logic, auth helpers, schedule math, and logging setup.
 - `worker/worker.py` registers the worker, maintains heartbeats, executes jobs, emits `run_start`/`run_end` events to Redis, and records worker operation events.
 - `worker/utils/*` contain shell/exec helpers, python env prep (`uv`/venv/system), completion criteria evaluation, concurrency counters, and heartbeats.
 - `worker/utils/git.py` — Git clone/checkout logic. PAT is injected for the network operation only; the remote URL is rewritten to strip credentials before the workspace is cached.
-- `worker/executor.py` — Job execution engine (shell/python/batch/external) with git source support.
+- `worker/executor.py` — Job execution engine (shell/python/batch/powershell/sql/http/external/sensor) with git source support.
 - `worker/runtime.py` — Host runtime discovery, configured tool paths, and fail-closed capability detection.
 - `worker/executor.py` — also handles Linux impersonation + Kerberos pre-auth when configured.
 - `worker/__main__.py` — CLI entry point; dispatches to `worker_main()` (default) or `bootstrap.main()` when the first argument is `bootstrap`.
 - `worker/bootstrap.py` — Windows worker bootstrap/watchdog: `BootstrapConfig` model, PID-lock helpers, watchdog loop, and `action_install`/`action_remove`/`action_run`/`action_validate` functions. CLI: `python -m worker bootstrap <install|remove|run|validate>`.
-- `worker/windows_tasks.py` — Thin wrapper around `schtasks` for Windows Task Scheduler management. All public functions raise `RuntimeError` on non-Windows platforms.
-- `ui/src/App.tsx` — Main React component.
-- `ui/src/api/` — API client with domain-scoped token management.
-- `ui/src/components/JobForm.tsx` — Job creation form with AI generation.
+- `worker/windows_tasks.py` — Thin wrapper around `schtasks` for Windows Task Scheduler management. All public functions raise `RuntimeError` on non-Windows platforms. (A Windows Service alternative via NSSM wraps the same `bootstrap run` watchdog with no code changes — docs only, see `docs/windows-worker-bootstrap.md`.)
+- `go-worker/` — Go worker implementation, same Redis protocol/env-var contract as the Python worker. `main.go` entry point; `internal/worker/worker.go` (dispatch loop + heartbeat file for liveness probes), `internal/executor/executor.go` (shell/http/external only — no SQL/impersonation/Kerberos), `internal/source/source.go` (Git provisioning), `internal/workspace/cache.go`, `internal/config/config.go`, `internal/redisclient/client.go`. Tested with `go test ./...`; no Windows bootstrap equivalent (Python-only).
+- `ui/src/App.tsx` — Main React component; header holds the Admin button and the "Investigate" button that opens `InvestigateDrawer`.
+- `ui/src/api/` — API client with domain-scoped token management; `ui/src/api/investigations.ts` is the client for the canned-checks tool.
+- `ui/src/components/JobForm.tsx` — Job creation form with AI generation (re-exports the decomposed `job-form/` module).
 - `ui/src/components/JobRuns.tsx` — Run history with AI failure analysis.
-- `examples/` holds submission scripts/templates; `deploy/helm/hydra` has the Kubernetes Helm chart; `docker-compose*.yml` define local stacks.
+- `ui/src/components/FailureInsight.tsx` — AI Log Assistant + "Compare vs Last Success" (Run Diff Copilot) on a run's log view.
+- `ui/src/components/InvestigateDrawer.tsx` — canned-investigations drawer; `ui/src/components/ProviderSelect.tsx` — shared Gemini/OpenAI picker used by every AI feature.
+- `examples/` holds submission scripts/templates; `deploy/helm/hydra` has the Kubernetes Helm chart; `docker-compose.yml` + `docker-compose.worker.yml`/`docker-compose.worker.go.yml` (single pool) or `docker-compose.workers.yml` (multiple pools side by side) + `docker-compose.separated.yml`/`docker-compose.dev.yml` define local stacks.
 - `tests/` — Backend integration and unit tests.
-- `tests/test_ai.py` — AI endpoint tests.
+- `tests/test_ai.py` — AI endpoint tests (generate/analyze/predict/diagnose). `tests/test_investigations.py` — canned-checks tests. `tests/test_mongo_client.py` — asserts the Mongo client is constructed `tz_aware=True` (a real prior bug: BSON datetimes decode naive by default, which crashes arithmetic against `datetime.now(timezone.utc)` elsewhere in the scheduler).
 
 ## Building and Running
 
@@ -170,14 +175,16 @@ Located in `scripts/`:
 *   `dev-down.sh`: Stops the development stack.
 *   `test.sh`: Runs Python backend tests.
 *   `test-all.sh`: Runs all tests.
-*   `worker-up.sh`: Helper to start a worker.
-*   `docker-compose.worker.go.yml`: Compose file to run the Go worker.
+*   `worker-up.sh`: Starts a single worker pool against an existing scheduler; `WORKER_FLAVOR=python` (default) or `WORKER_FLAVOR=go` picks `docker-compose.worker.yml` vs `docker-compose.worker.go.yml`.
 *   `build-images.sh`: Builds Docker images.
 *   `create-domain.sh`: Creates a new domain via the API.
 *   `provision-redis-acl.sh`: Rotates/provisions domain worker Redis ACL credentials via admin API.
 *   `configure-external-redis-acl.sh`: Configures domain worker ACL user directly on an external Redis server via `redis-cli`.
-*   `start-domain-workers.sh`: Agentic worker bring-up for Docker/Kubernetes/Bare deployments.
+*   `start-domain-workers.sh`: Agentic worker bring-up for Docker/Kubernetes/Bare deployments; `WORKER_FLAVOR=python|go` selects the compose file for `WORKER_BACKEND=docker`.
 *   `diagnose-domain-admin.sh`: Agentic diagnostics for domain auth and worker visibility (with optional Redis deep checks).
+*   `hydra-apply.py`: Applies a job definition (YAML/JSON) via the API — used by `hydra-ctl apply`.
+
+The Compose files themselves (`docker-compose.worker.go.yml`, `docker-compose.workers.yml`, etc.) live at the repo root, not in `scripts/` — see the "Docker Deployment" section of `README.md` for the full set and how they combine.
 
 ## Testing
 
@@ -243,7 +250,8 @@ Located in `scripts/`:
 
 ### Additional Notes
 
-- Python CI covers 3.11 and 3.13 across Linux, macOS, and Windows. Python container images use 3.13 slim and install the locked environment with `uv`.
+- Python CI (`.github/workflows/python-ci.yml`) covers 3.11 and 3.13 across Linux, macOS, and Windows, plus separate jobs for lint (ruff), the Go worker (`go test ./...`), the Helm chart (`helm lint --strict` + `helm template` in three configurations), Docker image builds (scheduler/worker/go-worker/ui), a full-stack Compose smoke test (`tests/test_end_to_end.py`), and a Cypress browser journey. Python container images use 3.13 slim and install the locked environment with `uv`.
+- A separate `.github/workflows/release-please.yml` runs on every push to `main`, driving automatic versioning/changelog/GitHub Releases from commit messages — see the commit-message rule under **Working Agreements** below and `CONTRIBUTING.md`.
 - Environment variables can be configured via `.env` file (see `.env.example`).
 - MongoDB uses a named volume `mongo-data` for persistence.
 - Redis connection precedence: if both `REDIS_SENTINELS` and `REDIS_SENTINEL_MASTER` are set, scheduler/worker use Sentinel discovery; otherwise they use `REDIS_URL`.
@@ -252,7 +260,10 @@ Located in `scripts/`:
 
 *   **Magic Job Generator:** In the UI "New Job" form, use natural language to generate job JSON. Select between Gemini and OpenAI from the dropdown.
 *   **AI Log Assistant:** In Run Logs, use AI helper actions for remediation, summary, error extraction, retry tuning, or custom questions. Select between Gemini and OpenAI.
-*   **Configuration:** Ensure `GEMINI_API_KEY` and/or `OPENAI_API_KEY` are set in the Scheduler environment.
+*   **Duration Prediction:** `POST /ai/predict_duration` — historical median/mean/p90 runtime for a job, no LLM call.
+*   **Run Diff Copilot:** In Run Logs, "Compare vs Last Success" (`POST /ai/diagnose_regression`) diffs the failed run's output against the job's last successful run plus its duration baseline, returning a structured cause/confidence/evidence/fix/transience verdict instead of analyzing one run in isolation.
+*   **Investigate (not AI):** header button opening canned, LLM-free checks (`GET /investigations/`) — recently failed, running longer than usual, flaky, never succeeded. No provider key required; complements the AI features above rather than replacing them.
+*   **Configuration:** Ensure `GEMINI_API_KEY` and/or `OPENAI_API_KEY` are set in the Scheduler environment for the AI-backed features (not needed for Investigate).
 
 ## Git Source Execution
 
@@ -292,6 +303,7 @@ The worker will clone the repo to a temporary directory, switch to `path` (if pr
 ## Working Agreements
 
 - Commit after each meaningful change with a clear description of what changed and why. Keep commits small and scoped.
+- **Commit messages must follow [Conventional Commits](https://www.conventionalcommits.org/)** — `<type>[optional scope]: <description>`, e.g. `fix: correct duration calc when a run has no start_ts` or `feat(worker): add heartbeat liveness file for Go workers`. This isn't just style: `.github/workflows/release-please.yml` parses these on every push to `main` to drive automatic version bumps (`pyproject.toml`, `ui/package.json`, `deploy/helm/hydra/Chart.yaml`), `CHANGELOG.md` generation, and GitHub Releases — a non-conventional commit is silently invisible to that pipeline (no version bump, no changelog line). Types that matter: `fix:` (patch), `feat:` (minor — this repo is pre-1.0 with `bump-minor-pre-major: true`), `fix!:`/`feat!:`/a `BREAKING CHANGE:` footer (major), `perf:` (patch); `docs:`/`chore:`/`refactor:`/`test:`/`build:`/`ci:` don't bump the version or show in the changelog. **This repo merges PRs with a merge commit (not squash)**, so each individual commit reaching `main` is scanned on its own — write every commit message as if it stands alone, not just the PR title. Full details and examples: [`CONTRIBUTING.md`](CONTRIBUTING.md).
 - Use `git status`/`git diff` frequently before committing to keep the working tree clean and to avoid drifting config or lockfiles.
 - When editing, align affinity/capability expectations across scheduler, worker, and UI to prevent drift between enforcement and presentation.
 - Keep `AGENTS.md` current whenever architecture, APIs, auth behavior, deployment workflow, or operator-facing features change.

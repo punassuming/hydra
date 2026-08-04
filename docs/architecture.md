@@ -177,7 +177,7 @@ flowchart LR
 
     subgraph Windows["Windows Bare-Metal"]
         direction TB
-        BS["bootstrap watchdog\n(Task Scheduler)"]
+        BS["bootstrap watchdog\n(Task Scheduler OR\nWindows Service via NSSM)"]
         BS --> WW["python -m worker"]
     end
 

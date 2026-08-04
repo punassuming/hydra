@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Layout, Segmented, Button } from "antd";
+import { SearchOutlined } from "@ant-design/icons";
 import { Routes, Route, useLocation, useNavigate } from "react-router-dom";
 import { ConfigProvider, theme } from "antd";
 import { HomePage } from "./pages/Home";
@@ -10,6 +11,7 @@ import { AdminPage } from "./pages/Admin";
 import { HydraLogo } from "./components/HydraLogo";
 import { HeaderSettings } from "./components/HeaderSettings";
 import { AuthPrompt } from "./components/AuthPrompt";
+import { InvestigateDrawer } from "./components/InvestigateDrawer";
 import { AUTH_REQUIRED_EVENT, hasAnyToken } from "./api/client";
 import { WorkerDetailPage } from "./pages/WorkerDetail";
 import { ActiveDomainProvider, useActiveDomain } from "./context/ActiveDomainContext";
@@ -47,6 +49,7 @@ function AppShell({ darkMode, setDarkMode }: { darkMode: boolean; setDarkMode: (
   const navigate = useNavigate();
   const { domain: activeDomain } = useActiveDomain();
   const [authOpen, setAuthOpen] = useState(!hasAnyToken());
+  const [investigateOpen, setInvestigateOpen] = useState(false);
   const { colors } = useTheme();
   const { Header, Content } = Layout;
 
@@ -184,6 +187,9 @@ function AppShell({ darkMode, setDarkMode }: { darkMode: boolean; setDarkMode: (
             >
               {darkMode ? "☀" : "☽"}
             </button>
+            <Button icon={<SearchOutlined />} onClick={() => setInvestigateOpen(true)}>
+              Investigate
+            </Button>
             <Button
               type={location.pathname.startsWith("/admin") ? "primary" : "default"}
               onClick={() => navigate("/admin")}
@@ -193,6 +199,7 @@ function AppShell({ darkMode, setDarkMode }: { darkMode: boolean; setDarkMode: (
             <HeaderSettings />
           </div>
         </Header>
+        <InvestigateDrawer open={investigateOpen} onClose={() => setInvestigateOpen(false)} />
         <Content
           style={{
             background: darkMode ? "#0c1220" : colors.bgSecondary,

@@ -18,6 +18,7 @@ import {
 import { JobDefinition, PythonEnvironment, SourceConfig } from "../../types";
 import { JobPayload, ValidationResult, fetchWorkers, fetchJobs, generateJob } from "../../api/jobs";
 import { useActiveDomain } from "../../context/ActiveDomainContext";
+import { ProviderSelect } from "../ProviderSelect";
 import {
   createDefaultPayload,
   createDefaultPythonEnvironment,
@@ -1161,15 +1162,7 @@ export function JobForm({
           message="Magic Job Generator"
           description={
             <Space.Compact style={{ width: "100%" }}>
-              <Select
-                value={provider}
-                onChange={setProvider}
-                options={[
-                  { label: "Gemini", value: "gemini" },
-                  { label: "OpenAI", value: "openai" },
-                ]}
-                style={{ width: 100 }}
-              />
+              <ProviderSelect value={provider} onChange={setProvider} style={{ width: 100 }} />
               <Input
                 placeholder="Describe your job (e.g., 'Run a backup script every Sunday at 2am')"
                 value={prompt}

@@ -139,3 +139,19 @@ export const analyzeRun = (payload: {
   question?: string;
 }) =>
   apiClient.post<{ analysis: string }>("/ai/analyze_run", { provider: "gemini", ...payload });
+
+export interface RegressionDiagnosis {
+  likely_cause: string;
+  confidence: "low" | "medium" | "high";
+  evidence: string[];
+  suggested_fix: string;
+  is_transient: boolean;
+  compared_run_id: string;
+  compared_run_started_at?: string | null;
+  current_duration_seconds?: number | null;
+  baseline_p90_seconds?: number | null;
+  baseline_sample_size: number;
+}
+
+export const diagnoseRegression = (runId: string, provider: "gemini" | "openai" = "gemini", model?: string) =>
+  apiClient.post<RegressionDiagnosis>("/ai/diagnose_regression", { run_id: runId, provider, model });

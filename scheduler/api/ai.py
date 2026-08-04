@@ -1,7 +1,8 @@
+import difflib
 import json
 import os
 from enum import Enum
-from typing import Optional
+from typing import List, Literal, Optional
 
 import google.generativeai as genai
 import openai
@@ -13,6 +14,13 @@ from ..mongo_client import get_db
 
 router = APIRouter(prefix="/ai", tags=["AI"])
 MAX_PREDICTION_SAMPLE_SIZE = 200  # Cap query size to keep estimation requests fast.
+
+# Shared log-truncation budget so every feature that hands log text to an LLM
+# (analyze_run, diagnose_regression) truncates the same way.
+STDERR_TAIL_CHARS = 6000
+STDOUT_TAIL_CHARS = 2500
+
+_DEFAULT_MODELS = {"gemini": "gemini-pro", "openai": "gpt-4o"}
 
 class AIProvider(str, Enum):
     GEMINI = "gemini"
@@ -44,6 +52,30 @@ class PredictDurationRequest(BaseModel):
     job_id: str
     sample_size: int = Field(default=20, ge=1, le=MAX_PREDICTION_SAMPLE_SIZE)
     domain: Optional[str] = None
+
+class DiagnoseRegressionRequest(BaseModel):
+    run_id: str
+    provider: AIProvider = AIProvider.GEMINI
+    model: Optional[str] = None
+
+class DiagnoseRegressionResponse(BaseModel):
+    likely_cause: str
+    confidence: Literal["low", "medium", "high"]
+    evidence: List[str]
+    suggested_fix: str
+    is_transient: bool
+    compared_run_id: str
+    compared_run_started_at: Optional[str] = None
+    current_duration_seconds: Optional[float] = None
+    baseline_p90_seconds: Optional[float] = None
+    baseline_sample_size: int = 0
+
+class _LLMDiagnosis(BaseModel):
+    likely_cause: str
+    confidence: Literal["low", "medium", "high"]
+    evidence: List[str]
+    suggested_fix: str
+    is_transient: bool
 
 SYSTEM_PROMPT_JOB = """
 You are an expert job scheduler assistant. Convert the user's natural language request into a JSON
@@ -110,6 +142,19 @@ def _call_openai(prompt: str, system: str = "", model_name: str = "gpt-3.5-turbo
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"OpenAI Error: {str(e)}")
 
+def _call_llm(provider: AIProvider, model: Optional[str], system: str, prompt: str) -> str:
+    """Single dispatch point for every feature that needs an LLM call.
+
+    Keeps the provider branching (and default-model lookup) in one place
+    instead of duplicated per endpoint.
+    """
+    resolved_model = model or _DEFAULT_MODELS.get(provider.value)
+    if provider == AIProvider.GEMINI:
+        return _call_gemini(prompt, system, resolved_model)
+    if provider == AIProvider.OPENAI:
+        return _call_openai(prompt, system, resolved_model)
+    raise HTTPException(status_code=400, detail="Invalid provider")
+
 def _clean_json(text: str) -> str:
     text = text.strip()
     if text.startswith("```json"):
@@ -122,16 +167,8 @@ def _clean_json(text: str) -> str:
 
 @router.post("/generate_job")
 async def generate_job(req: GenerateRequest):
-    provider = req.provider
-    model = req.model or ("gemini-pro" if provider == AIProvider.GEMINI else "gpt-4o")
-    
-    if provider == AIProvider.GEMINI:
-        text = _call_gemini(req.prompt, SYSTEM_PROMPT_JOB, model)
-    elif provider == AIProvider.OPENAI:
-        text = _call_openai(req.prompt, SYSTEM_PROMPT_JOB, model)
-    else:
-        raise HTTPException(status_code=400, detail="Invalid provider")
-        
+    text = _call_llm(req.provider, req.model, SYSTEM_PROMPT_JOB, req.prompt)
+
     try:
         cleaned = _clean_json(text)
         data = json.loads(cleaned)
@@ -142,11 +179,8 @@ async def generate_job(req: GenerateRequest):
 
 @router.post("/analyze_run")
 async def analyze_run(req: AnalyzeRequest):
-    provider = req.provider
-    model = req.model or ("gemini-pro" if provider == AIProvider.GEMINI else "gpt-4o")
-
-    stderr_tail = (req.stderr or "")[-6000:]
-    stdout_tail = (req.stdout or "")[-2500:]
+    stderr_tail = (req.stderr or "")[-STDERR_TAIL_CHARS:]
+    stdout_tail = (req.stdout or "")[-STDOUT_TAIL_CHARS:]
     context = f"""
 Run ID: {req.run_id}
 Exit Code: {req.exit_code}
@@ -205,14 +239,8 @@ Stdout: {stdout_tail}
 
 Provide a concise summary of the error and 1-3 specific steps to fix it.
 """
-    
-    if provider == AIProvider.GEMINI:
-        text = _call_gemini(prompt, "", model)
-    elif provider == AIProvider.OPENAI:
-        text = _call_openai(prompt, "", model)
-    else:
-        raise HTTPException(status_code=400, detail="Invalid provider")
-        
+
+    text = _call_llm(req.provider, req.model, "", prompt)
     return {"analysis": text}
 
 
@@ -228,6 +256,36 @@ def _percentile(sorted_values, p: float) -> Optional[float]:
     return float(sorted_values[lower] + (sorted_values[upper] - sorted_values[lower]) * fraction)
 
 
+def duration_percentiles(
+    db, job_id: str, domain_filter: Optional[str], sample_size: int, exclude_run_id: Optional[str] = None
+) -> Optional[dict]:
+    """Historical duration stats for a job — shared by predict_duration and diagnose_regression."""
+    query = {
+        "job_id": job_id,
+        "status": {"$in": ["success", "failed"]},
+        "duration": {"$gte": 0},
+    }
+    if domain_filter:
+        query["domain"] = domain_filter
+    if exclude_run_id:
+        query["_id"] = {"$ne": exclude_run_id}
+
+    runs = list(db.job_runs.find(query).sort("start_ts", -1).limit(sample_size))
+    durations = sorted(
+        float(run["duration"])
+        for run in runs
+        if isinstance(run.get("duration"), (int, float)) and run["duration"] >= 0
+    )
+    if not durations:
+        return None
+    return {
+        "sample_size": len(durations),
+        "median_seconds": _percentile(durations, 0.5),
+        "mean_seconds": sum(durations) / len(durations),
+        "p90_seconds": _percentile(durations, 0.9),
+    }
+
+
 @router.post("/predict_duration")
 async def predict_duration(req: PredictDurationRequest, request: Request):
     db = get_db()
@@ -235,33 +293,139 @@ async def predict_duration(req: PredictDurationRequest, request: Request):
     domain = getattr(request.state, "domain", "prod")
     is_admin = getattr(request.state, "is_admin", False)
 
-    query = {
-        "job_id": req.job_id,
-        "status": {"$in": ["success", "failed"]},
-        "duration": {"$gte": 0},
-    }
+    domain_filter = None
     if not is_admin:
-        query["domain"] = domain
+        domain_filter = domain
     elif req.domain:
-        query["domain"] = req.domain
+        domain_filter = req.domain
 
-    runs = list(db.job_runs.find(query).sort("start_ts", -1).limit(sample_size))
-    durations = []
-    for run in runs:
-        duration = run.get("duration")
-        if isinstance(duration, (int, float)) and duration >= 0:
-            durations.append(float(duration))
-    durations.sort()
-    if not durations:
+    stats = duration_percentiles(db, req.job_id, domain_filter, sample_size)
+    if not stats:
         return {"job_id": req.job_id, "sample_size": 0, "estimated_duration_seconds": None, "p90_duration_seconds": None}
 
-    mean_seconds = sum(durations) / len(durations)
-    median_seconds = _percentile(durations, 0.5)
-    p90_seconds = _percentile(durations, 0.9)
     return {
         "job_id": req.job_id,
-        "sample_size": len(durations),
-        "estimated_duration_seconds": median_seconds,  # Median estimate is more stable for skewed runtimes.
-        "mean_duration_seconds": mean_seconds,
-        "p90_duration_seconds": p90_seconds,
+        "sample_size": stats["sample_size"],
+        "estimated_duration_seconds": stats["median_seconds"],  # Median is more stable for skewed runtimes.
+        "mean_duration_seconds": stats["mean_seconds"],
+        "p90_duration_seconds": stats["p90_seconds"],
     }
+
+
+def _unified_log_diff(baseline_log: str, current_log: str, max_lines: int = 200) -> str:
+    diff = list(
+        difflib.unified_diff(
+            baseline_log.splitlines(),
+            current_log.splitlines(),
+            fromfile="last_success",
+            tofile="this_run",
+            lineterm="",
+        )
+    )
+    if not diff:
+        return "(no textual difference between this run's output and the last successful run's output)"
+    if len(diff) > max_lines:
+        diff = diff[:max_lines] + [f"... ({len(diff) - max_lines} more diff lines truncated) ..."]
+    return "\n".join(diff)
+
+
+SYSTEM_PROMPT_DIAGNOSE_REGRESSION = """
+You are an expert SRE assistant diagnosing why a scheduled job run failed. You are given a
+diff between this run's output and the most recent successful run's output, plus duration
+data, as your primary evidence — ground your answer in that evidence rather than guessing.
+
+Respond with ONLY a JSON object (no markdown fences) matching this schema:
+{
+  "likely_cause": "<one sentence>",
+  "confidence": "low" | "medium" | "high",
+  "evidence": ["<short evidence bullet>", "..."],
+  "suggested_fix": "<concrete next step(s)>",
+  "is_transient": true | false
+}
+
+If the diff shows no meaningful change and duration is in the normal range, say so explicitly
+and prefer a transient explanation (e.g. network blip, resource contention) over inventing a
+code-level cause you cannot support from the evidence.
+"""
+
+
+@router.post("/diagnose_regression")
+async def diagnose_regression(req: DiagnoseRegressionRequest, request: Request):
+    db = get_db()
+    domain = getattr(request.state, "domain", "prod")
+    is_admin = getattr(request.state, "is_admin", False)
+
+    current = db.job_runs.find_one({"_id": req.run_id})
+    if not current:
+        raise HTTPException(status_code=404, detail="run not found")
+    run_domain = current.get("domain", "prod")
+    if not is_admin and run_domain != domain:
+        raise HTTPException(status_code=403, detail="forbidden")
+
+    job_id = current.get("job_id")
+    baseline_query = {"job_id": job_id, "status": "success", "_id": {"$ne": req.run_id}}
+    current_start = current.get("start_ts")
+    if current_start:
+        baseline_query["start_ts"] = {"$lt": current_start}
+    baseline = next(iter(db.job_runs.find(baseline_query).sort("start_ts", -1).limit(1)), None)
+    if not baseline:
+        raise HTTPException(
+            status_code=422,
+            detail="no_prior_success: no successful run of this job exists yet to compare against",
+        )
+
+    job_doc = db.job_definitions.find_one({"_id": job_id}, {"name": 1}) or {}
+    job_name = job_doc.get("name", job_id)
+
+    stats = duration_percentiles(db, job_id, run_domain, MAX_PREDICTION_SAMPLE_SIZE, exclude_run_id=req.run_id)
+    current_duration = current.get("duration")
+    if stats and isinstance(current_duration, (int, float)):
+        duration_line = (
+            f"Duration comparison: this run took {current_duration:.1f}s vs a historical "
+            f"p90 of {stats['p90_seconds']:.1f}s (median {stats['median_seconds']:.1f}s, "
+            f"n={stats['sample_size']})."
+        )
+        if stats["p90_seconds"] and current_duration >= 2 * stats["p90_seconds"]:
+            duration_line += " This run took notably longer than usual."
+    else:
+        duration_line = "No historical duration baseline is available yet for this job."
+
+    current_log = (
+        f"STDOUT:\n{(current.get('stdout') or '')[-STDOUT_TAIL_CHARS:]}\n\n"
+        f"STDERR:\n{(current.get('stderr') or '')[-STDERR_TAIL_CHARS:]}"
+    )
+    baseline_log = (
+        f"STDOUT:\n{(baseline.get('stdout') or '')[-STDOUT_TAIL_CHARS:]}\n\n"
+        f"STDERR:\n{(baseline.get('stderr') or '')[-STDERR_TAIL_CHARS:]}"
+    )
+    diff_text = _unified_log_diff(baseline_log, current_log)
+
+    baseline_started = baseline.get("start_ts")
+    prompt = f"""
+Job: {job_name} ({job_id})
+This run: id={req.run_id} status={current.get('status')} exit_code={current.get('returncode')}
+Compared against last success: id={baseline.get('_id')} started at {baseline_started}
+{duration_line}
+
+Unified diff of this run's output against the last successful run's output:
+{diff_text}
+"""
+
+    text = _call_llm(req.provider, req.model, SYSTEM_PROMPT_DIAGNOSE_REGRESSION, prompt)
+    try:
+        parsed = _LLMDiagnosis.model_validate_json(_clean_json(text))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to parse diagnosis: {str(e)}")
+
+    return DiagnoseRegressionResponse(
+        likely_cause=parsed.likely_cause,
+        confidence=parsed.confidence,
+        evidence=parsed.evidence,
+        suggested_fix=parsed.suggested_fix,
+        is_transient=parsed.is_transient,
+        compared_run_id=str(baseline.get("_id")),
+        compared_run_started_at=baseline_started.isoformat() if hasattr(baseline_started, "isoformat") else baseline_started,
+        current_duration_seconds=float(current_duration) if isinstance(current_duration, (int, float)) else None,
+        baseline_p90_seconds=stats["p90_seconds"] if stats else None,
+        baseline_sample_size=stats["sample_size"] if stats else 0,
+    )

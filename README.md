@@ -16,17 +16,17 @@
 
 | Category | Capabilities |
 |---|---|
-| **Executors** | `shell`, `python`, `batch`, `powershell`, `sql` (Postgres/MySQL/MSSQL/Oracle/MongoDB), `http` (REST/webhooks), `external` |
+| **Executors** | `shell`, `python`, `batch`, `powershell`, `sql` (Postgres/MySQL/MSSQL/Oracle/MongoDB), `http` (REST/webhooks), `external`, `sensor` (poll HTTP/SQL until a condition is met) |
 | **Scheduling** | Immediate, cron (with timezone), interval — with optional `start_at`/`end_at` windows |
 | **Source Provisioning** | Git clone (PAT auth, sparse checkout), local `copy`, SSH `rsync` |
-| **AI Assistance** | Natural-language job generation + run failure analysis via Google Gemini or OpenAI |
+| **AI Assistance** | Natural-language job generation, run failure analysis, run-diff root-cause diagnosis, and duration prediction via Google Gemini or OpenAI — plus a canned, LLM-free "Investigate" sweep for common ops questions |
 | **Multi-Domain** | Full tenant isolation with per-domain tokens and Redis ACL scoping |
 | **Affinity** | Route jobs by OS, tags, hostnames, subnets, deployment type, or executor capability |
 | **Reliability** | Retries with delay, timeout enforcement, failover requeue, dependency graph (`depends_on`) |
 | **Alerting** | On-failure webhooks and SMTP email alerts (domain-scoped credentials) |
 | **Security** | Domain-scoped tokens, encrypted credential store, per-domain Redis ACL, Linux user impersonation, Kerberos pre-auth |
 | **Observability** | Real-time SSE log streaming, Gantt/concurrency timeline, worker metrics trends, operational event history |
-| **Deployment** | Docker Compose, Kubernetes manifests, Redis Sentinel HA |
+| **Deployment** | Docker Compose (single/multi worker pool), Kubernetes Helm chart, Windows Task Scheduler/Service, Redis Sentinel HA |
 
 ---
 
@@ -196,6 +196,9 @@ Jobs declare an `executor` block to choose how they run:
 
 // PowerShell (Windows workers)
 { "type": "powershell", "script": "Get-Date" }
+
+// Sensor (poll until a condition is met, then complete)
+{ "type": "sensor", "sensor_type": "http", "target": "https://api.example.com/status", "poll_interval_seconds": 30, "expected_status": [200] }
 ```
 
 All executor types support `env`, `args`, `workdir`, `impersonate_user` (Linux/macOS), and Kerberos pre-auth.
@@ -279,6 +282,19 @@ On any run's log view, pick an analysis mode:
 ### Duration Prediction
 `POST /ai/predict_duration` estimates expected runtime from historical run data (median, mean, p90).
 
+### Run Diff Copilot
+On a failed run's log view, click **Compare vs Last Success** (next to the AI Log Assistant) to diff this run's
+output against the job's most recent successful run and get a grounded diagnosis — `POST /ai/diagnose_regression`
+returns a likely cause, confidence level, supporting evidence, a suggested fix, and whether the failure looks
+transient, using the diff plus the job's historical p90 duration (from Duration Prediction, above) as evidence
+rather than guessing from a single run in isolation.
+
+### Investigate (canned, no AI provider required)
+The **Investigate** button in the header opens a set of fixed, whitelisted checks that sweep every job for
+things that need attention — recently failed jobs, runs already taking 2x longer than usual, flaky jobs, and
+jobs that have never once succeeded (`GET /investigations/`, `GET /investigations/{key}`). These are plain
+database queries, not LLM calls: no `GEMINI_API_KEY`/`OPENAI_API_KEY` needed, and results are instant.
+
 ---
 
 ## Multi-Domain & Security
@@ -310,27 +326,32 @@ REDIS_PASSWORD=<worker_redis_acl_password> \
 docker compose -f docker-compose.worker.yml up --build --scale worker=2
 ```
 
-### Windows Workers — Task Scheduler Bootstrap
+### Windows Workers — Task Scheduler or Windows Service
 
-On Windows hosts, use the built-in bootstrap module to register a single Task
-Scheduler task that keeps a Hydra worker alive:
+On Windows hosts, use the built-in bootstrap module to keep a Hydra worker
+alive, supervised either by Task Scheduler (no extra tools) or as a real
+Windows Service via [NSSM](https://nssm.cc/) (shows up in `services.msc`,
+easier to fold into existing service monitoring):
 
 ```powershell
 # Validate config first
 $env:DOMAIN="prod"; $env:API_TOKEN="<token>"; $env:REDIS_URL="redis://host:6379/0"
 python -m worker bootstrap validate
 
-# Install the scheduled task (requires admin)
-python -m worker bootstrap install
+# Option A: Task Scheduler (requires admin)
+python -m worker bootstrap install   # register
+python -m worker bootstrap run       # start immediately, without waiting for reboot
+python -m worker bootstrap remove    # uninstall
 
-# Start the watchdog immediately (without waiting for reboot)
-python -m worker bootstrap run
-
-# Remove the task
-python -m worker bootstrap remove
+# Option B: Windows Service via NSSM (requires admin + nssm.exe on PATH)
+nssm install HydraWorker "<path-to-python>" "-m worker bootstrap run"
+nssm set HydraWorker AppDirectory <runtime-dir>
+nssm start HydraWorker
 ```
 
-See [`docs/windows-worker-bootstrap.md`](docs/windows-worker-bootstrap.md) for a complete guide.
+See [`docs/windows-worker-bootstrap.md`](docs/windows-worker-bootstrap.md) for
+the complete guide covering both mechanisms, environment variables, service
+accounts, and troubleshooting.
 
 ---
 
@@ -383,7 +404,8 @@ On terminal job failure:
 | **Jobs** | `GET /jobs/` · `POST /jobs/` · `PUT /jobs/{id}` · `POST /jobs/{id}/run` · `POST /jobs/adhoc` · `POST /jobs/validate` · `GET /jobs/{id}/graph` |
 | **Runs & Logs** | `GET /jobs/{id}/runs` · `GET /runs/{id}` · `GET /runs/{id}/stream` (SSE) · `GET /history` |
 | **Workers** | `GET /workers/` · `GET /workers/{id}/metrics` · `GET /workers/{id}/timeline` · `GET /workers/{id}/operations` · `POST /workers/{id}/state` |
-| **AI** | `POST /ai/generate` · `POST /ai/analyze` · `POST /ai/predict_duration` |
+| **AI** | `POST /ai/generate_job` · `POST /ai/analyze_run` · `POST /ai/predict_duration` · `POST /ai/diagnose_regression` |
+| **Investigations** | `GET /investigations/` · `GET /investigations/{key}` |
 | **Domain Self-Service** | `GET /domain/settings` · `PUT /domain/settings` · `POST /domain/token/rotate` · `POST /domain/redis_acl/rotate` |
 | **Credentials** | `GET /credentials/` · `POST /credentials/` · `PUT /credentials/{name}` · `DELETE /credentials/{name}` |
 | **Admin** | `GET /admin/domains` · `POST /admin/domains` · `POST /admin/domains/{domain}/token` · `POST /admin/domains/{domain}/redis_acl/rotate` |
@@ -452,6 +474,7 @@ helm install hydra deploy/helm/hydra -n hydra --create-namespace \
 - **Worker detail**: metrics trends, concurrency Gantt timeline, operational event history
 - **Log viewer**: search/highlight, parsed/raw toggle, expand, copy
 - **AI assistant**: integrated in log view and job creation form
+- **Investigate**: header button for canned, LLM-free checks across all jobs (recently failed, running long, flaky, never succeeded)
 - **Dark/light mode** persistent toggle
 - **Admin panel**: domain management, credential CRUD, token rotation
 
@@ -481,6 +504,12 @@ cd ui && npm run cypress:run    # headless
 ```
 
 See also: [`docs/README.md`](docs/README.md), [`docs/development/docker-compose-workflows.md`](docs/development/docker-compose-workflows.md), [`docs/development/testing.md`](docs/development/testing.md)
+
+### Versioning & Releases
+
+Version bumps, `CHANGELOG.md`, and GitHub Releases are generated automatically from
+[Conventional Commits](https://www.conventionalcommits.org/) on `main` — see
+[`CONTRIBUTING.md`](CONTRIBUTING.md) for the commit format and how the release PR flow works.
 
 ---
 

@@ -152,13 +152,20 @@ PYTHONUNBUFFERED=1
     }
     // kubernetes — start-domain-workers.sh rotates its own token + Redis ACL via
     // ADMIN_TOKEN and takes `<domain> [scale]` as positional args; it does not
-    // read API_TOKEN/REDIS_PASSWORD/REDIS_URL from the environment.
+    // read API_TOKEN/REDIS_PASSWORD/REDIS_URL from the environment. Deployment
+    // name/namespace must match a worker pool already installed via the Helm
+    // chart (deploy/helm/hydra) — this script only rotates credentials and
+    // scales an existing Deployment, it does not install the chart.
     return (
-      `# Rotates a fresh domain token + Redis ACL and scales the K8s deployment.
+      `# Rotates a fresh domain token + Redis ACL and scales an existing
+# Helm-installed worker Deployment (deploy/helm/hydra). K8S_DEPLOYMENT
+# follows the chart's naming: "<release-name>-worker-<pool-name>" —
+# e.g. "hydra-worker-python-default" for "helm install hydra ..." with
+# the default pool name from values.yaml's workers[].name.
 ADMIN_TOKEN=<your-admin-token> \\
 WORKER_BACKEND=k8s \\
 K8S_NAMESPACE=hydra \\
-K8S_DEPLOYMENT=hydra-worker \\
+K8S_DEPLOYMENT=hydra-worker-python-default \\
 ./scripts/start-domain-workers.sh ${effectiveDomain} 2`
     );
   }, [mode, effectiveDomain, effectiveToken, effectivePassword, redisPassword, workerRedisUrl, maxConcurrency, tagsCleaned, tags]);
@@ -167,7 +174,7 @@ K8S_DEPLOYMENT=hydra-worker \\
     docker: "Add --scale worker=N to run N workers in parallel. Workers auto-restart on crash (restart: unless-stopped).",
     bare: "Use a process supervisor (systemd, supervisord) to keep the worker alive. Set WORKER_ID to a unique value when running multiple workers on the same host.",
     windows: "The bootstrap installs a Task Scheduler watchdog that restarts the worker automatically. See docs/windows-worker-bootstrap.md for a full guide.",
-    kubernetes: "This script rotates a fresh domain token + Redis ACL itself and writes them into a K8s Secret before scaling — the domain token / Redis fields above are not used for this path. Requires an admin token and kubectl access. Manifests are in deploy/k8s/worker-deployment.yaml.",
+    kubernetes: "This script rotates a fresh domain token + Redis ACL itself and writes them into a K8s Secret before scaling an existing worker Deployment — the domain token / Redis fields above are not used for this path. Requires an admin token and kubectl access. Install the worker pool first via the Helm chart (deploy/helm/hydra); K8S_DEPLOYMENT must match its generated Deployment name.",
   };
 
   return (
