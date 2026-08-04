@@ -67,7 +67,12 @@ if [[ "${redis_mode}" == "auto" ]]; then
     redis_mode="docker"
   elif command -v kubectl >/dev/null 2>&1; then
     if [[ -z "${K8S_REDIS_POD}" ]]; then
-      K8S_REDIS_POD="$(kubectl -n "${K8S_NAMESPACE}" get pods -l app=redis -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+      # Helm chart (deploy/helm/hydra) labels Redis app.kubernetes.io/component=redis;
+      # fall back to the legacy app=redis label for hand-rolled manifests.
+      K8S_REDIS_POD="$(kubectl -n "${K8S_NAMESPACE}" get pods -l app.kubernetes.io/component=redis -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+      if [[ -z "${K8S_REDIS_POD}" ]]; then
+        K8S_REDIS_POD="$(kubectl -n "${K8S_NAMESPACE}" get pods -l app=redis -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+      fi
     fi
     if [[ -n "${K8S_REDIS_POD}" ]]; then
       redis_mode="k8s"

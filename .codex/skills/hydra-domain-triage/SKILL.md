@@ -34,7 +34,7 @@ ADMIN_TOKEN=<admin_token> ./scripts/diagnose-domain-admin.sh <domain>
   - `DOCKER_REDIS_CONTAINER`
 - Kubernetes:
   - `K8S_NAMESPACE`
-  - `K8S_REDIS_POD` (optional; auto-discovery via `app=redis` label)
+  - `K8S_REDIS_POD` (optional; auto-discovers via the Helm chart's `app.kubernetes.io/component=redis` label, falling back to the legacy `app=redis` label)
 - Redis CLI:
   - `REDIS_URL`
   - `REDIS_PASSWORD` (optional if embedded/auth not required)

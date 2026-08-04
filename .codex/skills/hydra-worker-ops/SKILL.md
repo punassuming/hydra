@@ -28,9 +28,10 @@ ADMIN_TOKEN=<admin_token> ./scripts/start-domain-workers.sh <domain> [scale]
 
 - `API_BASE_URL` (default `http://localhost:8000`)
 - `WORKER_BACKEND=docker|k8s|bare|print`
+- `WORKER_FLAVOR=python|go` (default `python`) — only used by `WORKER_BACKEND=docker`; picks `docker-compose.worker.yml` vs `docker-compose.worker.go.yml`.
 - Kubernetes:
   - `K8S_NAMESPACE`
-  - `K8S_DEPLOYMENT`
+  - `K8S_DEPLOYMENT` — must match an already-Helm-installed worker pool's generated Deployment name (`<release-name>-worker-<pool-name>`, e.g. `hydra-worker-python-default`), not an arbitrary name. This script only rotates credentials and scales an existing Deployment — it does not install the Helm chart.
   - `K8S_SECRET_PREFIX`
 - Bare-metal:
   - `BARE_START_CMD`

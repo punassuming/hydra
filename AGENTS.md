@@ -299,7 +299,6 @@ The worker will clone the repo to a temporary directory, switch to `path` (if pr
 ## Known Gaps / Cleanup Targets
 
 - Queue-based routing is not implemented; all dispatching is per worker/domain. If queues are needed, add scheduler-side selection rules and worker registration metadata accordingly.
-- `ui/src/components/WorkerSetupDrawer.tsx`'s Kubernetes copy still references `deploy/k8s/worker-deployment.yaml`, which was deleted when `deploy/helm/hydra/` replaced the raw manifests. Update that copy to point at the Helm chart instead.
 
 ## Working Agreements
 
