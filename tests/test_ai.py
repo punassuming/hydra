@@ -133,3 +133,117 @@ def test_predict_duration_empty_history():
         response = client.post("/ai/predict_duration", json={"job_id": "job-2"}, headers=_auth_headers())
     assert response.status_code == 200
     assert response.json()["estimated_duration_seconds"] is None
+
+
+# ---------------------------------------------------------------------------
+# diagnose_regression
+# ---------------------------------------------------------------------------
+
+class _FakeCursor:
+    def __init__(self, docs):
+        self.docs = docs
+
+    def sort(self, *_args, **_kwargs):
+        return self
+
+    def limit(self, n):
+        return self.docs[:n]
+
+
+class _FakeJobRuns:
+    def __init__(self, docs_by_id, baseline_docs=None, history_docs=None):
+        self._docs_by_id = docs_by_id
+        self._baseline_docs = baseline_docs if baseline_docs is not None else []
+        self._history_docs = history_docs if history_docs is not None else self._baseline_docs
+
+    def find_one(self, query, *_args, **_kwargs):
+        return self._docs_by_id.get(query.get("_id"))
+
+    def find(self, query, *_args, **_kwargs):
+        if query.get("status") == "success":
+            return _FakeCursor(self._baseline_docs)
+        return _FakeCursor(self._history_docs)
+
+
+class _FakeJobDefinitions:
+    def find_one(self, *_args, **_kwargs):
+        return {"_id": "job-1", "name": "nightly-backup"}
+
+
+def _make_diagnose_db(current_run, baseline_docs=None, history_docs=None):
+    class FakeDB:
+        job_runs = _FakeJobRuns({current_run["_id"]: current_run}, baseline_docs, history_docs)
+        job_definitions = _FakeJobDefinitions()
+
+    return FakeDB()
+
+
+def test_diagnose_regression_run_not_found():
+    db = _make_diagnose_db({"_id": "other-run"})
+    with patch("scheduler.api.ai.get_db", return_value=db):
+        response = client.post("/ai/diagnose_regression", json={"run_id": "missing-run"}, headers=_auth_headers())
+    assert response.status_code == 404
+
+
+def test_diagnose_regression_no_prior_success():
+    current = {
+        "_id": "run-2", "job_id": "job-1", "domain": "prod", "status": "failed",
+        "returncode": 1, "stdout": "", "stderr": "boom", "duration": 5.0,
+    }
+    db = _make_diagnose_db(current, baseline_docs=[])
+    with patch("scheduler.api.ai.get_db", return_value=db):
+        response = client.post("/ai/diagnose_regression", json={"run_id": "run-2"}, headers=_auth_headers())
+    assert response.status_code == 422
+    assert "no_prior_success" in response.json()["detail"]
+
+
+def test_diagnose_regression_success(mock_gemini):
+    current = {
+        "_id": "run-2", "job_id": "job-1", "domain": "prod", "status": "failed",
+        "returncode": 1, "stdout": "step1\nstep2\n", "stderr": "boom: connection refused", "duration": 90.0,
+    }
+    baseline = {
+        "_id": "run-1", "job_id": "job-1", "domain": "prod", "status": "success",
+        "returncode": 0, "stdout": "step1\nstep2\n", "stderr": "", "duration": 12.0,
+    }
+    db = _make_diagnose_db(current, baseline_docs=[baseline], history_docs=[baseline])
+
+    diagnosis_json = (
+        '{"likely_cause": "downstream service unreachable", "confidence": "high", '
+        '"evidence": ["stderr shows connection refused", "duration 7x baseline"], '
+        '"suggested_fix": "check network policy to the downstream host", "is_transient": true}'
+    )
+    mock_gemini.GenerativeModel.return_value.generate_content.return_value.text = diagnosis_json
+
+    with patch.dict("os.environ", {"GEMINI_API_KEY": "fake", "ADMIN_TOKEN": _TEST_ADMIN_TOKEN}), \
+         patch("scheduler.api.ai.get_db", return_value=db):
+        response = client.post("/ai/diagnose_regression", json={"run_id": "run-2"}, headers=_auth_headers())
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["likely_cause"] == "downstream service unreachable"
+    assert data["confidence"] == "high"
+    assert data["is_transient"] is True
+    assert data["compared_run_id"] == "run-1"
+    assert data["current_duration_seconds"] == 90.0
+    assert data["baseline_p90_seconds"] == 12.0
+
+
+def test_diagnose_regression_invalid_llm_output(mock_gemini):
+    current = {
+        "_id": "run-2", "job_id": "job-1", "domain": "prod", "status": "failed",
+        "returncode": 1, "stdout": "", "stderr": "boom", "duration": 5.0,
+    }
+    baseline = {
+        "_id": "run-1", "job_id": "job-1", "domain": "prod", "status": "success",
+        "returncode": 0, "stdout": "", "stderr": "", "duration": 4.0,
+    }
+    db = _make_diagnose_db(current, baseline_docs=[baseline], history_docs=[baseline])
+    mock_gemini.GenerativeModel.return_value.generate_content.return_value.text = "not json"
+
+    with patch.dict("os.environ", {"GEMINI_API_KEY": "fake", "ADMIN_TOKEN": _TEST_ADMIN_TOKEN}), \
+         patch("scheduler.api.ai.get_db", return_value=db):
+        response = client.post("/ai/diagnose_regression", json={"run_id": "run-2"}, headers=_auth_headers())
+
+    assert response.status_code == 500
+    assert "Failed to parse diagnosis" in response.json()["detail"]

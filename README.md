@@ -279,6 +279,19 @@ On any run's log view, pick an analysis mode:
 ### Duration Prediction
 `POST /ai/predict_duration` estimates expected runtime from historical run data (median, mean, p90).
 
+### Run Diff Copilot
+On a failed run's log view, click **Compare vs Last Success** (next to the AI Log Assistant) to diff this run's
+output against the job's most recent successful run and get a grounded diagnosis — `POST /ai/diagnose_regression`
+returns a likely cause, confidence level, supporting evidence, a suggested fix, and whether the failure looks
+transient, using the diff plus the job's historical p90 duration (from Duration Prediction, above) as evidence
+rather than guessing from a single run in isolation.
+
+### Investigate (canned, no AI provider required)
+The **Investigate** button in the header opens a set of fixed, whitelisted checks that sweep every job for
+things that need attention — recently failed jobs, runs already taking 2x longer than usual, flaky jobs, and
+jobs that have never once succeeded (`GET /investigations/`, `GET /investigations/{key}`). These are plain
+database queries, not LLM calls: no `GEMINI_API_KEY`/`OPENAI_API_KEY` needed, and results are instant.
+
 ---
 
 ## Multi-Domain & Security
@@ -388,7 +401,8 @@ On terminal job failure:
 | **Jobs** | `GET /jobs/` · `POST /jobs/` · `PUT /jobs/{id}` · `POST /jobs/{id}/run` · `POST /jobs/adhoc` · `POST /jobs/validate` · `GET /jobs/{id}/graph` |
 | **Runs & Logs** | `GET /jobs/{id}/runs` · `GET /runs/{id}` · `GET /runs/{id}/stream` (SSE) · `GET /history` |
 | **Workers** | `GET /workers/` · `GET /workers/{id}/metrics` · `GET /workers/{id}/timeline` · `GET /workers/{id}/operations` · `POST /workers/{id}/state` |
-| **AI** | `POST /ai/generate` · `POST /ai/analyze` · `POST /ai/predict_duration` |
+| **AI** | `POST /ai/generate_job` · `POST /ai/analyze_run` · `POST /ai/predict_duration` · `POST /ai/diagnose_regression` |
+| **Investigations** | `GET /investigations/` · `GET /investigations/{key}` |
 | **Domain Self-Service** | `GET /domain/settings` · `PUT /domain/settings` · `POST /domain/token/rotate` · `POST /domain/redis_acl/rotate` |
 | **Credentials** | `GET /credentials/` · `POST /credentials/` · `PUT /credentials/{name}` · `DELETE /credentials/{name}` |
 | **Admin** | `GET /admin/domains` · `POST /admin/domains` · `POST /admin/domains/{domain}/token` · `POST /admin/domains/{domain}/redis_acl/rotate` |

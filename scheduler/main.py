@@ -11,6 +11,7 @@ from .api.domain import router as domain_router
 from .api.events import router as events_router
 from .api.health import router as health_router
 from .api.history import router as history_router
+from .api.investigations import router as investigations_router
 from .api.jobs import router as jobs_router
 from .api.logs import router as logs_router
 from .api.workers import router as workers_router
@@ -90,3 +91,4 @@ app.include_router(admin_router)
 app.include_router(credentials_router)
 app.include_router(domain_router)
 app.include_router(ai_router)
+app.include_router(investigations_router)
