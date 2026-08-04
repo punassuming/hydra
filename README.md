@@ -16,17 +16,17 @@
 
 | Category | Capabilities |
 |---|---|
-| **Executors** | `shell`, `python`, `batch`, `powershell`, `sql` (Postgres/MySQL/MSSQL/Oracle/MongoDB), `http` (REST/webhooks), `external` |
+| **Executors** | `shell`, `python`, `batch`, `powershell`, `sql` (Postgres/MySQL/MSSQL/Oracle/MongoDB), `http` (REST/webhooks), `external`, `sensor` (poll HTTP/SQL until a condition is met) |
 | **Scheduling** | Immediate, cron (with timezone), interval — with optional `start_at`/`end_at` windows |
 | **Source Provisioning** | Git clone (PAT auth, sparse checkout), local `copy`, SSH `rsync` |
-| **AI Assistance** | Natural-language job generation + run failure analysis via Google Gemini or OpenAI |
+| **AI Assistance** | Natural-language job generation, run failure analysis, run-diff root-cause diagnosis, and duration prediction via Google Gemini or OpenAI — plus a canned, LLM-free "Investigate" sweep for common ops questions |
 | **Multi-Domain** | Full tenant isolation with per-domain tokens and Redis ACL scoping |
 | **Affinity** | Route jobs by OS, tags, hostnames, subnets, deployment type, or executor capability |
 | **Reliability** | Retries with delay, timeout enforcement, failover requeue, dependency graph (`depends_on`) |
 | **Alerting** | On-failure webhooks and SMTP email alerts (domain-scoped credentials) |
 | **Security** | Domain-scoped tokens, encrypted credential store, per-domain Redis ACL, Linux user impersonation, Kerberos pre-auth |
 | **Observability** | Real-time SSE log streaming, Gantt/concurrency timeline, worker metrics trends, operational event history |
-| **Deployment** | Docker Compose, Kubernetes manifests, Redis Sentinel HA |
+| **Deployment** | Docker Compose (single/multi worker pool), Kubernetes Helm chart, Windows Task Scheduler/Service, Redis Sentinel HA |
 
 ---
 
@@ -196,6 +196,9 @@ Jobs declare an `executor` block to choose how they run:
 
 // PowerShell (Windows workers)
 { "type": "powershell", "script": "Get-Date" }
+
+// Sensor (poll until a condition is met, then complete)
+{ "type": "sensor", "sensor_type": "http", "target": "https://api.example.com/status", "poll_interval_seconds": 30, "expected_status": [200] }
 ```
 
 All executor types support `env`, `args`, `workdir`, `impersonate_user` (Linux/macOS), and Kerberos pre-auth.
@@ -471,6 +474,7 @@ helm install hydra deploy/helm/hydra -n hydra --create-namespace \
 - **Worker detail**: metrics trends, concurrency Gantt timeline, operational event history
 - **Log viewer**: search/highlight, parsed/raw toggle, expand, copy
 - **AI assistant**: integrated in log view and job creation form
+- **Investigate**: header button for canned, LLM-free checks across all jobs (recently failed, running long, flaky, never succeeded)
 - **Dark/light mode** persistent toggle
 - **Admin panel**: domain management, credential CRUD, token rotation
 
