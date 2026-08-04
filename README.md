@@ -501,6 +501,12 @@ cd ui && npm run cypress:run    # headless
 
 See also: [`docs/README.md`](docs/README.md), [`docs/development/docker-compose-workflows.md`](docs/development/docker-compose-workflows.md), [`docs/development/testing.md`](docs/development/testing.md)
 
+### Versioning & Releases
+
+Version bumps, `CHANGELOG.md`, and GitHub Releases are generated automatically from
+[Conventional Commits](https://www.conventionalcommits.org/) on `main` — see
+[`CONTRIBUTING.md`](CONTRIBUTING.md) for the commit format and how the release PR flow works.
+
 ---
 
 ## Troubleshooting

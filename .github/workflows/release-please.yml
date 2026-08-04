@@ -1,0 +1,29 @@
+name: release-please
+
+# Automatic versioning + changelog + GitHub Releases, driven by Conventional
+# Commits (see CONTRIBUTING.md). On every push to main (i.e. every merged
+# PR), release-please either opens/updates a standing "release PR" that
+# accumulates the version bump + CHANGELOG.md entries, or — if that release
+# PR itself was just merged — tags the release and publishes GitHub Release
+# notes generated from the same changelog.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@v4
+        with:
+          # Prefer a PAT/GitHub App token (RELEASE_PLEASE_TOKEN) if the repo
+          # has one configured: the default GITHUB_TOKEN cannot trigger other
+          # workflows, so a release PR opened with it would not get the
+          # normal python-ci.yml checks run against it before merge. Falls
+          # back to GITHUB_TOKEN so this works with zero setup either way —
+          # see CONTRIBUTING.md for how to add the PAT.
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
