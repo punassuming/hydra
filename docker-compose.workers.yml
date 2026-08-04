@@ -1,0 +1,89 @@
+# docker-compose.workers.yml
+#
+# Runs MULTIPLE, DIFFERENT worker pools side by side against the same
+# scheduler/Redis stack — the Docker-route equivalent of the Helm chart's
+# `workers:` list (deploy/helm/hydra/values.yaml). Two pools are defined
+# below: a Python pool (full feature set — SQL executor, Kerberos/
+# impersonation) and a lightweight Go pool (cheaper per-replica, no SQL
+# executor/impersonation). Scale each independently:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.workers.yml \
+#     up -d --build --scale worker-python=4 --scale worker-go=8
+#
+# To add a THIRD pool (e.g. a GPU-tagged pool, or a second Python pool
+# pointed at a different domain), copy one of the two blocks below, rename
+# the service, and change WORKER_TAGS / DOMAIN / MAX_CONCURRENCY / resource
+# limits as needed — see the commented example at the bottom.
+
+x-worker-python-base: &worker-python-base
+  build:
+    context: .
+    dockerfile: worker/Dockerfile
+  restart: unless-stopped
+  env_file:
+    - .env
+  depends_on:
+    scheduler:
+      condition: service_healthy
+
+x-worker-go-base: &worker-go-base
+  build:
+    context: ./go-worker
+    dockerfile: Dockerfile
+  restart: unless-stopped
+  env_file:
+    - .env
+  depends_on:
+    scheduler:
+      condition: service_healthy
+
+services:
+  worker-python:
+    <<: *worker-python-base
+    environment:
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - WORKER_REQUIRE_REDIS_ACL=${WORKER_REQUIRE_REDIS_ACL:-true}
+      - DOMAIN=${WORKER_PYTHON_DOMAIN:-${DOMAIN:-prod}}
+      - API_TOKEN=${WORKER_PYTHON_API_TOKEN:-${API_TOKEN:-}}
+      - WORKER_TAGS=${WORKER_PYTHON_TAGS:-batch,data}
+      - ALLOWED_USERS=${WORKER_PYTHON_ALLOWED_USERS:-}
+      - MAX_CONCURRENCY=${WORKER_PYTHON_MAX_CONCURRENCY:-4}
+      - WORKER_STATE=${WORKER_PYTHON_STATE:-online}
+      - DEPLOYMENT_TYPE=docker
+
+  worker-go:
+    <<: *worker-go-base
+    environment:
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - DOMAIN=${WORKER_GO_DOMAIN:-${DOMAIN:-prod}}
+      - API_TOKEN=${WORKER_GO_API_TOKEN:-${API_TOKEN:-}}
+      - WORKER_TAGS=${WORKER_GO_TAGS:-go,lightweight}
+      - ALLOWED_USERS=${WORKER_GO_ALLOWED_USERS:-}
+      - MAX_CONCURRENCY=${WORKER_GO_MAX_CONCURRENCY:-8}
+      - WORKER_STATE=${WORKER_GO_STATE:-online}
+      - DEPLOYMENT_TYPE=docker
+
+  # Example third pool — uncomment and adjust to add a GPU-tagged Python
+  # pool on a different domain. Copy-paste this pattern for any number of
+  # additional pools; just give each a unique service name.
+  #
+  # worker-gpu:
+  #   <<: *worker-python-base
+  #   environment:
+  #     - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+  #     - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+  #     - WORKER_REQUIRE_REDIS_ACL=${WORKER_REQUIRE_REDIS_ACL:-true}
+  #     - DOMAIN=${WORKER_GPU_DOMAIN:-ml}
+  #     - API_TOKEN=${WORKER_GPU_API_TOKEN:-}
+  #     - WORKER_TAGS=gpu,ml
+  #     - MAX_CONCURRENCY=${WORKER_GPU_MAX_CONCURRENCY:-2}
+  #     - DEPLOYMENT_TYPE=docker
+  #   deploy:
+  #     resources:
+  #       reservations:
+  #         devices:
+  #           - driver: nvidia
+  #             count: 1
+  #             capabilities: [gpu]

@@ -1,22 +1,31 @@
 services:
+  # Bundled Redis. Set REDIS_URL below to point the scheduler/workers at an
+  # external Redis instead and this service simply goes unused — run
+  # `docker compose up --no-deps scheduler ui` to skip starting it at all.
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
       retries: 10
 
+  # Bundled MongoDB. Set MONGO_URL below to point at an external instance
+  # instead (managed Atlas, a shared cluster, etc.) and skip this service the
+  # same way as redis above.
   mongo:
     # mongo:6 requires AVX; use 5.x for broader CPU support
     image: mongo:6.0
     restart: unless-stopped
     command: ["mongod", "--bind_ip_all", "--setParameter", "diagnosticDataCollectionEnabled=false"]
     ports:
-      - "27017:27017"
+      - "${MONGO_PORT:-27017}:27017"
     volumes:
       - mongo-data:/data/db
     healthcheck:
@@ -33,13 +42,16 @@ services:
     env_file:
       - .env
     environment:
-      - REDIS_URL=redis://redis:6379/0
+      # Point these at an external Redis/Mongo to skip the bundled
+      # containers entirely (see the comments on those services above).
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - REDIS_PASSWORD=${SCHEDULER_REDIS_PASSWORD:-}
-      - MONGO_URL=mongodb://mongo:27017
-      - MONGO_DB=hydra_jobs
-      - SCHEDULER_HEARTBEAT_TTL=10
+      - MONGO_URL=${MONGO_URL:-mongodb://mongo:27017}
+      - MONGO_DB=${MONGO_DB:-hydra_jobs}
+      - SCHEDULER_HEARTBEAT_TTL=${SCHEDULER_HEARTBEAT_TTL:-10}
       # Thread the API_TOKEN through as the seed token so the bundled worker
       # can connect on first boot without any extra provisioning steps.
+      - SEED_DOMAIN=${SEED_DOMAIN:-prod}
       - SEED_DOMAIN_TOKEN=${API_TOKEN:-}
       - SEED_DOMAIN_REDIS_PASSWORD=${REDIS_PASSWORD:-}
     depends_on:
@@ -48,20 +60,29 @@ services:
       mongo:
         condition: service_healthy
     ports:
-      - "8000:8000"
+      - "${SCHEDULER_PORT:-8000}:8000"
 
   ui:
     build:
       context: ./ui
       dockerfile: Dockerfile
       args:
+        # Baked in as the build-time fallback; HYDRA_API_BASE_URL below
+        # overrides it at container start without needing a rebuild.
         VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
     restart: unless-stopped
+    environment:
+      # Must be a URL reachable from your BROWSER (not container-to-container
+      # DNS) — e.g. http://localhost:8000 when using the default port
+      # mapping above. Defaults to VITE_API_BASE_URL so both stay in sync
+      # unless you deliberately want them to differ.
+      - HYDRA_API_BASE_URL=${HYDRA_API_BASE_URL:-${VITE_API_BASE_URL:-http://localhost:8000}}
     depends_on:
       scheduler:
         condition: service_healthy
     ports:
-      - "5173:80"
+      - "${UI_PORT:-5173}:80"
 
 volumes:
+  redis-data:
   mongo-data:

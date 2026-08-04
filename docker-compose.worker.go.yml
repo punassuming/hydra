@@ -1,18 +1,39 @@
 services:
+  # Standalone Go worker — lighter footprint than the Python worker, good for
+  # scaling many cheap replicas. Missing the Python worker's SQL executor and
+  # Kerberos/impersonation support. Points at an existing scheduler/Redis
+  # stack (bundled or remote). Run with:
+  #   docker compose -f docker-compose.worker.go.yml up -d --build --scale go-worker=N
   go-worker:
     build:
       context: ./go-worker
       dockerfile: Dockerfile
+    restart: unless-stopped
     env_file:
       - .env
     environment:
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      # Leave WORKER_ID unset when scaling (--scale go-worker=N) so Docker
+      # Compose's replica-index suffix keeps each instance's ID unique;
+      # set it explicitly only when running a single named instance.
       - WORKER_ID=${WORKER_ID:-}
       - DOMAIN=${DOMAIN:-prod}
       - API_TOKEN=${API_TOKEN}
       - WORKER_TAGS=${WORKER_TAGS:-go}
+      - ALLOWED_USERS=${ALLOWED_USERS:-}
       - MAX_CONCURRENCY=${MAX_CONCURRENCY:-2}
+      # online | draining | offline (also accepts the legacy alias "disabled")
+      - WORKER_STATE=${WORKER_STATE:-online}
       - DEPLOYMENT_TYPE=${DEPLOYMENT_TYPE:-docker}
       - WORKER_METRICS_SAMPLE_SECONDS=${WORKER_METRICS_SAMPLE_SECONDS:-15}
       - WORKER_METRICS_WINDOW_SECONDS=${WORKER_METRICS_WINDOW_SECONDS:-1800}
+      # Liveness file read by go-worker/Dockerfile's HEALTHCHECK; only useful
+      # to override if you're bind-mounting a different tmpfs/path.
+      - WORKER_HEARTBEAT_FILE=${WORKER_HEARTBEAT_FILE:-/tmp/hydra_worker_heartbeat}
+      # Non-containerized execution path overrides — only relevant if your
+      # worker image bundles alternate interpreter/shell/git locations.
+      - HYDRA_PYTHON_PATH=${HYDRA_PYTHON_PATH:-}
+      - HYDRA_SHELL_PATH=${HYDRA_SHELL_PATH:-}
+      - HYDRA_GIT_PATH=${HYDRA_GIT_PATH:-}
+      - HYDRA_TEMP_DIR=${HYDRA_TEMP_DIR:-}

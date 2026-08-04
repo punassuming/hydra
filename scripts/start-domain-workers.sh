@@ -5,6 +5,7 @@ set -euo pipefail
 #
 # Usage:
 #   ADMIN_TOKEN=... ./scripts/start-domain-workers.sh dev 2
+#   WORKER_FLAVOR=go ADMIN_TOKEN=... ./scripts/start-domain-workers.sh dev 2
 #   WORKER_BACKEND=k8s K8S_NAMESPACE=hydra K8S_DEPLOYMENT=hydra-worker \
 #     ADMIN_TOKEN=... ./scripts/start-domain-workers.sh dev 3
 #   WORKER_BACKEND=bare ADMIN_TOKEN=... ./scripts/start-domain-workers.sh dev
@@ -14,6 +15,7 @@ ADMIN_TOKEN="${ADMIN_TOKEN:-}"
 DOMAIN="${1:-}"
 SCALE="${2:-2}"
 WORKER_BACKEND="${WORKER_BACKEND:-docker}" # docker | k8s | bare | print
+WORKER_FLAVOR="${WORKER_FLAVOR:-python}"   # python | go — only used by WORKER_BACKEND=docker
 K8S_NAMESPACE="${K8S_NAMESPACE:-default}"
 K8S_DEPLOYMENT="${K8S_DEPLOYMENT:-hydra-worker}"
 K8S_SECRET_PREFIX="${K8S_SECRET_PREFIX:-hydra-worker}"
@@ -81,8 +83,22 @@ fi
 echo "Starting ${SCALE} worker(s) for domain=${DOMAIN}"
 case "${WORKER_BACKEND}" in
   docker)
+    case "${WORKER_FLAVOR}" in
+      python)
+        compose_file="docker-compose.worker.yml"
+        service_name="worker"
+        ;;
+      go)
+        compose_file="docker-compose.worker.go.yml"
+        service_name="go-worker"
+        ;;
+      *)
+        echo "Unsupported WORKER_FLAVOR=${WORKER_FLAVOR}. Use 'python' or 'go'."
+        exit 1
+        ;;
+    esac
     DOMAIN="${DOMAIN}" API_TOKEN="${API_TOKEN}" REDIS_PASSWORD="${REDIS_PASSWORD}" \
-      docker compose -f docker-compose.worker.yml up -d --build --force-recreate --scale "worker=${SCALE}"
+      docker compose -f "${compose_file}" up -d --build --force-recreate --scale "${service_name}=${SCALE}"
     ;;
   k8s)
     if ! command -v kubectl >/dev/null 2>&1; then
