@@ -168,7 +168,10 @@ class TestOrchestratorHeartbeat(unittest.TestCase):
 class TestCreateStandardOrchestrator(unittest.TestCase):
 
     def test_all_expected_loops_registered(self):
-        expected = {"scheduling", "failover", "schedule_trigger", "run_event", "timeout", "sla", "backfill"}
+        expected = {
+            "scheduling", "failover", "schedule_trigger", "run_event", "timeout", "sla", "backfill",
+            "redis_acl_reconcile",
+        }
         mgr = create_standard_orchestrator()
         self.assertEqual(set(mgr.loop_names), expected)
 
