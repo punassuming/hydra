@@ -26,6 +26,7 @@ Hydra's documentation is organized by topic so the `docs/` directory stays easy 
 
 - [`development/docker-compose-workflows.md`](development/docker-compose-workflows.md) — local Docker and Compose workflows
 - [`development/testing.md`](development/testing.md) — testing guardrails and test runner guidance
+- [`../tests/acceptance/README.md`](../tests/acceptance/README.md) — home-lab acceptance suite: domain isolation, executor matrix, mixed worker-pool routing, and chaos/resilience checks against a real deployment
 
 ## Design notes
 

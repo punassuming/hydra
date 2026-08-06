@@ -505,6 +505,19 @@ cd ui && npm run cypress:run    # headless
 
 See also: [`docs/README.md`](docs/README.md), [`docs/development/docker-compose-workflows.md`](docs/development/docker-compose-workflows.md), [`docs/development/testing.md`](docs/development/testing.md)
 
+### Home-Lab Acceptance Suite
+
+Before trusting a real deployment, [`tests/acceptance/`](tests/acceptance/README.md) can stand up
+(or point at) a live Hydra deployment and verify domain isolation, every executor type, mixed
+Python+Go worker pool routing, and recovery from a worker dying mid-job or Redis/Mongo restarting:
+
+```bash
+ADMIN_TOKEN=<token> ACCEPTANCE_DOCKER_NETWORK=<network> ./scripts/run-acceptance-tests.sh
+```
+
+See [`tests/acceptance/README.md`](tests/acceptance/README.md) for the full environment variable
+reference, the Docker/Kubernetes/bare-API modes, and what's deliberately left to check manually.
+
 ### Versioning & Releases
 
 Version bumps, `CHANGELOG.md`, and GitHub Releases are generated automatically from
