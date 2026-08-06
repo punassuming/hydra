@@ -128,6 +128,35 @@ jobs:
           EOF
           helm template hydra deploy/helm/hydra -f /tmp/multi-domain-values.yaml
 
+      - name: helm template — demoMode + extraEnv (regression check for the scheduler env/envFrom merge)
+        run: |
+          helm template hydra deploy/helm/hydra \
+            --set demoMode.enabled=true \
+            --set scheduler.extraEnv[0].name=EXTRA_ENV_TEST \
+            --set scheduler.extraEnv[0].value=ok \
+            > /tmp/demo-mode-render.yaml
+          python3 - <<'PY'
+          import sys
+          import yaml
+
+          docs = list(yaml.safe_load_all(open("/tmp/demo-mode-render.yaml")))
+          scheduler_deploy = next(
+              d for d in docs
+              if d and d.get("kind") == "Deployment" and d["metadata"]["name"] == "hydra-scheduler"
+          )
+          container = scheduler_deploy["spec"]["template"]["spec"]["containers"][0]
+
+          # extraEnv / demoMode must land in their own "env" list, never merged
+          # into "envFrom" (whose items only ever have configMapRef/secretRef).
+          for item in container.get("envFrom", []):
+              assert set(item.keys()) <= {"configMapRef", "secretRef", "prefix"}, f"bad envFrom entry: {item}"
+
+          env_names = {e["name"] for e in container.get("env", [])}
+          assert "HYDRA_DEMO_MODE" in env_names, f"HYDRA_DEMO_MODE missing from env: {env_names}"
+          assert "EXTRA_ENV_TEST" in env_names, f"EXTRA_ENV_TEST missing from env: {env_names}"
+          print("OK: env/envFrom rendered correctly with demoMode + extraEnv set")
+          PY
+
   ui:
     runs-on: ubuntu-latest
     permissions:

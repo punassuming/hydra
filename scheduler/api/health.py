@@ -1,4 +1,5 @@
 import json
+import os
 import time
 
 from fastapi import APIRouter, Request
@@ -8,6 +9,20 @@ from ..orchestrator import HEARTBEAT_TTL, ORCHESTRATOR_HEARTBEAT_KEY
 from ..redis_client import get_redis
 
 router = APIRouter()
+
+
+def demo_mode_enabled() -> bool:
+    """Whether demo/test UI affordances (seed-jobs buttons, executor smoke
+    test, dependency-graph demo, admin quick-actions) should render.
+
+    Purely a UI-declutter switch, not an authorization boundary: every
+    action those elements trigger goes through already-authorized endpoints
+    (POST /jobs/, POST /admin/domains, etc.) that work identically whether
+    this is on or off. Default off so a stock deployment's UI stays clean;
+    set HYDRA_DEMO_MODE=true (docker-compose.dev.yml does this by default;
+    the Helm chart's demoMode.enabled value controls it for Kubernetes).
+    """
+    return os.getenv("HYDRA_DEMO_MODE", "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 @router.get("/health")
@@ -22,7 +37,12 @@ def health(request: Request):
     # Return lightweight health stats
     workers_count = len(list(r.scan_iter(f"workers:{domain}:*")))
     pending = r.zcard(f"job_queue:{domain}:pending")
-    return {"status": "ok", "workers": workers_count, "pending_jobs": pending}
+    return {
+        "status": "ok",
+        "workers": workers_count,
+        "pending_jobs": pending,
+        "demo_mode": demo_mode_enabled(),
+    }
 
 
 @router.get("/health/orchestration")

@@ -15,6 +15,18 @@ imagePullSecrets: []
 # -- Namespace resources are created in comes from `helm install -n <ns>`;
 # this chart does not create its own Namespace object.
 
+# -- Demo/test UI affordances in the React app — a "Load Demo Jobs" button,
+# an executor smoke-test panel, a depends_on dependency-graph demo, and
+# admin quick-actions (create a throwaway domain, rotate-and-verify ACL,
+# credential round-trip check). Purely a UI-declutter switch: every action
+# those elements trigger goes through the same already-authorized endpoints
+# (POST /jobs/, POST /admin/domains, ...) regardless of this setting, so
+# turning it on does not grant any capability a valid token didn't already
+# have. Default off so a stock `helm install` never shows this; flip on for
+# a home-lab / demo / staging release.
+demoMode:
+  enabled: false
+
 # ---------------------------------------------------------------------------
 # Redis — job queues, worker coordination, heartbeats, pub/sub.
 # Single instance, no Sentinel/cluster: adequate for a home lab, not HA.

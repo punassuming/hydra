@@ -33,6 +33,8 @@ import { setTokenForDomain, getEffectiveToken, withTempToken, hasTokenForDomain,
 import { createJob } from "../api/jobs";
 import { useEffect, useState } from "react";
 import { useActiveDomain } from "../context/ActiveDomainContext";
+import { useDemoMode } from "../hooks/useDemoMode";
+import { DemoQuickActions } from "../components/DemoQuickActions";
 
 function CopyableCode({ code }: { code: string }) {
   const [copied, setCopied] = useState(false);
@@ -211,61 +213,7 @@ export function AdminPage() {
     },
     onError: (err: Error) => message.error(err.message),
   });
-  const sampleOptions = [
-    { key: "quick-shell", label: "Quick Shell", payload: {
-      name: "quick-shell",
-      user: "demo",
-      affinity: { os: ["linux"], tags: [], allowed_users: [] },
-      executor: { type: "shell", shell: "bash", script: "echo quick-ok" },
-      retries: 0,
-      timeout: 30,
-      queue: "default",
-      priority: 5,
-      schedule: { mode: "immediate", enabled: true },
-      completion: { exit_codes: [0], stdout_contains: ["quick-ok"], stdout_not_contains: [], stderr_contains: [], stderr_not_contains: [] },
-    }},
-    { key: "long-sleep", label: "Long Sleep", payload: {
-      name: "long-sleep",
-      user: "demo",
-      affinity: { os: ["linux"], tags: [], allowed_users: [] },
-      executor: { type: "shell", shell: "bash", script: "echo start; sleep 15; echo done" },
-      retries: 0,
-      timeout: 120,
-      queue: "default",
-      priority: 4,
-      schedule: { mode: "immediate", enabled: true },
-      completion: { exit_codes: [0], stdout_contains: ["done"], stdout_not_contains: ["error"], stderr_contains: [], stderr_not_contains: [] },
-    }},
-    { key: "python-env", label: "Python Env", payload: {
-      name: "python-env",
-      user: "demo",
-      affinity: { os: ["linux"], tags: ["python"], allowed_users: [] },
-      executor: {
-        type: "python",
-        interpreter: "python3",
-        code: "import sys; import platform; print('pyversion:', sys.version.split()[0]); print('platform:', platform.system())",
-        environment: { type: "system", python_version: "python3", requirements: [] },
-      },
-      retries: 0,
-      timeout: 60,
-      queue: "default",
-      priority: 5,
-      schedule: { mode: "immediate", enabled: true },
-      completion: { exit_codes: [0], stdout_contains: ["pyversion:"], stdout_not_contains: [], stderr_contains: [], stderr_not_contains: [] },
-    }},
-    { key: "cron-ping", label: "Cron Ping", payload: {
-      name: "cron-ping",
-      user: "demo",
-      affinity: { os: ["linux"], tags: [], allowed_users: [] },
-      executor: { type: "shell", shell: "bash", script: "echo cron-run $(date +%s)" },
-      retries: 0,
-      timeout: 30,
-      queue: "default",
-      priority: 3,
-      schedule: { mode: "cron", cron: "*/5 * * * *", enabled: true },
-      completion: { exit_codes: [0], stdout_contains: ["cron-run"], stdout_not_contains: [], stderr_contains: [], stderr_not_contains: [] },
-    }},
-  ];
+  const demoMode = useDemoMode();
   const [selectedSample, setSelectedSample] = useState<string | undefined>(undefined);
   const templatesQuery = useQuery({ queryKey: ["templates"], queryFn: fetchTemplates, staleTime: 10000, enabled: isAdmin });
 
@@ -658,6 +606,7 @@ docker compose -f docker-compose.worker.yml up -d --build`} />
           </Button>
         </Form>
       </Modal>
+      {demoMode && (
       <Card title={`Import Jobs (active domain: ${importDomain})`}>
         <Space direction="vertical" style={{ width: "100%" }}>
           <Typography.Text type="secondary">Paste a job JSON (single object or array) or use the sample set.</Typography.Text>
@@ -706,25 +655,23 @@ docker compose -f docker-compose.worker.yml up -d --build`} />
             </Button>
           </Space>
           <Space>
-            <Select
-              placeholder="Pick a sample job"
-              style={{ minWidth: 200 }}
-              value={selectedSample}
-              onChange={(val) => {
-                setSelectedSample(val);
-                const sample = sampleOptions.find((s) => s.key === val);
-                if (sample) {
-                  setImportText(JSON.stringify(sample.payload, null, 2));
-                }
-              }}
-              options={sampleOptions.map((s) => ({ label: s.label, value: s.key }))}
-            />
             <Button
               onClick={() => {
-                setImportText(JSON.stringify(sampleOptions.map((s) => s.payload), null, 2));
+                const demoJobs = (templatesQuery.data?.templates ?? [])
+                  .filter((t: any) => typeof t.name === "string" && t.name.startsWith("demo-"))
+                  .map((t: any) => {
+                    const { id: _id, ...payload } = t;
+                    return payload;
+                  });
+                if (!demoJobs.length) {
+                  message.warning("No demo-* templates found (scheduler/examples/templates.py)");
+                  return;
+                }
+                setImportText(JSON.stringify(demoJobs, null, 2));
               }}
+              loading={templatesQuery.isLoading}
             >
-              Load All Samples
+              Load Demo Jobs
             </Button>
           </Space>
           <AntInput.TextArea
@@ -734,64 +681,6 @@ docker compose -f docker-compose.worker.yml up -d --build`} />
             onChange={(e) => setImportText(e.target.value)}
           />
           <Space>
-            <Button
-              onClick={async () => {
-                const samples: any[] = [
-                  {
-                    name: "quick-shell",
-                    user: "demo",
-                    affinity: { os: ["linux"], tags: [], allowed_users: [] },
-                    executor: { type: "shell", shell: "bash", script: "echo quick-ok" },
-                    retries: 0,
-                    timeout: 30,
-                    priority: 5,
-                    schedule: { mode: "immediate", enabled: true },
-                    completion: { exit_codes: [0], stdout_contains: ["quick-ok"], stdout_not_contains: [], stderr_contains: [], stderr_not_contains: [] },
-                  },
-                  {
-                    name: "long-sleep",
-                    user: "demo",
-                    affinity: { os: ["linux"], tags: [], allowed_users: [] },
-                    executor: { type: "shell", shell: "bash", script: "echo start; sleep 15; echo done" },
-                    retries: 0,
-                    timeout: 120,
-                    priority: 4,
-                    schedule: { mode: "immediate", enabled: true },
-                    completion: { exit_codes: [0], stdout_contains: ["done"], stdout_not_contains: ["error"], stderr_contains: [], stderr_not_contains: [] },
-                  },
-                  {
-                    name: "python-env",
-                    user: "demo",
-                    affinity: { os: ["linux"], tags: ["python"], allowed_users: [] },
-                    executor: {
-                      type: "python",
-                      interpreter: "python3",
-                      code: "import sys; import platform; print('pyversion:', sys.version.split()[0]); print('platform:', platform.system())",
-                      environment: { type: "system", python_version: "python3", requirements: [] },
-                    },
-                    retries: 0,
-                    timeout: 60,
-                    priority: 5,
-                    schedule: { mode: "immediate", enabled: true },
-                    completion: { exit_codes: [0], stdout_contains: ["pyversion:"], stdout_not_contains: [], stderr_contains: [], stderr_not_contains: [] },
-                  },
-                  {
-                    name: "cron-ping",
-                    user: "demo",
-                    affinity: { os: ["linux"], tags: [], allowed_users: [] },
-                    executor: { type: "shell", shell: "bash", script: "echo cron-run $(date +%s)" },
-                    retries: 0,
-                    timeout: 30,
-                    priority: 3,
-                    schedule: { mode: "cron", cron: "*/5 * * * *", enabled: true },
-                    completion: { exit_codes: [0], stdout_contains: ["cron-run"], stdout_not_contains: [], stderr_contains: [], stderr_not_contains: [] },
-                  },
-                ];
-                setImportText(JSON.stringify(samples, null, 2));
-              }}
-            >
-              Load Sample Set
-            </Button>
             <Button
               type="primary"
               loading={importing}
@@ -836,6 +725,8 @@ docker compose -f docker-compose.worker.yml up -d --build`} />
           />
         </Space>
       </Card>
+      )}
+      {demoMode && <DemoQuickActions isAdmin={isAdmin} />}
       <Modal
         open={tokenModal.open}
         footer={null}

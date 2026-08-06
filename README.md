@@ -477,6 +477,10 @@ helm install hydra deploy/helm/hydra -n hydra --create-namespace \
 - **Investigate**: header button for canned, LLM-free checks across all jobs (recently failed, running long, flaky, never succeeded)
 - **Dark/light mode** persistent toggle
 - **Admin panel**: domain management, credential CRUD, token rotation
+- **Demo mode** (`HYDRA_DEMO_MODE=true`, off by default — see below): a "Demo Tools" drawer (executor
+  smoke test, dependency-graph demo) and admin quick-actions (create a throwaway demo domain, credential
+  round-trip check) for trying the system out. Purely a UI-declutter switch — nothing it does is a new
+  capability, so it's safe to enable in a home lab and safe to leave off in production.
 
 ---
 
@@ -521,7 +525,12 @@ reference, the Docker/Kubernetes/bare-API modes, and what's deliberately left to
 Prefer to log in and try things yourself? [`examples/acceptance-demo-jobs.yaml`](examples/acceptance-demo-jobs.yaml)
 seeds a domain with example jobs (echo, a bash script, `date`, a write/read-a-file check) via
 `scripts/hydra-apply.py` — or open the UI's **New Job → Start from Template** drawer, which lists
-the same examples.
+the same examples. Set `HYDRA_DEMO_MODE=true` (docker-compose.dev.yml does by default;
+`demoMode.enabled` in the Helm chart does not) to also unlock a **Demo Tools** drawer (executor
+smoke test, a `depends_on` dependency-graph demo using real job IDs) and an Admin **Demo Quick
+Actions** card (create a throwaway demo domain pre-seeded with jobs, a credential round-trip
+check). Leave it off in production — it's UI clutter prevention, not an access boundary, since
+every action goes through the same endpoints that are already available either way.
 
 ### Versioning & Releases
 
