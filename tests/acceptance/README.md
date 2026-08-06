@@ -13,6 +13,18 @@ HTTP, takes minutes rather than seconds, and needs real infrastructure —
 so it's opt-in (skips entirely unless `HYDRA_ACCEPTANCE=1`) and never runs
 in CI.
 
+**Prefer to poke around yourself instead of trusting an automated pass?**
+[`examples/acceptance-demo-jobs.yaml`](../../examples/acceptance-demo-jobs.yaml)
+seeds a handful of jobs (echo, a bash script, `date`, a write/read-a-file
+sanity check, and a worker-locality pair) into any running domain —
+`uv run python scripts/hydra-apply.py --file examples/acceptance-demo-jobs.yaml
+--token <domain_token>` — then log into the UI and run them by hand. The
+same jobs (minus the locality pair) are also one click away via the UI's
+"Start from Template" drawer. This pytest suite and that manual path check
+different things: the suite is a repeatable, scriptable pass/fail signal;
+logging in and running jobs yourself is how you actually get a feel for the
+deployment before trusting it.
+
 ## Quick start
 
 ```bash

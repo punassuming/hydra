@@ -518,6 +518,11 @@ ADMIN_TOKEN=<token> ACCEPTANCE_DOCKER_NETWORK=<network> ./scripts/run-acceptance
 See [`tests/acceptance/README.md`](tests/acceptance/README.md) for the full environment variable
 reference, the Docker/Kubernetes/bare-API modes, and what's deliberately left to check manually.
 
+Prefer to log in and try things yourself? [`examples/acceptance-demo-jobs.yaml`](examples/acceptance-demo-jobs.yaml)
+seeds a domain with example jobs (echo, a bash script, `date`, a write/read-a-file check) via
+`scripts/hydra-apply.py` — or open the UI's **New Job → Start from Template** drawer, which lists
+the same examples.
+
 ### Versioning & Releases
 
 Version bumps, `CHANGELOG.md`, and GitHub Releases are generated automatically from

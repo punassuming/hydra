@@ -175,6 +175,105 @@ TEMPLATES = [
         },
     },
     {
+        "id": "demo-echo",
+        "name": "demo-echo",
+        "user": "demo",
+        "affinity": {"os": ["linux"], "tags": [], "allowed_users": []},
+        "executor": {"type": "shell", "shell": "bash", "script": 'echo "hello from hydra"'},
+        "retries": 0,
+        "timeout": 15,
+        "priority": 5,
+        "schedule": {"mode": "immediate", "enabled": True},
+        "completion": {
+            "exit_codes": [0],
+            "stdout_contains": ["hello from hydra"],
+            "stdout_not_contains": [],
+            "stderr_contains": [],
+            "stderr_not_contains": [],
+        },
+    },
+    {
+        "id": "demo-bash-script",
+        "name": "demo-bash-script",
+        "user": "demo",
+        "affinity": {"os": ["linux"], "tags": [], "allowed_users": []},
+        "executor": {
+            "type": "shell",
+            "shell": "bash",
+            "script": (
+                "set -euo pipefail\n"
+                'echo "Hydra acceptance demo on $(hostname)"\n'
+                "for i in 1 2 3; do\n"
+                '  echo "step ${i}/3"\n'
+                "  sleep 1\n"
+                "done\n"
+                "echo done"
+            ),
+        },
+        "retries": 0,
+        "timeout": 30,
+        "priority": 5,
+        "schedule": {"mode": "immediate", "enabled": True},
+        "completion": {
+            "exit_codes": [0],
+            "stdout_contains": ["done"],
+            "stdout_not_contains": [],
+            "stderr_contains": [],
+            "stderr_not_contains": [],
+        },
+    },
+    {
+        "id": "demo-date",
+        "name": "demo-date",
+        "user": "demo",
+        "affinity": {"os": ["linux"], "tags": [], "allowed_users": []},
+        "executor": {
+            "type": "shell",
+            "shell": "bash",
+            "script": 'echo "worker host: $(hostname)"\ndate -u',
+        },
+        "retries": 0,
+        "timeout": 15,
+        "priority": 5,
+        "schedule": {"mode": "immediate", "enabled": True},
+        "completion": {
+            "exit_codes": [0],
+            "stdout_contains": [],
+            "stdout_not_contains": [],
+            "stderr_contains": [],
+            "stderr_not_contains": [],
+        },
+    },
+    {
+        "id": "demo-write-and-read-cache-file",
+        "name": "demo-write-and-read-cache-file",
+        "user": "demo",
+        "affinity": {"os": ["linux"], "tags": [], "allowed_users": []},
+        "executor": {
+            "type": "shell",
+            "shell": "bash",
+            "script": (
+                "set -euo pipefail\n"
+                "file=/tmp/hydra-demo-cache.txt\n"
+                'echo "written at $(date -u +%FT%TZ) by $(hostname)" > "${file}"\n'
+                'echo "wrote ${file}"\n'
+                'cat "${file}"\n'
+                "echo read-back-ok"
+            ),
+        },
+        "retries": 0,
+        "timeout": 15,
+        "priority": 5,
+        "schedule": {"mode": "immediate", "enabled": True},
+        "completion": {
+            "exit_codes": [0],
+            "stdout_contains": ["read-back-ok"],
+            "stdout_not_contains": [],
+            "stderr_contains": [],
+            "stderr_not_contains": [],
+        },
+    },
+    {
         "id": "smoke-cron",
         "name": "smoke-cron",
         "user": "smoke",

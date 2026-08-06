@@ -1,0 +1,129 @@
+# Demo jobs for a home-lab acceptance/exploration environment — log into the
+# UI and watch these run, or apply them headlessly:
+#
+#   uv run python scripts/hydra-apply.py --file examples/acceptance-demo-jobs.yaml \
+#       --token $API_TOKEN --domain prod
+#
+# Idempotent: hydra-apply.py matches by name within the domain and updates in
+# place on re-run, so re-applying this file is safe.
+#
+# These same jobs (minus the worker-locality pair, which needs its own
+# explanation) are also available one-click via the UI's "Start from
+# Template" drawer — see scheduler/examples/templates.py.
+
+- name: demo-echo
+  user: demo
+  executor:
+    type: shell
+    shell: bash
+    script: echo "hello from hydra"
+  timeout: 15
+  schedule:
+    mode: immediate
+    enabled: true
+  completion:
+    exit_codes: [0]
+    stdout_contains: ["hello from hydra"]
+
+- name: demo-bash-script
+  user: demo
+  executor:
+    type: shell
+    shell: bash
+    script: |
+      set -euo pipefail
+      echo "Hydra acceptance demo on $(hostname)"
+      for i in 1 2 3; do
+        echo "step ${i}/3"
+        sleep 1
+      done
+      echo done
+  timeout: 30
+  schedule:
+    mode: immediate
+    enabled: true
+  completion:
+    exit_codes: [0]
+    stdout_contains: ["done"]
+
+- name: demo-date
+  user: demo
+  executor:
+    type: shell
+    shell: bash
+    script: |
+      echo "worker host: $(hostname)"
+      date -u
+  timeout: 15
+  schedule:
+    mode: immediate
+    enabled: true
+  completion:
+    exit_codes: [0]
+
+- name: demo-write-and-read-cache-file
+  user: demo
+  executor:
+    type: shell
+    shell: bash
+    script: |
+      set -euo pipefail
+      file=/tmp/hydra-demo-cache.txt
+      echo "written at $(date -u +%FT%TZ) by $(hostname)" > "${file}"
+      echo "wrote ${file}"
+      cat "${file}"
+      echo read-back-ok
+  timeout: 15
+  schedule:
+    mode: immediate
+    enabled: true
+  completion:
+    exit_codes: [0]
+    stdout_contains: ["read-back-ok"]
+
+# --- Worker-locality bonus pair -------------------------------------------
+# Two separate jobs instead of one, both immediate (so submitting them
+# sequentially runs them sequentially — no depends_on needed). Worth running
+# if you have more than one worker in this domain: it's a quick, concrete
+# way to see that a job's filesystem is local to whichever worker picked it
+# up, not shared across your pool. Deliberately untagged, so with more than
+# one worker it's a coin flip whether demo-cache-reader lands where
+# demo-cache-writer did — the reader's own output explains a miss either
+# way. To force a guaranteed hit: after applying this file, edit both jobs
+# in the UI to add the same affinity.tags entry (matching one worker's
+# WORKER_TAGS) before running them.
+
+- name: demo-cache-writer
+  user: demo
+  executor:
+    type: shell
+    shell: bash
+    script: |
+      mkdir -p /tmp/hydra-demo
+      echo "written at $(date -u +%FT%TZ) by $(hostname)" > /tmp/hydra-demo/locality-check.txt
+      echo "wrote on $(hostname)"
+  timeout: 15
+  schedule:
+    mode: immediate
+    enabled: true
+  completion:
+    exit_codes: [0]
+
+- name: demo-cache-reader
+  user: demo
+  executor:
+    type: shell
+    shell: bash
+    script: |
+      if [ -f /tmp/hydra-demo/locality-check.txt ]; then
+        echo "hit on $(hostname): $(cat /tmp/hydra-demo/locality-check.txt)"
+      else
+        echo "miss on $(hostname) - this worker's disk doesn't have what demo-cache-writer wrote: either a different worker picked it up, or demo-cache-writer hasn't run yet." >&2
+        exit 1
+      fi
+  timeout: 15
+  schedule:
+    mode: immediate
+    enabled: true
+  completion:
+    exit_codes: [0]
