@@ -30,13 +30,13 @@ Create a `.env` with at least `ADMIN_TOKEN` and a domain token (for workers) bef
 ## Bootstrap test domains quickly
 - Create a domain + token: `ADMIN_TOKEN=<admin> ./scripts/create-domain.sh staging` (optional env: `API_BASE`, `DISPLAY`, `DESC`, `TOKEN`). Output prints the token.
 - Run a local worker for that domain: `API_TOKEN=<token> DOMAIN=staging ./scripts/dev-up.sh worker` (or `./scripts/worker-up.sh --build` against another stack).
-- Seed jobs into that domain: `API_BASE=http://localhost:8000 API_TOKEN=<token> python examples/seed_test_jobs.py`.
+- Seed some example jobs into that domain (echo, a bash script, `date`, a write/read-a-file sanity check — see `examples/acceptance-demo-jobs.yaml`): `uv run python scripts/hydra-apply.py --file examples/acceptance-demo-jobs.yaml --token <token> --domain staging`.
 - Kubernetes workers: install/upgrade the worker pool via the Helm chart instead of a raw `kubectl set env` — add a domain to `values.yaml`'s `workers:` list (or `deploy/helm/hydra/templates/domain-seed-job.yaml` via `domainSeed.extraDomains`) and `helm upgrade hydra deploy/helm/hydra -f values.yaml`. See `deploy/helm/hydra/README.md` for the multi-domain example.
 
 ## Quick interaction once the stack is up
 - Health: `curl http://localhost:8000/health`
 - Workers: `curl http://localhost:8000/workers/`
-- Seed sample jobs: `API_BASE=http://localhost:8000 API_TOKEN=<domain_token> python examples/seed_test_jobs.py`
+- Seed sample jobs: `uv run python scripts/hydra-apply.py --file examples/acceptance-demo-jobs.yaml --token <domain_token>`
 - Logs: `docker compose logs -f scheduler` or `docker compose logs -f worker`
 
 ## Tips to keep loops fast

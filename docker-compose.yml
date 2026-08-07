@@ -54,6 +54,10 @@ services:
       - SEED_DOMAIN=${SEED_DOMAIN:-prod}
       - SEED_DOMAIN_TOKEN=${API_TOKEN:-}
       - SEED_DOMAIN_REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      # UI-declutter switch (Load Demo Jobs / executor smoke test / admin
+      # quick-actions) — not a privilege escalation, just off by default so
+      # a stock `docker compose up` doesn't show demo scaffolding.
+      - HYDRA_DEMO_MODE=${HYDRA_DEMO_MODE:-false}
     depends_on:
       redis:
         condition: service_healthy

@@ -9,6 +9,7 @@ Verifies:
 """
 
 import json
+import os
 import threading
 import time
 import unittest
@@ -168,7 +169,10 @@ class TestOrchestratorHeartbeat(unittest.TestCase):
 class TestCreateStandardOrchestrator(unittest.TestCase):
 
     def test_all_expected_loops_registered(self):
-        expected = {"scheduling", "failover", "schedule_trigger", "run_event", "timeout", "sla", "backfill"}
+        expected = {
+            "scheduling", "failover", "schedule_trigger", "run_event", "timeout", "sla", "backfill",
+            "redis_acl_reconcile",
+        }
         mgr = create_standard_orchestrator()
         self.assertEqual(set(mgr.loop_names), expected)
 
@@ -281,6 +285,25 @@ class TestHealthEndpoint(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json()["status"], "ok")
         fake_db.command.assert_called_once_with("ping")
+
+    def test_health_reports_demo_mode_off_by_default(self):
+        fake_redis = self._mock_redis()
+        fake_db = MagicMock()
+        with patch.dict("os.environ", {}, clear=False), \
+             patch("scheduler.api.health.get_redis", return_value=fake_redis), \
+             patch("scheduler.api.health.get_db", return_value=fake_db):
+            os.environ.pop("HYDRA_DEMO_MODE", None)
+            resp = self.client.get("/health", headers=self.headers)
+        self.assertEqual(resp.json()["demo_mode"], False)
+
+    def test_health_reports_demo_mode_on_when_set(self):
+        fake_redis = self._mock_redis()
+        fake_db = MagicMock()
+        with patch.dict("os.environ", {"HYDRA_DEMO_MODE": "true"}), \
+             patch("scheduler.api.health.get_redis", return_value=fake_redis), \
+             patch("scheduler.api.health.get_db", return_value=fake_db):
+            resp = self.client.get("/health", headers=self.headers)
+        self.assertEqual(resp.json()["demo_mode"], True)
 
     def test_health_fails_when_mongo_unreachable(self):
         """A Redis-only check would report healthy here; it must not."""

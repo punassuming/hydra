@@ -509,6 +509,52 @@ def sla_monitoring_loop(stop_event: threading.Event):
         time.sleep(30)
 
 
+REDIS_ACL_RECONCILE_INTERVAL_SECONDS = int(os.getenv("SCHEDULER_ACL_RECONCILE_INTERVAL", "30"))
+
+
+def _reconcile_domain_acls(db) -> int:
+    """Re-apply every domain's persisted worker Redis ACL user. Returns the count reconciled."""
+    from .utils.redis_acl import ensure_worker_acl_user
+
+    reconciled = 0
+    for doc in db.domains.find({}, {"domain": 1, "worker_redis_acl_password": 1}):
+        domain = doc.get("domain")
+        password = doc.get("worker_redis_acl_password")
+        if not domain or not password:
+            continue
+        try:
+            ensure_worker_acl_user(domain, password=password)
+            reconciled += 1
+        except Exception as exc:
+            log.warning("Failed to reconcile Redis ACL user for domain %s: %s", domain, exc)
+    return reconciled
+
+
+def redis_acl_reconciliation_loop(stop_event: threading.Event):
+    """Keeps Redis worker ACL users in sync with what's persisted in Mongo.
+
+    ``ACL SETUSER`` is in-memory only (this deployment does not configure an
+    aclfile), so a Redis restart wipes every worker ACL user. Previously
+    those were only restored by ``ensure_domains_seeded()`` at scheduler
+    *process* startup — fine when Redis and the scheduler restart together,
+    but a Redis-only restart (crash, host reboot before the scheduler comes
+    back, a k8s node evicting just the Redis pod) left worker auth broken
+    with no self-healing until an operator noticed and either rotated ACLs
+    manually or bounced the scheduler too. This loop closes that gap by
+    periodically re-applying the same persisted ACL users; ``ensure_worker_acl_user``
+    with an explicit password is idempotent, so this is a no-op when nothing
+    has actually changed.
+    """
+    db = get_db()
+    log.info("Redis ACL reconciliation loop started (interval=%ss)", REDIS_ACL_RECONCILE_INTERVAL_SECONDS)
+    while not stop_event.is_set():
+        try:
+            _reconcile_domain_acls(db)
+        except Exception as exc:
+            log.exception("Error in Redis ACL reconciliation loop: %s", exc)
+        stop_event.wait(REDIS_ACL_RECONCILE_INTERVAL_SECONDS)
+
+
 def timeout_enforcement_loop(stop_event: threading.Event):
     r = get_redis()
     db = get_db()

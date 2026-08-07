@@ -26,7 +26,7 @@ Hydra Jobs is a distributed job runner designed for flexibility and scalability.
 
 ## Workflow & Architecture (Internal Details)
 
-- Scheduler (`scheduler/`) runs seven background loops: `scheduling_loop` dispatches jobs from `job_queue:<domain>:pending` to `job_queue:<domain>:<worker_id>`, `failover_loop` requeues jobs from offline workers and prunes stale offline worker records after a retention window, `schedule_trigger_loop` advances cron/interval jobs, `run_event_loop` consumes `run_events:<domain>` from Redis and persists run docs in Mongo, `timeout_enforcement_loop` marks stale runs as failed, `sla_monitoring_loop` checks SLA deadlines, and `backfill_dispatch_loop` handles historical backfill runs. There is **no** scheduler-side sensor evaluation loop — sensor jobs are dispatched to workers like any other job type.
+- Scheduler (`scheduler/`) runs eight background loops: `scheduling_loop` dispatches jobs from `job_queue:<domain>:pending` to `job_queue:<domain>:<worker_id>`, `failover_loop` requeues jobs from offline workers and prunes stale offline worker records after a retention window, `schedule_trigger_loop` advances cron/interval jobs, `run_event_loop` consumes `run_events:<domain>` from Redis and persists run docs in Mongo, `timeout_enforcement_loop` marks stale runs as failed, `sla_monitoring_loop` checks SLA deadlines, `backfill_dispatch_loop` handles historical backfill runs, and `redis_acl_reconciliation_loop` (every `SCHEDULER_ACL_RECONCILE_INTERVAL`s, default 30) re-applies each domain's persisted worker Redis ACL user so a Redis-only restart (Redis crashes/restarts without the scheduler also restarting) self-heals instead of leaving worker auth broken until an operator intervenes. There is **no** scheduler-side sensor evaluation loop — sensor jobs are dispatched to workers like any other job type.
 - **Control-plane separation**: The scheduler supports two runtime modes via `HYDRA_MODE`:
   - `combined` (default): API + all orchestration loops run in one process (backward compatible, easiest for local dev).
   - `api`: API only; no background loops. Run `python -m scheduler.orchestrator_entrypoint` as a separate process for the control-plane.
@@ -77,6 +77,7 @@ Hydra Jobs is a distributed job runner designed for flexibility and scalability.
   - Logs view supports search/highlight, parsed/raw modes, expansion, and copy actions.
   - AI log helper supports multiple analysis modes (failure fix, summary, error extraction, retry tuning, custom question).
   - Theme and key panel states persist via localStorage.
+  - **Demo mode** (`useDemoMode()` hook, reads `demo_mode` off `GET /health`, driven by the scheduler's `HYDRA_DEMO_MODE` env var — off by default): gates a "Demo Tools" header button on Home (`DemoToolsDrawer.tsx` — executor smoke test over shell/python, a `depends_on` dependency-graph demo using two real jobs created just-in-time so the second's `depends_on` can reference the first's actual `_id`) and Admin's "Import Jobs" card + "Demo Quick Actions" card (`DemoQuickActions.tsx` — create a throwaway domain pre-seeded with `demo-*` templates; a credential create/list/delete round-trip that asserts the secret payload is never echoed back). This is a UI-declutter switch only, not an authorization boundary — every action goes through endpoints (`POST /jobs/`, `POST /admin/domains`, ...) that work identically regardless of the flag.
 
 ## Project Structure & Key Modules
 
@@ -106,9 +107,10 @@ Hydra Jobs is a distributed job runner designed for flexibility and scalability.
 - `ui/src/components/JobRuns.tsx` — Run history with AI failure analysis.
 - `ui/src/components/FailureInsight.tsx` — AI Log Assistant + "Compare vs Last Success" (Run Diff Copilot) on a run's log view.
 - `ui/src/components/InvestigateDrawer.tsx` — canned-investigations drawer; `ui/src/components/ProviderSelect.tsx` — shared Gemini/OpenAI picker used by every AI feature.
-- `examples/` holds submission scripts/templates; `deploy/helm/hydra` has the Kubernetes Helm chart; `docker-compose.yml` + `docker-compose.worker.yml`/`docker-compose.worker.go.yml` (single pool) or `docker-compose.workers.yml` (multiple pools side by side) + `docker-compose.separated.yml`/`docker-compose.dev.yml` define local stacks.
+- `examples/acceptance-demo-jobs.yaml` — apply with `scripts/hydra-apply.py` to seed a domain with example jobs (echo, bash script, `date`, write/read-a-file, a worker-locality pair) for manually poking around after logging in; the same set (minus the locality pair) is also in `scheduler/examples/templates.py`, one click away via the UI's "Start from Template" drawer (`GET /jobs/templates`, `POST /admin/job_templates/{id}/import`). `deploy/helm/hydra` has the Kubernetes Helm chart; `docker-compose.yml` + `docker-compose.worker.yml`/`docker-compose.worker.go.yml` (single pool) or `docker-compose.workers.yml` (multiple pools side by side) + `docker-compose.separated.yml`/`docker-compose.dev.yml` define local stacks.
 - `tests/` — Backend integration and unit tests.
-- `tests/test_ai.py` — AI endpoint tests (generate/analyze/predict/diagnose). `tests/test_investigations.py` — canned-checks tests. `tests/test_mongo_client.py` — asserts the Mongo client is constructed `tz_aware=True` (a real prior bug: BSON datetimes decode naive by default, which crashes arithmetic against `datetime.now(timezone.utc)` elsewhere in the scheduler).
+- `tests/test_ai.py` — AI endpoint tests (generate/analyze/predict/diagnose). `tests/test_investigations.py` — canned-checks tests. `tests/test_mongo_client.py` — asserts the Mongo client is constructed `tz_aware=True` (a real prior bug: BSON datetimes decode naive by default, which crashes arithmetic against `datetime.now(timezone.utc)` elsewhere in the scheduler). `tests/test_redis_acl_reconciliation.py` — the Redis ACL self-heal loop (below).
+- `tests/acceptance/` — home-lab acceptance suite, opt-in (`HYDRA_ACCEPTANCE=1`, never runs in CI): stands up or points at a real deployment and checks domain isolation, the full executor matrix, mixed Python+Go worker-pool routing, and chaos/resilience (worker killed mid-job, Redis/Mongo restarted). Three backends (`docker` fully self-provisioning, `kubectl` verifies an already-Helm-installed deployment, `none` bare API smoke check) — see `tests/acceptance/README.md`. Run via `./scripts/run-acceptance-tests.sh`.
 
 ## Building and Running
 
@@ -183,6 +185,7 @@ Located in `scripts/`:
 *   `start-domain-workers.sh`: Agentic worker bring-up for Docker/Kubernetes/Bare deployments; `WORKER_FLAVOR=python|go` selects the compose file for `WORKER_BACKEND=docker`.
 *   `diagnose-domain-admin.sh`: Agentic diagnostics for domain auth and worker visibility (with optional Redis deep checks).
 *   `hydra-apply.py`: Applies a job definition (YAML/JSON) via the API — used by `hydra-ctl apply`.
+*   `run-acceptance-tests.sh`: Runs the home-lab acceptance suite (`tests/acceptance/`) against an already-running deployment (Docker Compose, live Kubernetes/Helm, or a bare API endpoint).
 
 The Compose files themselves (`docker-compose.worker.go.yml`, `docker-compose.workers.yml`, etc.) live at the repo root, not in `scripts/` — see the "Docker Deployment" section of `README.md` for the full set and how they combine.
 
@@ -196,6 +199,7 @@ The Compose files themselves (`docker-compose.worker.go.yml`, `docker-compose.wo
 *   Specific tests: `uv run pytest tests/test_scheduler.py tests/test_worker.py`
 *   Test files located in `tests/`
 *   Note: The end-to-end test is skipped unless the full stack is running.
+*   Home-lab acceptance suite (`tests/acceptance/`) is separate from all of the above — opt-in, minutes not seconds, never runs in CI. `./scripts/run-acceptance-tests.sh` or `HYDRA_ACCEPTANCE=1 uv run pytest tests/acceptance -v`. See `tests/acceptance/README.md`.
 
 ### Operator CLI
 
@@ -227,12 +231,14 @@ The Compose files themselves (`docker-compose.worker.go.yml`, `docker-compose.wo
 - `SCHEDULER_WORKER_OFFLINE_PRUNE_SECONDS` — Age threshold to prune stale offline worker registry records (default `1800`; minimum effectively `3 * SCHEDULER_HEARTBEAT_TTL`)
 - `SCHEDULER_STARVATION_WARN_THRESHOLD` — Number of no-worker misses before logging a starvation warning for a pending job (default `5`)
 - `SCHEDULER_BYPASS_MAX_EXTRA` — Maximum bypass_concurrency jobs per worker above its `max_concurrency` limit; `0` = unlimited (default `0`)
+- `SCHEDULER_ACL_RECONCILE_INTERVAL` — Seconds between passes of the Redis ACL reconciliation loop, which re-applies persisted worker ACL users so a Redis-only restart self-heals (default `30`)
 - `CORS_ALLOW_ORIGINS` — CORS allowed origins
 - `ADMIN_TOKEN` — Admin authentication token
 - `ADMIN_DOMAIN` — Admin domain name
 - `GEMINI_API_KEY` — Google Gemini API key for AI features
 - `OPENAI_API_KEY` — OpenAI API key for AI features
 - `LOG_LEVEL` — Logging level
+- `HYDRA_DEMO_MODE` — Surfaces `demo_mode: true` on `GET /health`, which gates demo/test UI elements (Demo Tools drawer, Admin's Import Jobs + Demo Quick Actions cards). Off by default; `docker-compose.dev.yml` defaults it on; the Helm chart's `demoMode.enabled` value controls it for Kubernetes. UI-declutter only, not an authorization boundary.
 
 ### Worker Environment Variables
 

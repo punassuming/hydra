@@ -1,13 +1,15 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Row, Col, Card, Typography, Space, Button, Modal, Divider, Table } from "antd";
-import { ThunderboltOutlined } from "@ant-design/icons";
+import { ThunderboltOutlined, ExperimentOutlined } from "@ant-design/icons";
 import { JobForm } from "../components/JobForm";
 import { JobList } from "../components/JobList";
 import { JobRuns } from "../components/JobRuns";
 import { EventsFeed } from "../components/EventsFeed";
 import { TemplateDrawer } from "../components/TemplateDrawer";
+import { DemoToolsDrawer } from "../components/DemoToolsDrawer";
 import { useSchedulerEvents } from "../hooks/useEvents";
+import { useDemoMode } from "../hooks/useDemoMode";
 import { createJob, deleteJob, fetchJobs, fetchQueueOverview, JobPayload, runAdhocJob, runJobNow, setJobEnabled, updateJob, validateJob } from "../api/jobs";
 import { useActiveDomain } from "../context/ActiveDomainContext";
 import { JobsDashboard } from "../components/JobsDashboard";
@@ -21,7 +23,9 @@ export function HomePage() {
   const [validating, setValidating] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [templateDrawerOpen, setTemplateDrawerOpen] = useState(false);
+  const [demoToolsOpen, setDemoToolsOpen] = useState(false);
   const [templatePayload, setTemplatePayload] = useState<Partial<JobPayload> | null>(null);
+  const demoMode = useDemoMode();
   const events = useSchedulerEvents();
   const { domain } = useActiveDomain();
   useEffect(() => {
@@ -221,6 +225,11 @@ export function HomePage() {
               <Button icon={<ThunderboltOutlined />} onClick={() => setTemplateDrawerOpen(true)}>
                 From Template
               </Button>
+              {demoMode && (
+                <Button icon={<ExperimentOutlined />} onClick={() => setDemoToolsOpen(true)}>
+                  Demo Tools
+                </Button>
+              )}
               <Button disabled={!selectedJob} onClick={() => setModalVisible(true)}>
                 Edit Selected
               </Button>
@@ -335,6 +344,7 @@ export function HomePage() {
           setModalVisible(true);
         }}
       />
+      {demoMode && <DemoToolsDrawer open={demoToolsOpen} onClose={() => setDemoToolsOpen(false)} />}
 
       <Modal
         title={selectedJob ? `Edit Job – ${selectedJob.name}` : templatePayload ? `New Job from Template – ${templatePayload.name ?? ""}` : "Create Job"}

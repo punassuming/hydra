@@ -186,6 +186,24 @@ loops). Useful if you want to restart or scale the API independently of the
 control plane. Default is `combined` (one Deployment does both) — simplest,
 and what most home-lab setups want.
 
+### Demo mode
+
+Off by default. Set `demoMode.enabled: true` to unlock demo/test UI
+elements — an executor smoke test and a `depends_on` dependency-graph demo
+(Home's "Demo Tools" button), plus a "Create Demo Domain" and credential
+round-trip check (Admin's "Demo Quick Actions" card):
+
+```yaml
+demoMode:
+  enabled: true
+```
+
+This is a UI-declutter switch, not an authorization boundary — every action
+those elements trigger goes through the same endpoints (`POST /jobs/`,
+`POST /admin/domains`, ...) that already work identically either way, so
+turning it on doesn't grant any capability a valid token didn't already
+have. Leave it off for a production release.
+
 ### Ingress
 
 Off by default (assumes nothing beyond ClusterIP Services). Turn on if you

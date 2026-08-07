@@ -58,16 +58,25 @@ spec:
                 name: {{ include "hydra.configMapName" . }}
             - secretRef:
                 name: {{ include "hydra.secretName" . }}
-          {{- if eq .Values.scheduler.mode "separated" }}
+          {{- if or (eq .Values.scheduler.mode "separated") .Values.demoMode.enabled .Values.scheduler.extraEnv }}
           env:
+            {{- if eq .Values.scheduler.mode "separated" }}
             # API-only: background loops run in the separate orchestrator
             # Deployment below. GET /health/orchestration reports whether
             # that Deployment is alive and making progress.
             - name: HYDRA_MODE
               value: "api"
-          {{- end }}
-          {{- with .Values.scheduler.extraEnv }}
-          {{- toYaml . | nindent 12 }}
+            {{- end }}
+            {{- if .Values.demoMode.enabled }}
+            # Surfaced on GET /health as demo_mode: true — a UI-declutter
+            # switch only (every action it enables goes through endpoints
+            # that work identically either way). Leave off in production.
+            - name: HYDRA_DEMO_MODE
+              value: "true"
+            {{- end }}
+            {{- with .Values.scheduler.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           {{- end }}
           resources:
             {{- toYaml .Values.scheduler.resources | nindent 12 }}

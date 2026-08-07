@@ -7,6 +7,9 @@ services:
       - SEED_DOMAIN=${DOMAIN:-dev}
       - SEED_DOMAIN_TOKEN=${API_TOKEN:-}
       - SEED_DOMAIN_REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      # Dev overlay defaults demo-mode UI affordances on; override with
+      # HYDRA_DEMO_MODE=false if you don't want them even in dev.
+      - HYDRA_DEMO_MODE=${HYDRA_DEMO_MODE:-true}
 
   worker:
     build:
