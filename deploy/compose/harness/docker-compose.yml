@@ -16,6 +16,7 @@ services:
     cpus: 0.5
     pids_limit: 128
     security_opt: ["no-new-privileges:true"]
+    networks: [backend]
 
   mongo:
     # MongoDB 5+ requires AVX. Harness does not expose it, so this pilot uses
@@ -36,6 +37,7 @@ services:
     cpus: 1.0
     pids_limit: 256
     security_opt: ["no-new-privileges:true"]
+    networks: [backend]
 
   scheduler:
     image: harness-scheduler:deploy-53aef84
@@ -68,6 +70,7 @@ services:
     cpus: 1.0
     pids_limit: 256
     security_opt: ["no-new-privileges:true"]
+    networks: [backend, frontend]
 
   ui:
     image: harness-ui:deploy-53aef84
@@ -94,6 +97,7 @@ services:
     cpus: 0.5
     pids_limit: 128
     security_opt: ["no-new-privileges:true"]
+    networks: [frontend]
 
   worker:
     image: harness-worker:deploy-53aef84
@@ -119,11 +123,14 @@ services:
     cpus: 1.0
     pids_limit: 256
     security_opt: ["no-new-privileges:true"]
+    networks: [backend]
 
 networks:
-  default:
+  backend:
     name: hydra-pilot-private
     internal: true
+  frontend:
+    name: hydra-pilot-frontend
 
 volumes:
   redis-data:
