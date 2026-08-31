@@ -33,6 +33,11 @@ git pull --ff-only origin deploy
 docker compose -f deploy/compose/harness/docker-compose.yml up -d --build
 ```
 
+The application images are tagged locally as `harness-scheduler:deploy-b618dda`,
+`harness-ui:deploy-b618dda`, and `harness-worker:deploy-b618dda`. Build and
+recreate are transactional with respect to the separate known-good recovery
+reference; do not retag `hydra-pilot-worker:recovery` during a retry.
+
 Verify only the intended listeners are present:
 
 ```bash
@@ -53,3 +58,9 @@ MongoDB volumes. Do not use `down -v` unless destruction of job history is
 explicitly approved. To roll back code, check out the previous known-good
 `deploy` commit and run `up -d --build` again. Backup and restore volume data
 separately under the host's protected backup policy.
+
+For a failed image build, leave the existing containers and the separate
+`hydra-pilot-worker:recovery` image untouched, then restore the prior Compose
+definition and run `docker compose -f /srv/openclaw/hydra-pilot/docker-compose.yml
+up -d --no-build`. The live cutover runbook records the exact recovery tag and
+verification commands.

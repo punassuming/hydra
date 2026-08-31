@@ -34,6 +34,7 @@ services:
     security_opt: ["no-new-privileges:true"]
 
   scheduler:
+    image: harness-scheduler:deploy-b618dda
     build:
       context: ../../..
       dockerfile: scheduler/Dockerfile
@@ -65,6 +66,7 @@ services:
     security_opt: ["no-new-privileges:true"]
 
   ui:
+    image: harness-ui:deploy-b618dda
     build:
       context: ../../../ui
       dockerfile: Dockerfile
@@ -90,6 +92,7 @@ services:
     security_opt: ["no-new-privileges:true"]
 
   worker:
+    image: harness-worker:deploy-b618dda
     build:
       context: ../../..
       dockerfile: worker/Dockerfile
