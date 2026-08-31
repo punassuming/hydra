@@ -20,7 +20,7 @@ def test_client_keeps_domain_and_token_on_every_lifecycle_request(monkeypatch):
 
     assert len(seen) == 7
     assert {item[3:] for item in seen} == {("token-a", "domain-a")}
-    assert [item[1] for item in seen] == ["/jobs/validate", "/jobs/", "/jobs/job-1/run", "/runs/run-1", "/history/", "/runs/run-1/kill", "/token/rotate"]
+    assert [item[1] for item in seen] == ["/jobs/validate", "/jobs/", "/jobs/job-1/run", "/runs/run-1", "/history/", "/runs/run-1/kill", "/domain/token/rotate"]
 
 
 def test_client_rejects_missing_credentials():

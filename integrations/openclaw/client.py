@@ -62,4 +62,4 @@ class HydraClient:
         This endpoint requires an admin token, so callers should construct a
         separate client with the admin credential for this operation.
         """
-        return self.request("POST", "/token/rotate", {})
+        return self.request("POST", "/domain/token/rotate", {})
