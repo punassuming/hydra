@@ -33,8 +33,8 @@ git pull --ff-only origin deploy
 docker compose -f deploy/compose/harness/docker-compose.yml up -d --build
 ```
 
-The application images are tagged locally as `harness-scheduler:deploy-fac7bd4`,
-`harness-ui:deploy-fac7bd4`, and `harness-worker:deploy-fac7bd4`. Build and
+The application images are tagged locally as `harness-scheduler:deploy-254b4e9`,
+`harness-ui:deploy-254b4e9`, and `harness-worker:deploy-254b4e9`. Build and
 recreate are transactional with respect to the separate known-good recovery
 reference; do not retag `hydra-pilot-worker:recovery` during a retry.
 

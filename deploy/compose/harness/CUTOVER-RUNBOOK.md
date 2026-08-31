@@ -1,6 +1,6 @@
 # Harness pilot cutover runbook
 
-Validated source: branch `deploy`, commit `fac7bd4d2bd6fd2820106df5ec77c05501bbac2b`.
+Validated source: branch `deploy`, commit `254b4e99ed6d75930b13f2a62121f2e0781961be`.
 
 ## Preflight
 
@@ -23,7 +23,7 @@ failed build.
 
 ```bash
 docker compose -p hydra-pilot -f deploy/compose/harness/docker-compose.yml build --pull=false
-docker image inspect harness-scheduler:deploy-fac7bd4 harness-ui:deploy-fac7bd4 harness-worker:deploy-fac7bd4
+docker image inspect harness-scheduler:deploy-254b4e9 harness-ui:deploy-254b4e9 harness-worker:deploy-254b4e9
 ```
 
 ## Cutover

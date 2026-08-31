@@ -34,7 +34,7 @@ services:
     security_opt: ["no-new-privileges:true"]
 
   scheduler:
-    image: harness-scheduler:deploy-fac7bd4
+    image: harness-scheduler:deploy-254b4e9
     build:
       context: ../../..
       dockerfile: scheduler/Dockerfile
@@ -66,7 +66,7 @@ services:
     security_opt: ["no-new-privileges:true"]
 
   ui:
-    image: harness-ui:deploy-fac7bd4
+    image: harness-ui:deploy-254b4e9
     build:
       context: ../../../ui
       dockerfile: Dockerfile
@@ -92,7 +92,7 @@ services:
     security_opt: ["no-new-privileges:true"]
 
   worker:
-    image: harness-worker:deploy-fac7bd4
+    image: harness-worker:deploy-254b4e9
     build:
       context: ../../..
       dockerfile: worker/Dockerfile
