@@ -12,7 +12,12 @@ import os
 import secrets
 import sys
 import time
+from pathlib import Path
 from typing import Any
+
+# Support the documented direct-script form as well as ``python -m``.
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from integrations.openclaw.client import HydraClient, HydraError
 
