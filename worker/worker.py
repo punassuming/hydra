@@ -341,7 +341,7 @@ def worker_main():
                     break
 
             end_ts = time.time()
-            status = "success" if success else "failed"
+            status = "success" if success else ("timed_out" if rc == 124 else "failed")
             publish_run_event(
                 {
                     "type": "run_end",
