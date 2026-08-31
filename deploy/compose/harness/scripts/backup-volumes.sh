@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# Create a consistent encrypted backup of the canonical Hydra Mongo/Redis volumes.
+set -euo pipefail
+
+repo=/srv/openclaw/hydra
+compose_file="$repo/deploy/compose/harness/docker-compose.yml"
+secrets=/srv/openclaw/secrets/hydra-backup.env
+destination=${1:-/srv/openclaw/backups/hydra/$(date -u +%Y%m%dT%H%M%SZ)}
+scratch=$(mktemp -d)
+was_stopped=0
+
+cleanup() {
+  rm -rf "$scratch"
+  if [ "$was_stopped" = 1 ]; then
+    (cd "$repo/deploy/compose/harness" && docker compose -p hydra up -d --no-build) || true
+  fi
+}
+trap cleanup EXIT
+
+test -r "$secrets"
+test "$(stat -c %a "$secrets")" = 600
+set -a
+. "$secrets"
+set +a
+: "${HYDRA_BACKUP_PASSPHRASE:?missing protected backup passphrase}"
+
+install -d -m 700 "$destination"
+test -z "$(find "$destination" -mindepth 1 -maxdepth 1 -print -quit)"
+
+# Raw Mongo files are copied only while quiesced; never use down -v here.
+(cd "$repo/deploy/compose/harness" && docker compose -p hydra stop)
+was_stopped=1
+
+for datastore in mongo redis; do
+  volume="hydra-pilot-${datastore}-data"
+  docker run --rm \
+    -v "${volume}:/source:ro" \
+    -v "${scratch}:/backup" \
+    redis:7-alpine sh -ec "cd /source && tar -cf /backup/${datastore}.tar ."
+  gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 \
+    --symmetric --cipher-algo AES256 \
+    --output "${destination}/${datastore}.tar.gpg" "${scratch}/${datastore}.tar" 3<<<"$HYDRA_BACKUP_PASSPHRASE"
+done
+
+(
+  cd "$destination"
+  sha256sum mongo.tar.gpg redis.tar.gpg > SHA256SUMS
+)
+{
+  printf 'created_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  printf 'source_commit=%s\n' "$(git -C "$repo" rev-parse HEAD)"
+  printf 'format=encrypted-raw-volume-v1\n'
+  printf 'mongo_volume=hydra-pilot-mongo-data\nredis_volume=hydra-pilot-redis-data\n'
+} > "${destination}/MANIFEST"
+
+echo "backup_dir=${destination}"
