@@ -1,12 +1,14 @@
 services:
   redis:
     image: redis:7-alpine
-    command: ["redis-server", "--appendonly", "yes"]
+    env_file:
+      - /srv/openclaw/secrets/hydra-datastore.env
+    command: ["/bin/sh", "-ec", "exec redis-server --appendonly yes --requirepass \"$$REDIS_CONTROL_PASSWORD\""]
     restart: unless-stopped
     volumes:
       - redis-data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli --user default --pass \"$$REDIS_CONTROL_PASSWORD\" ping | grep -qx PONG"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -19,12 +21,14 @@ services:
     # MongoDB 5+ requires AVX. Harness does not expose it, so this pilot uses
     # the last compatible major version.
     image: mongo:4.4
-    command: ["mongod", "--bind_ip_all", "--setParameter", "diagnosticDataCollectionEnabled=false"]
+    env_file:
+      - /srv/openclaw/secrets/hydra-datastore.env
+    command: ["mongod", "--auth", "--bind_ip_all", "--setParameter", "diagnosticDataCollectionEnabled=false"]
     restart: unless-stopped
     volumes:
       - mongo-data:/data/db
     healthcheck:
-      test: ["CMD", "mongo", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      test: ["CMD-SHELL", "mongo --quiet --username \"$$MONGO_INITDB_ROOT_USERNAME\" --password \"$$MONGO_INITDB_ROOT_PASSWORD\" --authenticationDatabase admin --eval \"db.adminCommand('ping').ok\" | grep -qx 1"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -41,10 +45,10 @@ services:
     restart: unless-stopped
     env_file:
       - /srv/openclaw/secrets/hydra-scheduler.env
+      - /srv/openclaw/secrets/hydra-datastore.env
     environment:
       REDIS_URL: redis://redis:6379/0
-      REDIS_PASSWORD: ""
-      MONGO_URL: mongodb://mongo:27017
+      REDIS_USERNAME: default
       MONGO_DB: hydra_jobs
       SCHEDULER_HEARTBEAT_TTL: "10"
     depends_on:
