@@ -91,8 +91,8 @@ scheduler:
   mode: combined
   replicas: 1
   image:
-    repository: hydra-scheduler
-    tag: latest
+    repository: ghcr.io/punassuming/hydra-scheduler
+    tag: "0.1.0"
   service:
     type: ClusterIP
     port: 8000
@@ -143,8 +143,8 @@ ui:
   enabled: true
   replicas: 1
   image:
-    repository: hydra-ui
-    tag: latest
+    repository: ghcr.io/punassuming/hydra-ui
+    tag: "0.1.0"
   service:
     type: ClusterIP
     port: 80
@@ -181,8 +181,8 @@ workers:
     workerState: online
     requireRedisAcl: true
     image:
-      repository: hydra-worker
-      tag: latest
+      repository: ghcr.io/punassuming/hydra-worker
+      tag: "0.1.0"
     resources:
       requests:
         cpu: 100m
@@ -208,8 +208,8 @@ workers:
     workerState: online
     requireRedisAcl: true
     image:
-      repository: hydra-go-worker
-      tag: latest
+      repository: ghcr.io/punassuming/hydra-go-worker
+      tag: "0.1.0"
     resources:
       requests:
         cpu: 50m
@@ -246,8 +246,8 @@ domainSeed:
   #    via the admin API. Leave empty if every worker pool uses defaultDomain.
   extraDomains: []
   image:
-    repository: hydra-scheduler
-    tag: latest
+    repository: ghcr.io/punassuming/hydra-scheduler
+    tag: "0.1.0"
 
 # ---------------------------------------------------------------------------
 # Ingress (optional) — off by default. Turn on if you run an ingress

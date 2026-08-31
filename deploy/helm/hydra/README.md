@@ -5,10 +5,9 @@ environment: Redis, MongoDB, the scheduler (FastAPI control plane), one or
 more worker "pools" (Python and/or Go workers, each independently scaled and
 placed), and the React UI.
 
-This chart does **not** assume you push images to a registry — the default
-workflow is build locally, load the images directly onto your cluster's
-nodes, then `helm install`. See [Building and loading images](#building-and-loading-images)
-below.
+The default values reference immutable GHCR `0.1.0` images. Publish them with
+the `Publish container images` workflow before installation, or override the
+repositories and use the local build/import workflow below.
 
 ## What gets deployed
 
