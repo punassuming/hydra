@@ -83,6 +83,33 @@ stack, and reseed the protected domain credentials.
   scheduler, worker, UI, Redis, and Mongo all reported healthy. No workload was
   submitted.
 
+## Encrypted backup and isolated restore
+
+Use the scripts below. They read protected host secret files, never write
+secrets or backup contents into the checkout, and never use `down -v`.
+
+```bash
+install -d -m 700 /srv/openclaw/backups/hydra
+deploy/compose/harness/scripts/backup-volumes.sh /srv/openclaw/backups/hydra/DATE
+deploy/compose/harness/scripts/restore-isolated.sh /srv/openclaw/backups/hydra/DATE
+```
+
+The backup script briefly stops the project for a consistent raw-volume archive,
+encrypts Mongo and Redis separately, and starts the existing stack. The restore
+script uses only disposable volumes and an internal-only temporary network,
+validates positive and negative datastore authentication, then removes its
+temporary containers, network, volumes, and plaintext work area.
+
+### Redacted backup/restore record — 2026-08-31
+
+- Created encrypted Mongo and Redis archives with a SHA-256 manifest under the
+  protected backup root; no plaintext archive or credential was retained there.
+- Restored both archives into disposable internal-only state. Mongo app and
+  Redis control authentication passed; unauthenticated Mongo/Redis access was
+  rejected.
+- Temporary restore resources were removed automatically. Canonical named
+  volumes were not reset or deleted.
+
 ## Rollback
 
 If build or startup fails, preserve the failed images and logs, then restore the
@@ -90,11 +117,35 @@ known-good deploy revision in the canonical checkout without deleting volumes:
 
 ```bash
 cd /srv/openclaw/hydra
-git switch --detach 81bce90795b8e77ae7e5a828bd568484831a3aa6
-docker compose -p hydra -f deploy/compose/harness/docker-compose.yml up -d --build
+git switch --detach 131af04ee7f3fe83d54aadfe65355ee797a8943c
+docker compose -p hydra -f deploy/compose/harness/docker-compose.yml up -d --build --force-recreate
 ```
 
 The harness definition must reference known-good application images, including
 the separately retained `hydra-pilot-worker:recovery` image where required.
 Confirm the same endpoints/listeners, healthy containers, unchanged secret
 file metadata, and unchanged named volumes. Record the failure before retrying.
+
+### Redacted rollback execution record — 2026-08-31
+
+- Checked out auth-compatible approved commit `131af04` in detached mode and
+  performed the forced Compose recreation.
+- Scheduler health reported `workers=1`; Redis/Mongo authenticated probes
+  passed; neither datastore had a host-published port.
+- Returned to canonical `deploy` and recreated the stack. No volume was
+  deleted. The target shares application artifact `deploy-53aef84` because
+  later commits in this sequence are deployment configuration/evidence.
+
+## Worker boundary verification
+
+The worker is non-root (`10001:10001`), read-only, non-privileged, has no
+Docker socket or host mount, no added Linux capabilities, and uses
+`no-new-privileges`. Its backend network is internal-only with scheduler,
+Mongo, and Redis; only scheduler/UI join the frontend network for LAN ingress.
+
+### Redacted boundary record — 2026-08-31
+
+- A pre-policy direct worker TCP connection to `1.1.1.1:443` succeeded.
+- After the backend/frontend split, the same bounded connection was denied
+  while scheduler health (`workers=1`) and LAN UI/API checks passed.
+- Redis and Mongo remain backend-only with no host-published ports.
