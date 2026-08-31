@@ -40,7 +40,7 @@ services:
     networks: [backend]
 
   scheduler:
-    image: harness-scheduler:deploy-53aef84
+    image: harness-scheduler:deploy-2789f54
     build:
       context: ../../..
       dockerfile: scheduler/Dockerfile
@@ -73,7 +73,7 @@ services:
     networks: [backend, frontend]
 
   ui:
-    image: harness-ui:deploy-53aef84
+    image: harness-ui:deploy-2789f54
     build:
       context: ../../../ui
       dockerfile: Dockerfile
@@ -100,7 +100,7 @@ services:
     networks: [frontend]
 
   worker:
-    image: harness-worker:deploy-53aef84
+    image: harness-worker:deploy-2789f54
     build:
       context: ../../..
       dockerfile: worker/Dockerfile
