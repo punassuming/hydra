@@ -155,3 +155,29 @@ Mongo, and Redis; only scheduler/UI join the frontend network for LAN ingress.
 - After the backend/frontend split, the same bounded connection was denied
   while scheduler health (`workers=1`) and LAN UI/API checks passed.
 - Redis and Mongo remain backend-only with no host-published ports.
+
+## Final acceptance execution — 2026-08-31
+
+- Rebuilt and force-recreated the canonical stack from the reviewed deployment
+  configuration.  The live scheduler, UI, and worker image references match
+  the Compose file; all five services became healthy and `/health` reported
+  `workers=1`.
+- Created an encrypted Mongo/Redis backup and successfully restored it into
+  disposable internal-only Docker volumes.  Authenticated Mongo and Redis
+  checks passed; unauthenticated checks failed; temporary restore resources
+  were removed.
+- Rolled back to the compatible approved revision `2789f54`, verified health,
+  and returned to the canonical deployment without deleting named volumes.
+  The older pre-network-split `131af04` path was found incompatible with the
+  current Docker topology; the rollback instructions now require a non-volume
+  destroying network teardown when crossing that boundary.
+- Re-ran worker hardening and egress checks: UID/GID `10001`, read-only root,
+  no mounts/privileges/capability additions, denied external TCP, and working
+  private Redis/Mongo connectivity.
+- Ran the disposable OpenClaw acceptance suite successfully: two-domain
+  isolation, immediate token rotation/revocation rejection, validation,
+  submit/run/log/history, cross-domain cancellation denial, cancellation,
+  timeout, and retry behavior.  The suite removed its temporary domains.
+- The reusable `verify-live.sh`, `verify-worker-boundary.sh`, and
+  `run-openclaw-acceptance.sh` helpers passed after their creation.  They are
+  the supported repeatable investigation path for this Harness deployment.
