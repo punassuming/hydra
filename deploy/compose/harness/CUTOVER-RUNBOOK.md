@@ -62,6 +62,22 @@ an explicit separately approved command: stop the stack, take a verified backup,
 remove only `hydra-pilot-mongo-data` and `hydra-pilot-redis-data`, recreate the
 stack, and reseed the protected domain credentials.
 
+### Redacted in-place migration record — 2026-08-31
+
+- Generated `/srv/openclaw/secrets/hydra-datastore.env` mode `0600`; no secret
+  values were committed or printed.
+- Created `hydra_root` with `root@admin` and `hydra` with
+  `readWrite@hydra_jobs` before enabling Mongo `--auth`.
+- Set a distinct Redis default-user control-plane password and verified that
+  unauthenticated `PING` is rejected while credentialed `PING` returns `PONG`.
+- Ran the mandatory `docker compose -p hydra ... up -d --build --force-recreate`.
+  The existing `hydra-pilot-redis-data` and `hydra-pilot-mongo-data` volumes
+  were retained.
+- Post-cutover: Mongo unauthenticated access was rejected; the `hydra` user
+  authenticated to `hydra_jobs`; Redis control-plane authentication succeeded;
+  scheduler, worker, UI, Redis, and Mongo all reported healthy. No workload was
+  submitted.
+
 ## Rollback
 
 If build or startup fails, preserve the failed images and logs, then restore the
