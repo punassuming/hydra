@@ -33,10 +33,10 @@ was_stopped=1
 
 for datastore in mongo redis; do
   volume="hydra-pilot-${datastore}-data"
-  docker run --rm --user "$(id -u):$(id -g)" \
+  docker run --rm --user 0:0 \
     -v "${volume}:/source:ro" \
     -v "${scratch}:/backup" \
-    redis:7-alpine sh -ec "cd /source && tar -cf /backup/${datastore}.tar ."
+    redis:7-alpine sh -ec "cd /source && tar -cf /backup/${datastore}.tar . && chmod 0644 /backup/${datastore}.tar"
   gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 \
     --symmetric --cipher-algo AES256 \
     --output "${destination}/${datastore}.tar.gpg" "${scratch}/${datastore}.tar" 3<<<"$HYDRA_BACKUP_PASSPHRASE"
