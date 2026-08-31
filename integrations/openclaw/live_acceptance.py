@@ -88,7 +88,6 @@ def main() -> int:
         a_job_id = _id(a_job)
         _expect(403, lambda: b_client.request("GET", f"/jobs/{a_job_id}"), "B read A job")
         _expect(403, lambda: b_client.run(a_job_id), "B submit A job")
-        _expect_denied(lambda: b_client.cancel("0" * 24), "B cancel foreign/non-owned run")
         if any(_id(item) == a_job_id for item in b_client.request("GET", "/jobs/")):
             raise AssertionError("B job listing exposed A job")
         if any(item.get("domain") == a_name for item in b_client.history()):
@@ -124,7 +123,9 @@ def main() -> int:
         cancel_id = _id(live.submit(_job(f"openclaw-cancel-{suffix}", "sleep 30", timeout=45)))
         live.run(cancel_id)
         cancel_run = _running(live, cancel_id)
-        live.cancel(str(cancel_run.get("_id") or cancel_run.get("id")))
+        cancel_run_id = str(cancel_run.get("_id") or cancel_run.get("id"))
+        _expect_denied(lambda: b_client.cancel(cancel_run_id), "B cancel seed-domain run")
+        live.cancel(cancel_run_id)
         cancelled = _terminal(live, cancel_id, timeout=25)
         if cancelled.get("status") not in {"failed", "cancelled", "canceled"}:
             raise AssertionError(f"cancellation status was {cancelled.get('status')}")
