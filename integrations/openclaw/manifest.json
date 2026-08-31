@@ -1,0 +1,7 @@
+{
+  "name": "hydra-jobs",
+  "integration": "openclaw",
+  "entrypoint": "integrations.openclaw.HydraClient",
+  "auth": {"headers": ["x-api-key", "x-domain"], "rotation": "POST /token/rotate"},
+  "domain_scoped": true
+}
