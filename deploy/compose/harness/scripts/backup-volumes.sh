@@ -33,7 +33,7 @@ was_stopped=1
 
 for datastore in mongo redis; do
   volume="hydra-pilot-${datastore}-data"
-  docker run --rm \
+  docker run --rm --user "$(id -u):$(id -g)" \
     -v "${volume}:/source:ro" \
     -v "${scratch}:/backup" \
     redis:7-alpine sh -ec "cd /source && tar -cf /backup/${datastore}.tar ."

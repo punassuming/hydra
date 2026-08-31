@@ -47,7 +47,7 @@ docker volume create "$mongo_volume" >/dev/null
 docker volume create "$redis_volume" >/dev/null
 for datastore in mongo redis; do
   volume_var="${datastore}_volume"
-  docker run --rm -v "${!volume_var}:/target" -v "${scratch}:/backup:ro" redis:7-alpine \
+  docker run --rm --user "$(id -u):$(id -g)" -v "${!volume_var}:/target" -v "${scratch}:/backup:ro" redis:7-alpine \
     sh -ec "cd /target && tar -xf /backup/${datastore}.tar"
 done
 docker network create --internal "$network" >/dev/null
