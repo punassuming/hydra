@@ -117,9 +117,15 @@ known-good deploy revision in the canonical checkout without deleting volumes:
 
 ```bash
 cd /srv/openclaw/hydra
-git switch --detach 131af04ee7f3fe83d54aadfe65355ee797a8943c
+git switch --detach 2789f54
 docker compose -p hydra -f deploy/compose/harness/docker-compose.yml up -d --build --force-recreate
 ```
+
+Use an approved revision that retains the current backend/frontend network
+topology.  For a rollback across a network-topology change, run `docker
+compose -p hydra -f deploy/compose/harness/docker-compose.yml down` first
+(never `down -v`), then recreate from the target revision.  This preserves the
+named datastore volumes while allowing Docker to replace incompatible networks.
 
 The harness definition must reference known-good application images, including
 the separately retained `hydra-pilot-worker:recovery` image where required.
@@ -128,8 +134,8 @@ file metadata, and unchanged named volumes. Record the failure before retrying.
 
 ### Redacted rollback execution record — 2026-08-31
 
-- Checked out auth-compatible approved commit `131af04` in detached mode and
-  performed the forced Compose recreation.
+- Checked out an auth-compatible approved commit in detached mode and performed
+  the forced Compose recreation.
 - Scheduler health reported `workers=1`; Redis/Mongo authenticated probes
   passed; neither datastore had a host-published port.
 - Returned to canonical `deploy` and recreated the stack. No volume was
