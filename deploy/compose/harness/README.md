@@ -33,8 +33,8 @@ git pull --ff-only origin deploy
 docker compose -f deploy/compose/harness/docker-compose.yml up -d --build
 ```
 
-The application images are tagged locally as `harness-scheduler:deploy-b618dda`,
-`harness-ui:deploy-b618dda`, and `harness-worker:deploy-b618dda`. Build and
+The application images are tagged locally as `harness-scheduler:deploy-fac7bd4`,
+`harness-ui:deploy-fac7bd4`, and `harness-worker:deploy-fac7bd4`. Build and
 recreate are transactional with respect to the separate known-good recovery
 reference; do not retag `hydra-pilot-worker:recovery` during a retry.
 
@@ -60,7 +60,15 @@ explicitly approved. To roll back code, check out the previous known-good
 separately under the host's protected backup policy.
 
 For a failed image build, leave the existing containers and the separate
-`hydra-pilot-worker:recovery` image untouched, then restore the prior Compose
-definition and run `docker compose -f /srv/openclaw/hydra-pilot/docker-compose.yml
-up -d --no-build`. The live cutover runbook records the exact recovery tag and
-verification commands.
+`hydra-pilot-worker:recovery` image untouched, then restore the prior deploy
+revision in the canonical checkout and run the harness definition again:
+
+```bash
+cd /srv/openclaw/hydra
+git switch --detach 81bce90795b8e77ae7e5a828bd568484831a3aa6
+docker compose -p hydra -f deploy/compose/harness/docker-compose.yml up -d --build
+```
+
+The live cutover runbook records the exact recovery tag and verification
+commands. Never use the retired pilot tree or the root `docker-compose.yml`
+for rollback.

@@ -1,6 +1,6 @@
 # Harness pilot cutover runbook
 
-Validated source: branch `deploy`, commit `b618dda47f1b0cb0c9e945e577a0fdf784918dc4` plus the reviewed worker identity fix in this commit.
+Validated source: branch `deploy`, commit `fac7bd4d2bd6fd2820106df5ec77c05501bbac2b`.
 
 ## Preflight
 
@@ -23,7 +23,7 @@ failed build.
 
 ```bash
 docker compose -p hydra-pilot -f deploy/compose/harness/docker-compose.yml build --pull=false
-docker image inspect harness-scheduler:deploy-b618dda harness-ui:deploy-b618dda harness-worker:deploy-b618dda
+docker image inspect harness-scheduler:deploy-fac7bd4 harness-ui:deploy-fac7bd4 harness-worker:deploy-fac7bd4
 ```
 
 ## Cutover
@@ -45,13 +45,15 @@ published ports.
 ## Rollback
 
 If build or startup fails, preserve the failed images and logs, then restore the
-known-good root Compose definition without deleting volumes:
+known-good deploy revision in the canonical checkout without deleting volumes:
 
 ```bash
-docker compose -p hydra-pilot -f /srv/openclaw/hydra-pilot/docker-compose.yml up -d --no-build
+cd /srv/openclaw/hydra
+git switch --detach 81bce90795b8e77ae7e5a828bd568484831a3aa6
+docker compose -p hydra -f deploy/compose/harness/docker-compose.yml up -d --build
 ```
 
-The root definition must reference a known-good application image, including
+The harness definition must reference known-good application images, including
 the separately retained `hydra-pilot-worker:recovery` image where required.
 Confirm the same endpoints/listeners, healthy containers, unchanged secret
 file metadata, and unchanged named volumes. Record the failure before retrying.
