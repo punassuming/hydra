@@ -20,4 +20,24 @@
     mode: immediate
     enabled: false
   timeout: 1
-
+- name: openclaw-cancel
+  user: acceptance
+  executor:
+    type: shell
+    shell: bash
+    script: "sleep 30"
+  schedule:
+    mode: immediate
+    enabled: false
+  timeout: 45
+- name: openclaw-retry
+  user: acceptance
+  executor:
+    type: shell
+    shell: bash
+    script: "exit 1"
+  schedule:
+    mode: immediate
+    enabled: false
+  max_retries: 1
+  timeout: 10
