@@ -14,15 +14,17 @@ describe("slugify", () => {
 describe("downloadJson", () => {
   let createObjectURL: ReturnType<typeof vi.fn>;
   let revokeObjectURL: ReturnType<typeof vi.fn>;
-  let clickSpy: ReturnType<typeof vi.fn>;
+  let clickCount: number;
 
   beforeEach(() => {
     createObjectURL = vi.fn().mockReturnValue("blob:mock-url");
     revokeObjectURL = vi.fn();
     (URL as unknown as { createObjectURL: typeof createObjectURL }).createObjectURL = createObjectURL;
     (URL as unknown as { revokeObjectURL: typeof revokeObjectURL }).revokeObjectURL = revokeObjectURL;
-    clickSpy = vi.fn();
-    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(clickSpy);
+    clickCount = 0;
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {
+      clickCount += 1;
+    });
   });
 
   afterEach(() => {
@@ -36,7 +38,7 @@ describe("downloadJson", () => {
     const blobArg = createObjectURL.mock.calls[0][0] as Blob;
     expect(blobArg.type).toBe("application/json");
 
-    expect(clickSpy).toHaveBeenCalledTimes(1);
+    expect(clickCount).toBe(1);
     expect(revokeObjectURL).toHaveBeenCalledWith("blob:mock-url");
   });
 });
