@@ -42,7 +42,11 @@ Verify the Docker health checks, authenticated Redis and Mongo probes (using
 the protected files without printing them), authenticated worker registration
 for `hydra-harness-pilot-01`, and only `10.10.40.40:8000` and
 `10.10.40.40:5173` as Hydra host listeners. Redis/Mongo must have no host
-published ports.
+published ports. The Compose network is internal-only; a worker must not be
+able to create a direct outbound TCP connection. If changing that network
+property, use `docker compose -p hydra down` (never `down -v`) before the
+mandatory recreation so Docker can replace the network without touching the
+named datastore volumes.
 
 ## Datastore authentication migration
 

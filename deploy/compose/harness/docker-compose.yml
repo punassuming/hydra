@@ -123,6 +123,7 @@ services:
 networks:
   default:
     name: hydra-pilot-private
+    internal: true
 
 volumes:
   redis-data:
