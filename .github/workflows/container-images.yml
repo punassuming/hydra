@@ -1,6 +1,17 @@
 name: Publish container images
 
 on:
+  push:
+    branches:
+      - k3s
+    paths:
+      - scheduler/**
+      - worker/**
+      - go-worker/**
+      - ui/**
+      - pyproject.toml
+      - uv.lock
+      - .github/workflows/container-images.yml
   workflow_dispatch:
     inputs:
       version:
@@ -38,12 +49,17 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - id: version
+        shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: echo "value=${INPUT_VERSION:-0.1.0}" >> "$GITHUB_OUTPUT"
       - uses: docker/build-push-action@v6
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.file }}
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}:${{ inputs.version }}
+          tags: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}:${{ steps.version.outputs.value }}
           cache-from: type=gha,scope=${{ matrix.image }}
           cache-to: type=gha,mode=max,scope=${{ matrix.image }}
           provenance: mode=max
