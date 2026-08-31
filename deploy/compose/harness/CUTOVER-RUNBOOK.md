@@ -8,7 +8,7 @@ Run from the repository root. This working directory is important because the
 Compose build contexts are relative to `deploy/compose/harness`.
 
 ```bash
-cd /srv/openclaw/hydra-pilot/source
+cd /srv/openclaw/hydra
 git switch deploy
 git status --short                 # must be empty
 git rev-parse HEAD                 # expected reviewed commit
