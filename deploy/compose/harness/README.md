@@ -33,10 +33,9 @@ git pull --ff-only origin deploy
 docker compose -f deploy/compose/harness/docker-compose.yml up -d --build
 ```
 
-The application images are tagged locally as `harness-scheduler:deploy-254b4e9`,
-`harness-ui:deploy-254b4e9`, and `harness-worker:deploy-254b4e9`. Build and
-recreate are transactional with respect to the separate known-good recovery
-reference; do not retag `hydra-pilot-worker:recovery` during a retry.
+The Compose file records the exact local image tags for the deployed revision.
+Build and recreate are transactional with respect to the separate known-good
+recovery reference; do not retag `hydra-pilot-worker:recovery` during a retry.
 
 Verify only the intended listeners are present:
 
@@ -72,3 +71,19 @@ docker compose -p hydra -f deploy/compose/harness/docker-compose.yml up -d --bui
 The live cutover runbook records the exact recovery tag and verification
 commands. Never use the retired pilot tree or the root `docker-compose.yml`
 for rollback.
+
+## Reusable verification helpers
+
+These commands avoid printing credentials and operate only on the canonical
+Harness deployment:
+
+```bash
+deploy/compose/harness/scripts/verify-live.sh
+deploy/compose/harness/scripts/verify-worker-boundary.sh
+deploy/compose/harness/scripts/backup-volumes.sh /srv/openclaw/backups/hydra/DATE
+deploy/compose/harness/scripts/restore-isolated.sh /srv/openclaw/backups/hydra/DATE
+deploy/compose/harness/scripts/run-openclaw-acceptance.sh
+```
+
+The final command creates and deletes disposable domains and harmless jobs. It
+is an acceptance operation, not a routine health check.
