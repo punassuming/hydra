@@ -5,9 +5,9 @@ environment: Redis, MongoDB, the scheduler (FastAPI control plane), one or
 more worker "pools" (Python and/or Go workers, each independently scaled and
 placed), and the React UI.
 
-The default values reference immutable GHCR `0.1.0` images. Publish them with
-the `Publish container images` workflow before installation, or override the
-repositories and use the local build/import workflow below.
+The default values reference immutable `0.1.2` images in the homelab registry.
+Build and push them from a trusted LAN workstation before installation, or
+override the repositories and use the local build/import workflow below.
 
 ## What gets deployed
 
