@@ -69,6 +69,24 @@ class HydraClient:
     def rotate_token(self) -> Any:
         return self.request("POST", "/domain/token/rotate", body={})
 
+    def run_details(self, run_id: str) -> Any:
+        return self.request("GET", f"/runs/{run_id}")
+
+    def job_runs(self, job_id: str) -> Any:
+        return self.request("GET", f"/jobs/{job_id}/runs")
+
+    def workers(self) -> Any:
+        return self.request("GET", "/workers/")
+
+    def health(self) -> Any:
+        return self.request("GET", "/health")
+
+    def overview(self, view: str) -> Any:
+        return self.request("GET", f"/overview/{view}")
+
+    def set_worker_state(self, worker_id: str, state: str) -> Any:
+        return self.request("POST", f"/workers/{worker_id}/state", body={"state": state})
+
     def request(
         self,
         method: str,
