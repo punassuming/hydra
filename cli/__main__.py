@@ -62,6 +62,9 @@ def build_parser() -> argparse.ArgumentParser:
     apply = commands.add_parser("apply", parents=[output_parent], help="Create a job from YAML or JSON")
     apply.add_argument("-f", "--filename", required=True)
 
+    validate = commands.add_parser("validate", parents=[output_parent], help="Validate a job YAML or JSON document")
+    validate.add_argument("-f", "--filename", required=True)
+
     delete = commands.add_parser("delete", parents=[output_parent], help="Delete a resource")
     delete.add_argument("resource", choices=("job",))
     delete.add_argument("name")
@@ -84,6 +87,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     overview = commands.add_parser("overview", parents=[output_parent], help="Show cluster health")
     overview.add_argument("view", nargs="?", default="statistics", choices=("statistics", "queue", "pressure"))
+
+    token = commands.add_parser("token", parents=[output_parent], help="Manage the current domain token")
+    token_commands = token.add_subparsers(dest="token_command", required=True)
+    token_commands.add_parser("rotate", parents=[output_parent], help="Rotate the current domain token")
     return parser
 
 
@@ -103,7 +110,10 @@ def main(argv: list[str] | None = None, client_factory: type[HydraClient] = Hydr
             _show(client.request("POST", f"/jobs/{_quote(job_id)}/run", body={"params": _params(args.param)}), args.output)
         elif args.command == "apply":
             document = _load_document(args.filename)
-            _show(client.request("POST", "/jobs/", body=document), args.output)
+            _show(client.submit(document), args.output)
+        elif args.command == "validate":
+            document = _load_document(args.filename)
+            _show(client.validate(document), args.output)
         elif args.command == "delete":
             job_id = _resolve_job(client, args.name)
             _show(client.request("DELETE", f"/jobs/{_quote(job_id)}"), args.output)
@@ -119,6 +129,8 @@ def main(argv: list[str] | None = None, client_factory: type[HydraClient] = Hydr
             _show(client.request("POST", path, body=body), args.output)
         elif args.command == "overview":
             _show(client.request("GET", f"/overview/{args.view}"), args.output)
+        elif args.command == "token":
+            _show(client.rotate_token(), args.output)
         return 0
     except (APIError, OSError, ValueError, yaml.YAMLError) as exc:
         write_error(str(exc))

@@ -1,8 +1,10 @@
 # OpenClaw integration
 
-`HydraClient` binds every request to one API token and one domain using
-`x-api-key` and `x-domain`. Construct a separate client with an admin token
-for `rotate_token`; rotation calls `/domain/token/rotate` and revokes the previous domain token.
+`HydraClient` is a constrained facade over the shared `hydra-ctl` HTTP client.
+It binds every request to one API token and one domain using `x-api-key` and
+`x-domain`; it does not maintain a second transport implementation. Construct
+a separate client with an admin token for `rotate_token`; rotation calls
+`/domain/token/rotate` and revokes the previous domain token.
 
 The acceptance jobs in `jobs/acceptance.yaml` are source-controlled and
 harmless: one echo job covers submit/run/history/log retrieval, while the

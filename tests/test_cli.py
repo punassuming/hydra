@@ -28,6 +28,15 @@ class FakeClient:
         self.calls.append(("STREAM", path, None, None))
         yield from self.events
 
+    def submit(self, document):
+        return self.request("POST", "/jobs/", body=document)
+
+    def validate(self, document):
+        return self.request("POST", "/jobs/validate", body=document)
+
+    def rotate_token(self):
+        return self.request("POST", "/domain/token/rotate", body={})
+
 
 def invoke(client, *args):
     return main(list(args), client_factory=lambda *unused, **also_unused: client)
@@ -82,6 +91,25 @@ def test_apply_reads_yaml(capsys):
 
     assert client.calls[0][2]["executor"]["script"] == "echo ok"
     assert json.loads(capsys.readouterr().out)["_id"] == "job-2"
+
+
+def test_validate_reads_yaml(capsys):
+    definition = Path(__file__).parent / "fixtures" / "cli_job.yaml"
+    client = FakeClient({("POST", "/jobs/validate"): {"valid": True}})
+
+    assert invoke(client, "validate", "-f", str(definition), "-o", "json") == 0
+
+    assert client.calls == [("POST", "/jobs/validate", client.calls[0][2], None)]
+    assert json.loads(capsys.readouterr().out) == {"valid": True}
+
+
+def test_token_rotate_uses_shared_client_method(capsys):
+    client = FakeClient({("POST", "/domain/token/rotate"): {"rotated": True}})
+
+    assert invoke(client, "token", "rotate", "-o", "json") == 0
+
+    assert client.calls == [("POST", "/domain/token/rotate", {}, None)]
+    assert json.loads(capsys.readouterr().out) == {"rotated": True}
 
 
 def test_logs_prints_stdout_and_stderr(capsys):
@@ -175,3 +203,6 @@ def test_http_client_decodes_api_error(monkeypatch):
         HydraClient("https://hydra.example").request("GET", "/jobs/")
 
     assert raised.value.status == 403
+    assert raised.value.body == {"detail": "wrong domain"}
+    assert raised.value.method == "GET"
+    assert raised.value.path == "/jobs/"

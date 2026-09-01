@@ -13,9 +13,20 @@ from typing import Any
 class APIError(RuntimeError):
     """A request rejected by Hydra or the network layer."""
 
-    def __init__(self, message: str, status: int | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        status: int | None = None,
+        *,
+        body: Any = None,
+        method: str | None = None,
+        path: str | None = None,
+    ) -> None:
         super().__init__(message)
         self.status = status
+        self.body = body
+        self.method = method
+        self.path = path
 
 
 class HydraClient:
@@ -33,6 +44,30 @@ class HydraClient:
             self.headers["x-api-key"] = token
         if domain:
             self.headers["x-domain"] = domain
+
+    # These small lifecycle helpers are intentionally shared by hydra-ctl and
+    # constrained integrations.  Keep policy (such as manifest allowlisting)
+    # outside this transport client.
+    def validate(self, job: Mapping[str, Any]) -> Any:
+        return self.request("POST", "/jobs/validate", body=job)
+
+    def submit(self, job: Mapping[str, Any]) -> Any:
+        return self.request("POST", "/jobs/", body=job)
+
+    def run(self, job_id: str, params: Mapping[str, Any] | None = None) -> Any:
+        return self.request("POST", f"/jobs/{job_id}/run", body={"params": dict(params or {})})
+
+    def logs(self, run_id: str) -> Any:
+        return self.request("GET", f"/runs/{run_id}")
+
+    def history(self) -> Any:
+        return self.request("GET", "/history/")
+
+    def cancel(self, run_id: str) -> Any:
+        return self.request("POST", f"/runs/{run_id}/kill", body={})
+
+    def rotate_token(self) -> Any:
+        return self.request("POST", "/domain/token/rotate", body={})
 
     def request(
         self,
@@ -56,7 +91,7 @@ class HydraClient:
                     return None
                 return json.loads(payload)
         except urllib.error.HTTPError as exc:
-            raise self._http_error(exc) from exc
+            raise self._http_error(exc, method=method, path=path) from exc
         except (urllib.error.URLError, TimeoutError) as exc:
             reason = getattr(exc, "reason", exc)
             raise APIError(f"could not reach {self.base_url}: {reason}") from exc
@@ -90,7 +125,7 @@ class HydraClient:
                         pass
                     yield event, payload
         except urllib.error.HTTPError as exc:
-            raise self._http_error(exc) from exc
+            raise self._http_error(exc, method="GET", path=path) from exc
         except (urllib.error.URLError, TimeoutError) as exc:
             reason = getattr(exc, "reason", exc)
             raise APIError(f"could not reach {self.base_url}: {reason}") from exc
@@ -104,11 +139,13 @@ class HydraClient:
         return url
 
     @staticmethod
-    def _http_error(exc: urllib.error.HTTPError) -> APIError:
+    def _http_error(exc: urllib.error.HTTPError, *, method: str | None = None, path: str | None = None) -> APIError:
         detail = exc.reason
+        body: Any = None
         try:
             payload = json.loads(exc.read())
+            body = payload
             detail = payload.get("detail", payload) if isinstance(payload, dict) else payload
         except (json.JSONDecodeError, UnicodeDecodeError):
             pass
-        return APIError(f"API returned {exc.code}: {detail}", exc.code)
+        return APIError(f"API returned {exc.code}: {detail}", exc.code, body=body, method=method, path=path)
