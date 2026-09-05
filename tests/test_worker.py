@@ -23,6 +23,13 @@ def test_os_exec_echo():
     assert "hello" in out.strip().lower()
 
 
+def test_os_exec_timeout_uses_explicit_timeout_return_code():
+    shell = "cmd" if IS_WINDOWS else "bash"
+    command = "ping -n 3 127.0.0.1 > nul" if IS_WINDOWS else "sleep 3"
+    rc, _, _ = run_command(command, shell=shell, timeout=1)
+    assert rc == 124
+
+
 def test_python_executor_runs_inline_code():
     rc, out, _ = run_python("print('hydra')", interpreter=PYTHON_INTERPRETER)
     assert rc == 0

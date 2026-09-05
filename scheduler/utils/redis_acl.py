@@ -37,13 +37,16 @@ def worker_acl_key_patterns(domain: str) -> list[str]:
 
 
 def worker_acl_channel_patterns(domain: str) -> list[str]:
-    return [f"&log_stream:{domain}:*"]
+    # Workers listen for cancellation notifications on this channel.  Log
+    # streaming is served by the scheduler and is not a worker concern.
+    return [f"&job_kill:{domain}"]
 
 
 def worker_acl_commands() -> list[str]:
     return [
         "+ping",
         "+exists",
+        "+hexists",
         "+blpop",
         "+hset",
         "+hincrby",
@@ -55,6 +58,7 @@ def worker_acl_commands() -> list[str]:
         "+expire",
         "+del",
         "+publish",
+        "+subscribe",
     ]
 
 

@@ -28,6 +28,39 @@ class FakeClient:
         self.calls.append(("STREAM", path, None, None))
         yield from self.events
 
+    def submit(self, document):
+        return self.request("POST", "/jobs/", body=document)
+
+    def validate(self, document):
+        return self.request("POST", "/jobs/validate", body=document)
+
+    def rotate_token(self):
+        return self.request("POST", "/domain/token/rotate", body={})
+
+    def run(self, job_id, params=None):
+        return self.request("POST", f"/jobs/{job_id}/run", body={"params": params or {}})
+
+    def run_details(self, run_id):
+        return self.request("GET", f"/runs/{run_id}")
+
+    def job_runs(self, job_id):
+        return self.request("GET", f"/jobs/{job_id}/runs")
+
+    def cancel(self, run_id):
+        return self.request("POST", f"/runs/{run_id}/kill", body={})
+
+    def workers(self):
+        return self.request("GET", "/workers/")
+
+    def health(self):
+        return self.request("GET", "/health")
+
+    def overview(self, view):
+        return self.request("GET", f"/overview/{view}")
+
+    def set_worker_state(self, worker_id, state):
+        return self.request("POST", f"/workers/{worker_id}/state", body={"state": state})
+
 
 def invoke(client, *args):
     return main(list(args), client_factory=lambda *unused, **also_unused: client)
@@ -82,6 +115,63 @@ def test_apply_reads_yaml(capsys):
 
     assert client.calls[0][2]["executor"]["script"] == "echo ok"
     assert json.loads(capsys.readouterr().out)["_id"] == "job-2"
+
+
+def test_validate_reads_yaml(capsys):
+    definition = Path(__file__).parent / "fixtures" / "cli_job.yaml"
+    client = FakeClient({("POST", "/jobs/validate"): {"valid": True}})
+
+    assert invoke(client, "validate", "-f", str(definition), "-o", "json") == 0
+
+    assert client.calls == [("POST", "/jobs/validate", client.calls[0][2], None)]
+    assert json.loads(capsys.readouterr().out) == {"valid": True}
+
+
+def test_token_rotate_uses_shared_client_method(capsys):
+    client = FakeClient({("POST", "/domain/token/rotate"): {"rotated": True}})
+
+    assert invoke(client, "token", "rotate", "-o", "json") == 0
+
+    assert client.calls == [("POST", "/domain/token/rotate", {}, None)]
+    assert json.loads(capsys.readouterr().out) == {"rotated": True}
+
+
+def test_retry_queues_the_job_from_an_existing_run(capsys):
+    client = FakeClient(
+        {
+            ("GET", "/runs/run-1"): {"_id": "run-1", "job_id": "job-1"},
+            ("POST", "/jobs/job-1/run"): {"job_id": "job-1", "queued": True},
+        }
+    )
+
+    assert invoke(client, "retry", "run-1", "-o", "json") == 0
+
+    assert client.calls[-1] == ("POST", "/jobs/job-1/run", {"params": {}}, None)
+    assert json.loads(capsys.readouterr().out)["queued"] is True
+
+
+def test_doctor_aggregates_read_only_health(capsys):
+    client = FakeClient(
+        {
+            ("GET", "/health"): {"status": "ok"},
+            ("GET", "/health/orchestration"): {"status": "ok"},
+            ("GET", "/overview/queue"): {"pending": 0},
+            ("GET", "/overview/pressure"): {"pressure": "low"},
+            ("GET", "/workers/"): [],
+        }
+    )
+
+    assert invoke(client, "doctor", "-o", "json") == 0
+
+    assert json.loads(capsys.readouterr().out)["health"] == {"status": "ok"}
+
+
+def test_audit_export_is_domain_scoped(capsys):
+    client = FakeClient({("GET", "/history/"): [{"_id": "run-1"}]})
+
+    assert invoke(client, "audit", "export", "--domain", "research", "-o", "json") == 0
+
+    assert client.calls == [("GET", "/history/", None, {"domain": "research"})]
 
 
 def test_logs_prints_stdout_and_stderr(capsys):
@@ -175,3 +265,6 @@ def test_http_client_decodes_api_error(monkeypatch):
         HydraClient("https://hydra.example").request("GET", "/jobs/")
 
     assert raised.value.status == 403
+    assert raised.value.body == {"detail": "wrong domain"}
+    assert raised.value.method == "GET"
+    assert raised.value.path == "/jobs/"

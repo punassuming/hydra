@@ -1,0 +1,139 @@
+services:
+  redis:
+    image: redis:7-alpine
+    env_file:
+      - /srv/openclaw/secrets/hydra-datastore.env
+    command: ["/bin/sh", "-ec", "exec redis-server --appendonly yes --requirepass \"$$REDIS_CONTROL_PASSWORD\""]
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli --user default --pass \"$$REDIS_CONTROL_PASSWORD\" ping | grep -qx PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 128
+    security_opt: ["no-new-privileges:true"]
+    networks: [backend]
+
+  mongo:
+    # MongoDB 5+ requires AVX. Harness does not expose it, so this pilot uses
+    # the last compatible major version.
+    image: mongo:4.4
+    env_file:
+      - /srv/openclaw/secrets/hydra-datastore.env
+    command: ["mongod", "--auth", "--bind_ip_all", "--setParameter", "diagnosticDataCollectionEnabled=false"]
+    restart: unless-stopped
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD-SHELL", "mongo --quiet --username \"$$MONGO_INITDB_ROOT_USERNAME\" --password \"$$MONGO_INITDB_ROOT_PASSWORD\" --authenticationDatabase admin --eval \"db.adminCommand('ping').ok\" | grep -qx 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    mem_limit: 1g
+    cpus: 1.0
+    pids_limit: 256
+    security_opt: ["no-new-privileges:true"]
+    networks: [backend]
+
+  scheduler:
+    image: harness-scheduler:deploy-ebb81b4
+    build:
+      context: ../../..
+      dockerfile: scheduler/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - /srv/openclaw/secrets/hydra-scheduler.env
+      - /srv/openclaw/secrets/hydra-datastore.env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      REDIS_USERNAME: default
+      MONGO_DB: hydra_jobs
+      SCHEDULER_HEARTBEAT_TTL: "10"
+    depends_on:
+      redis:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+    ports:
+      - "10.10.40.40:8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; raise SystemExit(0 if urllib.request.urlopen('http://localhost:8000/health', timeout=3).status == 200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      start_period: 20s
+      retries: 6
+    mem_limit: 768m
+    cpus: 1.0
+    pids_limit: 256
+    security_opt: ["no-new-privileges:true"]
+    networks: [backend, frontend]
+
+  ui:
+    image: harness-ui:deploy-ebb81b4
+    build:
+      context: ../../../ui
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: http://10.10.40.40:8000
+    restart: unless-stopped
+    environment:
+      HYDRA_API_BASE_URL: http://10.10.40.40:8000
+    depends_on:
+      scheduler:
+        condition: service_healthy
+    ports:
+      - "10.10.40.40:5173:80"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:80/"]
+      interval: 10s
+      timeout: 5s
+      start_period: 10s
+      retries: 6
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 128
+    security_opt: ["no-new-privileges:true"]
+    networks: [frontend]
+
+  worker:
+    image: harness-worker:deploy-ebb81b4
+    build:
+      context: ../../..
+      dockerfile: worker/Dockerfile
+    restart: unless-stopped
+    user: "10001:10001"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=256m
+    env_file:
+      - /srv/openclaw/secrets/hydra-worker.env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      WORKER_REQUIRE_REDIS_ACL: "true"
+      MAX_CONCURRENCY: "1"
+      WORKER_ID: hydra-harness-pilot-01
+    depends_on:
+      scheduler:
+        condition: service_healthy
+    mem_limit: 768m
+    cpus: 1.0
+    pids_limit: 256
+    security_opt: ["no-new-privileges:true"]
+    networks: [backend]
+
+networks:
+  backend:
+    name: hydra-pilot-private
+    internal: true
+  frontend:
+    name: hydra-pilot-frontend
+
+volumes:
+  redis-data:
+    name: hydra-pilot-redis-data
+  mongo-data:
+    name: hydra-pilot-mongo-data

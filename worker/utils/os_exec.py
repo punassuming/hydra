@@ -16,14 +16,20 @@ def _merged_env(extra: Optional[Dict[str, str]]) -> Dict[str, str]:
 
 
 def _run(cmd: Sequence[str], timeout: Optional[int], env: Optional[Dict[str, str]], workdir: Optional[str]):
-    proc = subprocess.run(
-        list(cmd),
-        capture_output=True,
-        text=True,
-        timeout=timeout if timeout and timeout > 0 else None,
-        cwd=workdir,
-        env=_merged_env(env),
-    )
+    try:
+        proc = subprocess.run(
+            list(cmd),
+            capture_output=True,
+            text=True,
+            timeout=timeout if timeout and timeout > 0 else None,
+            cwd=workdir,
+            env=_merged_env(env),
+        )
+    except subprocess.TimeoutExpired as exc:
+        # Preserve a portable, explicit timeout result for the worker's run
+        # lifecycle instead of leaking an exception or treating SIGKILL as an
+        # ordinary failed command.
+        return 124, exc.stdout or "", exc.stderr or ""
     return proc.returncode, proc.stdout, proc.stderr
 
 
@@ -85,15 +91,17 @@ def _run_with_callbacks(
         t_kill = threading.Thread(target=_watch_kill, daemon=True)
         t_kill.start()
 
+    timed_out = False
     try:
         proc.wait(timeout=timeout if timeout and timeout > 0 else None)
     except subprocess.TimeoutExpired:
+        timed_out = True
         proc.kill()
         proc.wait()
     for t in threads:
         t.join(timeout=1)
 
-    return proc.returncode, "".join(stdout_lines), "".join(stderr_lines)
+    return (124 if timed_out else proc.returncode), "".join(stdout_lines), "".join(stderr_lines)
 
 
 def run_command(

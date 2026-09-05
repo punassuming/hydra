@@ -196,7 +196,7 @@ class TestOrchestrationHealthEndpoint(unittest.TestCase):
         from scheduler.main import app
         os.environ.setdefault("ADMIN_TOKEN", "test_token")
         self.client = TestClient(app, raise_server_exceptions=True)
-        self.headers = {"X-Admin-Token": "test_token"}
+        self.headers = {"x-api-key": "test_token"}
 
     def _mock_redis(self, heartbeat_value):
         fake = MagicMock()
@@ -264,7 +264,7 @@ class TestHealthEndpoint(unittest.TestCase):
 
         from scheduler.main import app
         os.environ.setdefault("ADMIN_TOKEN", "test_token")
-        self.headers = {"X-Admin-Token": "test_token"}
+        self.headers = {"x-api-key": "test_token"}
         # raise_server_exceptions=False so an unhandled exception in the handler
         # comes back as a real 500 response, matching production (uvicorn) behavior,
         # instead of propagating as a Python exception in the test itself.
@@ -304,6 +304,34 @@ class TestHealthEndpoint(unittest.TestCase):
              patch("scheduler.api.health.get_db", return_value=fake_db):
             resp = self.client.get("/health", headers=self.headers)
         self.assertEqual(resp.json()["demo_mode"], True)
+
+    def test_health_honors_domain_query_for_unauthenticated_probe(self):
+        fake_redis = self._mock_redis()
+        fake_redis.scan_iter.side_effect = lambda pattern: (
+            iter(["workers:openclaw-system:worker-1"])
+            if pattern == "workers:openclaw-system:*"
+            else iter([])
+        )
+        fake_db = MagicMock()
+        with patch("scheduler.api.health.get_redis", return_value=fake_redis), \
+             patch("scheduler.api.health.get_db", return_value=fake_db):
+            resp = self.client.get("/health?domain=openclaw-system")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["workers"], 1)
+
+    def test_health_aggregates_workers_for_unauthenticated_probe(self):
+        fake_redis = self._mock_redis()
+        fake_redis.scan_iter.side_effect = lambda pattern: (
+            iter(["workers:openclaw-system:worker-1"])
+            if pattern == "workers:*:*"
+            else iter([])
+        )
+        fake_db = MagicMock()
+        with patch("scheduler.api.health.get_redis", return_value=fake_redis), \
+             patch("scheduler.api.health.get_db", return_value=fake_db):
+            resp = self.client.get("/health")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["workers"], 1)
 
     def test_health_fails_when_mongo_unreachable(self):
         """A Redis-only check would report healthy here; it must not."""

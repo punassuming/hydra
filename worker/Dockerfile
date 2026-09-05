@@ -4,6 +4,10 @@ WORKDIR /app
 
 RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
 
+# Compose runs the worker as this dedicated non-root identity.
+RUN groupadd --gid 10001 hydra \
+    && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin hydra
+
 RUN pip install --no-cache-dir uv==0.5.13
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
