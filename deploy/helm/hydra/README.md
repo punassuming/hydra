@@ -5,9 +5,12 @@ environment: Redis, MongoDB, the scheduler (FastAPI control plane), one or
 more worker "pools" (Python and/or Go workers, each independently scaled and
 placed), and the React UI.
 
-The default values reference immutable `0.1.2` images in the homelab registry.
-Build and push them from a trusted LAN workstation before installation, or
-override the repositories and use the local build/import workflow below.
+The default values reference immutable `0.1.0` images in the homelab registry
+(`registry.eieio.cc`) — the same version release-please tracks for the whole
+project (`pyproject.toml`, `ui/package.json`, this chart's `Chart.yaml`, and
+these image tags all move together on release). Build and push them from a
+trusted LAN workstation before installation, or override the repositories and
+use the local build/import workflow below.
 
 ## What gets deployed
 
@@ -36,13 +39,17 @@ Hydra's own stack).
 
 ## Building and loading images
 
-Build all four images from the repo root:
+If you'd rather not depend on `registry.eieio.cc` being reachable from your
+cluster, build all four images locally from the repo root — tagged to match
+the version release-please tracks, so the override below stays a single,
+consistent value:
 
 ```bash
-docker build -f scheduler/Dockerfile  -t hydra-scheduler:latest  .
-docker build -f worker/Dockerfile     -t hydra-worker:latest     .
-docker build -f go-worker/Dockerfile  -t hydra-go-worker:latest  go-worker
-docker build -f ui/Dockerfile         -t hydra-ui:latest         ui
+VERSION=$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')
+docker build -f scheduler/Dockerfile  -t hydra-scheduler:$VERSION  .
+docker build -f worker/Dockerfile     -t hydra-worker:$VERSION     .
+docker build -f go-worker/Dockerfile  -t hydra-go-worker:$VERSION  go-worker
+docker build -f ui/Dockerfile         -t hydra-ui:$VERSION         ui
 ```
 
 Then load them onto your cluster — the exact command depends on what you're
@@ -51,35 +58,48 @@ running:
 **k3s** (a very common home-lab choice):
 ```bash
 for img in hydra-scheduler hydra-worker hydra-go-worker hydra-ui; do
-  docker save "${img}:latest" | sudo k3s ctr images import -
+  docker save "${img}:${VERSION}" | sudo k3s ctr images import -
 done
 ```
 
 **kind:**
 ```bash
 for img in hydra-scheduler hydra-worker hydra-go-worker hydra-ui; do
-  kind load docker-image "${img}:latest"
+  kind load docker-image "${img}:${VERSION}"
 done
 ```
 
 **minikube:**
 ```bash
 for img in hydra-scheduler hydra-worker hydra-go-worker hydra-ui; do
-  minikube image load "${img}:latest"
+  minikube image load "${img}:${VERSION}"
 done
 ```
 
 **Any containerd node reachable over SSH** (generic fallback):
 ```bash
-docker save hydra-scheduler:latest | ssh <node> sudo ctr -n k8s.io images import -
+docker save "hydra-scheduler:${VERSION}" | ssh <node> sudo ctr -n k8s.io images import -
 # repeat per image/node
 ```
 
-With images loaded, `imagePullPolicy: IfNotPresent` (the chart default) means
-Kubernetes uses the locally-loaded image instead of trying to pull from a
-registry. If you *do* push to a registry (GHCR, a private registry, etc.),
-set `imagePullPolicy: Always` and each component's `image.repository`/`tag`
-to your registry path, plus `imagePullSecrets` if it's private.
+With images loaded, point the chart at your locally-built names instead of
+the registry default — `imagePullPolicy: IfNotPresent` (the chart default)
+then means Kubernetes uses the locally-loaded image instead of trying to
+pull:
+
+```bash
+helm install hydra deploy/helm/hydra -n hydra --create-namespace \
+  --set scheduler.image.repository=hydra-scheduler,scheduler.image.tag=$VERSION \
+  --set ui.image.repository=hydra-ui,ui.image.tag=$VERSION \
+  --set workers[0].image.repository=hydra-worker,workers[0].image.tag=$VERSION \
+  --set workers[1].image.repository=hydra-go-worker,workers[1].image.tag=$VERSION \
+  --set domainSeed.image.repository=hydra-scheduler,domainSeed.image.tag=$VERSION
+```
+
+If you *do* push to your own registry (GHCR, a private registry, etc.)
+instead, set `imagePullPolicy: Always` and each component's
+`image.repository`/`tag` to your registry path, plus `imagePullSecrets` if
+it's private.
 
 ## Installing
 
