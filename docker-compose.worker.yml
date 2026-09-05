@@ -4,10 +4,21 @@ services:
   #   docker compose -f docker-compose.worker.yml up -d --build --scale worker=N
   # See scripts/worker-up.sh and scripts/start-domain-workers.sh for wrappers.
   worker:
+    image: hydra-worker:${HYDRA_IMAGE_TAG:-local}
     build:
       context: .
       dockerfile: worker/Dockerfile
     restart: unless-stopped
+    # Runs as the dedicated non-root identity worker/Dockerfile creates, with
+    # a read-only root filesystem — jobs may only write under /tmp (the
+    # tmpfs below) or an explicitly configured writable path
+    # (HYDRA_TEMP_DIR). Validated against the executor types this project
+    # supports (shell/python/batch/sql/http/external/sensor).
+    user: "10001:10001"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=256m
+    security_opt: ["no-new-privileges:true"]
     env_file:
       - .env
     environment:

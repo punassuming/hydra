@@ -9,6 +9,11 @@ services:
     build:
       context: .
       dockerfile: worker/Dockerfile
+    user: "10001:10001"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=256m
+    security_opt: ["no-new-privileges:true"]
     environment:
       API_TOKEN: ci-domain-token
       DOMAIN: ci
@@ -20,3 +25,8 @@ services:
         condition: service_healthy
       scheduler:
         condition: service_healthy
+    # redis/scheduler live on the base file's internal "backend" network —
+    # this worker is introduced fresh by this overlay (docker-compose.yml
+    # has no bundled worker), so without this it falls back to Compose's
+    # separate implicit "default" network and can't reach either.
+    networks: [backend]

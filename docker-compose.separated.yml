@@ -45,3 +45,8 @@ services:
       mongo:
         condition: service_healthy
     restart: unless-stopped
+    # redis/mongo live on the base file's internal "backend" network — a
+    # service introduced here rather than overriding one already in
+    # docker-compose.yml otherwise falls back to Compose's separate implicit
+    # "default" network and can't reach either.
+    networks: [backend]

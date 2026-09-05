@@ -11,6 +11,11 @@ FROM alpine:3.20
 
 RUN apk add --no-cache ca-certificates bash git python3 openssh-client rsync
 
+# Compose runs the worker as this dedicated non-root identity — mirrors
+# worker/Dockerfile's Python worker for the same treatment on both.
+RUN addgroup -g 10001 hydra \
+    && adduser -D -H -u 10001 -G hydra -s /sbin/nologin hydra
+
 WORKDIR /app
 COPY --from=build /out/hydra-go-worker /usr/local/bin/hydra-go-worker
 

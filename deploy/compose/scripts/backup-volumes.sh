@@ -2,17 +2,22 @@
 # Create a consistent encrypted backup of the canonical Hydra Mongo/Redis volumes.
 set -euo pipefail
 
-repo=/srv/openclaw/hydra
-compose_file="$repo/deploy/compose/harness/docker-compose.yml"
-secrets=/srv/openclaw/secrets/hydra-backup.env
-destination=${1:-/srv/openclaw/backups/hydra/$(date -u +%Y%m%dT%H%M%SZ)}
+# Pick up HARNESS_* overrides from deploy/compose/.env (see .env.example)
+# without requiring every script to duplicate a parsing step.
+set -a
+[ -f "$(dirname "$0")/../.env" ] && . "$(dirname "$0")/../.env"
+set +a
+
+repo="${HARNESS_REPO_ROOT:-/srv/openclaw/hydra}"
+secrets="${HARNESS_SECRETS_DIR:-/srv/openclaw/secrets}/hydra-backup.env"
+destination=${1:-${HARNESS_BACKUP_DIR:-/srv/openclaw/backups/hydra}/$(date -u +%Y%m%dT%H%M%SZ)}
 scratch=$(mktemp -d)
 was_stopped=0
 
 cleanup() {
   rm -rf "$scratch"
   if [ "$was_stopped" = 1 ]; then
-    (cd "$repo/deploy/compose/harness" && docker compose -p hydra up -d --no-build) || true
+    (cd "$repo" && docker compose -p hydra up -d --no-build) || true
   fi
 }
 trap cleanup EXIT
@@ -28,11 +33,11 @@ install -d -m 700 "$destination"
 test -z "$(find "$destination" -mindepth 1 -maxdepth 1 -print -quit)"
 
 # Raw Mongo files are copied only while quiesced; never use down -v here.
-(cd "$repo/deploy/compose/harness" && docker compose -p hydra stop)
+(cd "$repo" && docker compose -p hydra stop)
 was_stopped=1
 
 for datastore in mongo redis; do
-  volume="hydra-pilot-${datastore}-data"
+  volume="hydra_${datastore}-data"
   docker run --rm --user 0:0 \
     -v "${volume}:/source:ro" \
     -v "${scratch}:/backup" \
@@ -50,7 +55,7 @@ done
   printf 'created_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   printf 'source_commit=%s\n' "$(git -C "$repo" rev-parse HEAD)"
   printf 'format=encrypted-raw-volume-v1\n'
-  printf 'mongo_volume=hydra-pilot-mongo-data\nredis_volume=hydra-pilot-redis-data\n'
+  printf 'mongo_volume=hydra_mongo-data\nredis_volume=hydra_redis-data\n'
 } > "${destination}/MANIFEST"
 
 echo "backup_dir=${destination}"

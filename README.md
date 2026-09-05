@@ -81,8 +81,11 @@ ADMIN_TOKEN=my_secret docker compose up --build
 |---|---|
 | UI | http://localhost:5173 |
 | Scheduler API | http://localhost:8000 |
-| Redis | localhost:6379 |
-| MongoDB | localhost:27017 |
+
+Redis and MongoDB aren't published to the host — they're only reachable from
+the scheduler/worker containers, on an internal-only network. Use
+`docker compose exec redis redis-cli` / `docker compose exec mongo mongo` to
+poke at them directly.
 
 > Set `GEMINI_API_KEY` or `OPENAI_API_KEY` to enable AI features.
 
@@ -125,6 +128,18 @@ docker compose -f docker-compose.yml -f docker-compose.separated.yml up --build
 
 Redis and MongoDB both persist to named volumes (`redis-data`, `mongo-data`)
 by default — `docker compose down -v` to wipe them.
+
+**Hardening, opt-in**: the bundled Redis/MongoDB run without auth by
+default (matching the Quick Start above) — set `SCHEDULER_REDIS_PASSWORD`
+and/or `MONGO_INITDB_ROOT_USERNAME`/`MONGO_INITDB_ROOT_PASSWORD` in `.env`
+to require it (see `.env.example`). The scheduler/UI and Redis/Mongo/worker
+containers are split across two Docker networks — Redis/Mongo/worker have
+no path to the internet or the host, only to each other and the scheduler.
+Workers (`docker-compose.worker.yml` and friends) run as a dedicated
+non-root user with a read-only root filesystem (writes only under `/tmp` or
+`HYDRA_TEMP_DIR`). For backup/restore, live-deployment verification, and
+worker-boundary checks beyond what compose itself provides, see
+[`deploy/compose/README.md`](deploy/compose/README.md).
 
 ---
 

@@ -9,6 +9,15 @@ services:
       context: ./go-worker
       dockerfile: Dockerfile
     restart: unless-stopped
+    # Runs as the dedicated non-root identity go-worker/Dockerfile creates,
+    # with a read-only root filesystem — jobs may only write under /tmp (the
+    # tmpfs below) or an explicitly configured writable path
+    # (HYDRA_TEMP_DIR).
+    user: "10001:10001"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=256m
+    security_opt: ["no-new-privileges:true"]
     env_file:
       - .env
     environment:

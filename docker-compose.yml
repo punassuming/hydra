@@ -2,39 +2,78 @@ services:
   # Bundled Redis. Set REDIS_URL below to point the scheduler/workers at an
   # external Redis instead and this service simply goes unused — run
   # `docker compose up --no-deps scheduler ui` to skip starting it at all.
+  #
+  # Auth is opt-in: leave SCHEDULER_REDIS_PASSWORD unset for a zero-config
+  # local run (matches this file's long-standing default), or set it in
+  # .env to require authentication — the scheduler already reads the same
+  # variable for its own connection, so setting it here is the only step.
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes"]
-    ports:
-      - "${REDIS_PORT:-6379}:6379"
+    # A plain string (not a /bin/sh -c wrapper) so Compose does its own
+    # shell-like splitting at config time — argv[0] stays "redis-server",
+    # which the official image's entrypoint specifically checks for before
+    # dropping privileges to the redis user. A /bin/sh -c wrapper would make
+    # argv[0] "/bin/sh" instead and silently skip that privilege drop.
+    command: redis-server --appendonly yes ${SCHEDULER_REDIS_PASSWORD:+--requirepass "$SCHEDULER_REDIS_PASSWORD"}
+    environment:
+      # Only for the healthcheck below to see at runtime — the command
+      # above is resolved by Compose itself, before the container starts.
+      - SCHEDULER_REDIS_PASSWORD=${SCHEDULER_REDIS_PASSWORD:-}
     volumes:
       - redis-data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: >
+        if [ -n "$$SCHEDULER_REDIS_PASSWORD" ]; then
+          redis-cli -a "$$SCHEDULER_REDIS_PASSWORD" --no-auth-warning ping | grep -qx PONG;
+        else
+          redis-cli ping | grep -qx PONG;
+        fi
       interval: 5s
       timeout: 3s
       retries: 10
+    security_opt: ["no-new-privileges:true"]
+    networks: [backend]
 
   # Bundled MongoDB. Set MONGO_URL below to point at an external instance
   # instead (managed Atlas, a shared cluster, etc.) and skip this service the
   # same way as redis above.
+  #
+  # mongo:4.4 (not a newer major) for broader hardware compatibility — 5.x+
+  # requires an AVX-capable CPU, which not every home-lab box has. Auth is
+  # opt-in, same pattern as redis: set MONGO_INITDB_ROOT_USERNAME/PASSWORD in
+  # .env to require it (and update MONGO_URL below to include them), leave
+  # unset for a zero-config local run.
   mongo:
-    # mongo:6 requires AVX; use 5.x for broader CPU support
-    image: mongo:6.0
+    image: mongo:4.4
     restart: unless-stopped
+    # A plain, static list — argv[0] stays "mongod", which the official
+    # image's entrypoint checks for before running its own init logic. That
+    # logic already auto-adds --auth and creates the root user itself when
+    # MONGO_INITDB_ROOT_USERNAME/PASSWORD are both set (nothing for us to
+    # add here); a /bin/sh -c wrapper would make argv[0] "/bin/sh" instead
+    # and silently skip all of that, including on the auth-enabled path.
     command: ["mongod", "--bind_ip_all", "--setParameter", "diagnosticDataCollectionEnabled=false"]
-    ports:
-      - "${MONGO_PORT:-27017}:27017"
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=${MONGO_INITDB_ROOT_USERNAME:-}
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_INITDB_ROOT_PASSWORD:-}
     volumes:
       - mongo-data:/data/db
     healthcheck:
-      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      test: >
+        if [ -n "$$MONGO_INITDB_ROOT_PASSWORD" ]; then
+          mongo --quiet --username "$$MONGO_INITDB_ROOT_USERNAME" --password "$$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin --eval "db.adminCommand('ping').ok" | grep -qx 1;
+        else
+          mongo --quiet --eval "db.adminCommand('ping').ok" | grep -qx 1;
+        fi
       interval: 10s
       timeout: 5s
       retries: 10
+    security_opt: ["no-new-privileges:true"]
+    networks: [backend]
 
   scheduler:
+    image: hydra-scheduler:${HYDRA_IMAGE_TAG:-local}
     build:
       context: .
       dockerfile: scheduler/Dockerfile
@@ -46,11 +85,14 @@ services:
       # containers entirely (see the comments on those services above).
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - REDIS_PASSWORD=${SCHEDULER_REDIS_PASSWORD:-}
+      # If you set Mongo auth above, update this to include credentials,
+      # e.g. mongodb://<user>:<pass>@mongo:27017/?authSource=admin.
       - MONGO_URL=${MONGO_URL:-mongodb://mongo:27017}
       - MONGO_DB=${MONGO_DB:-hydra_jobs}
       - SCHEDULER_HEARTBEAT_TTL=${SCHEDULER_HEARTBEAT_TTL:-10}
-      # Thread the API_TOKEN through as the seed token so the bundled worker
-      # can connect on first boot without any extra provisioning steps.
+      # Thread the API_TOKEN through as the seed token so a worker started
+      # via docker-compose.worker.yml (or one of its variants) can connect
+      # on first boot without any extra provisioning steps.
       - SEED_DOMAIN=${SEED_DOMAIN:-prod}
       - SEED_DOMAIN_TOKEN=${API_TOKEN:-}
       - SEED_DOMAIN_REDIS_PASSWORD=${REDIS_PASSWORD:-}
@@ -64,9 +106,18 @@ services:
       mongo:
         condition: service_healthy
     ports:
-      - "${SCHEDULER_PORT:-8000}:8000"
+      - "${BIND_IP:-0.0.0.0}:${SCHEDULER_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; raise SystemExit(0 if urllib.request.urlopen('http://localhost:8000/health', timeout=3).status == 200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      start_period: 20s
+      retries: 6
+    security_opt: ["no-new-privileges:true"]
+    networks: [backend, frontend]
 
   ui:
+    image: hydra-ui:${HYDRA_IMAGE_TAG:-local}
     build:
       context: ./ui
       dockerfile: Dockerfile
@@ -85,7 +136,25 @@ services:
       scheduler:
         condition: service_healthy
     ports:
-      - "${UI_PORT:-5173}:80"
+      - "${BIND_IP:-0.0.0.0}:${UI_PORT:-5173}:8080"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8080/"]
+      interval: 10s
+      timeout: 5s
+      start_period: 10s
+      retries: 6
+    security_opt: ["no-new-privileges:true"]
+    networks: [frontend]
+
+networks:
+  # Redis/Mongo (and the scheduler, which needs to reach them) live on
+  # backend, an internal-only network unreachable from outside the compose
+  # project — nothing publishes their ports to the host. Scheduler/UI also
+  # join frontend so their published ports remain reachable. A worker
+  # (docker-compose.worker.yml or a workers.yml pool) joins backend too.
+  backend:
+    internal: true
+  frontend:
 
 volumes:
   redis-data:
