@@ -37,9 +37,10 @@ def worker_acl_key_patterns(domain: str) -> list[str]:
 
 
 def worker_acl_channel_patterns(domain: str) -> list[str]:
-    # Workers listen for cancellation notifications on this channel.  Log
-    # streaming is served by the scheduler and is not a worker concern.
-    return [f"&job_kill:{domain}"]
+    # Workers publish live log chunks on log_stream:<domain>:<run_id> (see
+    # worker.py's stream_log()) and subscribe to job_kill:<domain> for
+    # cancellation notifications — both need explicit channel ACL grants.
+    return [f"&log_stream:{domain}:*", f"&job_kill:{domain}"]
 
 
 def worker_acl_commands() -> list[str]:

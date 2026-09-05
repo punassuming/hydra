@@ -9,5 +9,5 @@ def test_worker_acl_allows_heartbeat_registration_and_kill_listener():
     assert "+hexists" in commands
     assert "+subscribe" in commands
 
-    assert worker_acl_channel_patterns("prod") == ["&job_kill:prod"]
+    assert worker_acl_channel_patterns("prod") == ["&log_stream:prod:*", "&job_kill:prod"]
 
