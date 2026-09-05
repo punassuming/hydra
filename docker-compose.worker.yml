@@ -48,3 +48,16 @@ services:
       - HYDRA_SHELL_PATH=${HYDRA_SHELL_PATH:-}
       - HYDRA_GIT_PATH=${HYDRA_GIT_PATH:-}
       - HYDRA_TEMP_DIR=${HYDRA_TEMP_DIR:-}
+    # Plain (non-internal) declaration on its own — but when this file is
+    # combined with docker-compose.yml (`-f docker-compose.yml -f
+    # docker-compose.worker.yml`, the documented "bundled" usage), Compose
+    # merges this with that file's `internal: true` backend network rather
+    # than replacing it, so the worker joins the SAME internal network as
+    # the bundled redis/mongo/scheduler and "redis://redis:6379/0" resolves.
+    # Run standalone against a remote Redis, this network is just an empty,
+    # non-internal one the worker sits on alone — outbound access is
+    # unaffected, so a remote REDIS_URL still works.
+    networks: [backend]
+
+networks:
+  backend: {}
