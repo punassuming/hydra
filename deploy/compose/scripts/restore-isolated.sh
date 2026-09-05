@@ -65,14 +65,14 @@ docker run -d --name "$redis_container" --network "$network" -e "SCHEDULER_REDIS
 
 for _ in $(seq 1 30); do
   if printf '%s\n%s\n' "$MONGO_APP_USERNAME" "$MONGO_APP_PASSWORD" | docker exec -i "$mongo_container" sh -ec \
-    'read -r user; read -r pass; mongo --quiet --username "$user" --password "$pass" --authenticationDatabase hydra_jobs hydra_jobs --eval "db.runCommand({ping:1}).ok"' 2>/dev/null | grep -qx 1; then
+    'read -r user; read -r pass; mongosh --quiet --username "$user" --password "$pass" --authenticationDatabase hydra_jobs hydra_jobs --eval "db.runCommand({ping:1}).ok"' 2>/dev/null | grep -qx 1; then
     break
   fi
   sleep 1
 done
 printf '%s\n%s\n' "$MONGO_APP_USERNAME" "$MONGO_APP_PASSWORD" | docker exec -i "$mongo_container" sh -ec \
-  'read -r user; read -r pass; mongo --quiet --username "$user" --password "$pass" --authenticationDatabase hydra_jobs hydra_jobs --eval "db.runCommand({ping:1}).ok"' | grep -qx 1
-mongo_unauth=$(docker exec "$mongo_container" mongo --quiet --eval 'db.getSiblingDB("hydra_jobs").stats()' 2>&1 || true)
+  'read -r user; read -r pass; mongosh --quiet --username "$user" --password "$pass" --authenticationDatabase hydra_jobs hydra_jobs --eval "db.runCommand({ping:1}).ok"' | grep -qx 1
+mongo_unauth=$(docker exec "$mongo_container" mongosh --quiet --eval 'db.getSiblingDB("hydra_jobs").stats()' 2>&1 || true)
 case "$mongo_unauth" in *Unauthorized*|*not\ authorized*) ;; *) echo 'isolated Mongo did not fail closed' >&2; exit 1;; esac
 printf '%s\n' "$SCHEDULER_REDIS_PASSWORD" | docker exec -i "$redis_container" sh -ec \
   'read -r pass; REDISCLI_AUTH="$pass" redis-cli --user default ping' | grep -qx PONG

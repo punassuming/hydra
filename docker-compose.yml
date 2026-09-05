@@ -66,11 +66,15 @@ services:
     volumes:
       - mongo-data:/data/db
     healthcheck:
+      # mongo:6.0's image bundles mongosh, not the legacy `mongo` shell
+      # (dropped as of Mongo 6) — using `mongo` here would fail every
+      # attempt with "command not found" and eventually report unhealthy
+      # even though mongod itself started up fine.
       test: >
         if [ -n "$$MONGO_INITDB_ROOT_PASSWORD" ]; then
-          mongo --quiet --username "$$MONGO_INITDB_ROOT_USERNAME" --password "$$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin --eval "db.adminCommand('ping').ok" | grep -qx 1;
+          mongosh --quiet --username "$$MONGO_INITDB_ROOT_USERNAME" --password "$$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin --eval "db.adminCommand('ping').ok" | grep -qx 1;
         else
-          mongo --quiet --eval "db.adminCommand('ping').ok" | grep -qx 1;
+          mongosh --quiet --eval "db.adminCommand('ping').ok" | grep -qx 1;
         fi
       interval: 10s
       timeout: 5s
