@@ -68,7 +68,13 @@ def _running(client: HydraClient, job_id: str, timeout: float = 20) -> dict[str,
 
 
 def _job(name: str, script: str, *, timeout: int, retries: int | None = None) -> dict[str, Any]:
-    value = {"name": name, "user": "acceptance", "executor": {"type": "shell", "shell": "bash", "script": script}, "schedule": {"mode": "immediate", "enabled": False}, "timeout": timeout}
+    value = {
+        "name": name,
+        "user": "acceptance",
+        "executor": {"type": "shell", "shell": "bash", "script": script},
+        "schedule": {"mode": "immediate", "enabled": False},
+        "timeout": timeout,
+    }
     if retries is not None:
         value["max_retries"] = retries
     return value

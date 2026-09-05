@@ -2,8 +2,9 @@
 
 from typing import Any
 
-from cli._client import APIError as HydraError
+from cli._client import APIError as HydraError  # noqa: F401 - re-exported via __init__.py
 from cli._client import HydraClient as _HydraClient
+
 
 class HydraClient(_HydraClient):
     """API client whose token and domain are fixed for its entire lifetime."""

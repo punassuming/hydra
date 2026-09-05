@@ -92,7 +92,9 @@ def build_parser() -> argparse.ArgumentParser:
     state.add_argument("state", choices=("online", "draining", "offline"))
     detach = worker_commands.add_parser("detach", parents=[output_parent], help="Detach a worker")
     detach.add_argument("worker_id")
-    drain = worker_commands.add_parser("drain", parents=[output_parent], help="Drain a worker and optionally wait for active jobs")
+    drain = worker_commands.add_parser(
+        "drain", parents=[output_parent], help="Drain a worker and optionally wait for active jobs"
+    )
     drain.add_argument("worker_id")
     drain.add_argument("--wait", action="store_true")
     drain.add_argument("--wait-timeout", type=float, default=60)
@@ -104,7 +106,7 @@ def build_parser() -> argparse.ArgumentParser:
     token_commands = token.add_subparsers(dest="token_command", required=True)
     token_commands.add_parser("rotate", parents=[output_parent], help="Rotate the current domain token")
 
-    doctor = commands.add_parser("doctor", parents=[output_parent], help="Read-only API, queue, and worker diagnostic report")
+    commands.add_parser("doctor", parents=[output_parent], help="Read-only API, queue, and worker diagnostic report")
 
     watch = commands.add_parser("watch", parents=[output_parent], help="Show repeated read-only job, run, worker, or queue state")
     watch.add_argument("resource", choices=("run", "worker", "queue", "health"))
