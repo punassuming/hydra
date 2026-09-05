@@ -39,13 +39,19 @@ services:
   # instead (managed Atlas, a shared cluster, etc.) and skip this service the
   # same way as redis above.
   #
-  # mongo:4.4 (not a newer major) for broader hardware compatibility — 5.x+
-  # requires an AVX-capable CPU, which not every home-lab box has. Auth is
-  # opt-in, same pattern as redis: set MONGO_INITDB_ROOT_USERNAME/PASSWORD in
-  # .env to require it (and update MONGO_URL below to include them), leave
-  # unset for a zero-config local run.
+  # Stays on mongo:6.0 (requires an AVX-capable CPU — not every home-lab box
+  # has one, but that's a pre-existing constraint of this file, not a new
+  # one). Do NOT drop this to an older major to dodge the AVX requirement on
+  # an existing deployment: Mongo doesn't support starting an older binary
+  # against a newer version's on-disk data — that's a downgrade requiring an
+  # explicit dump/restore migration, not just an image tag change, and doing
+  # it in place here would leave an existing mongo-data volume unable to
+  # start at all. Auth is opt-in, same pattern as redis: set
+  # MONGO_INITDB_ROOT_USERNAME/PASSWORD in .env to require it (and update
+  # MONGO_URL below to include them), leave unset for a zero-config local
+  # run.
   mongo:
-    image: mongo:4.4
+    image: mongo:6.0
     restart: unless-stopped
     # A plain, static list — argv[0] stays "mongod", which the official
     # image's entrypoint checks for before running its own init logic. That

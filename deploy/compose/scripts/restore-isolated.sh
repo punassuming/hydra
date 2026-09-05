@@ -58,7 +58,7 @@ for datastore in mongo redis; do
     sh -ec "cd /target && tar -xf /backup/${datastore}.tar"
 done
 docker network create --internal "$network" >/dev/null
-docker run -d --name "$mongo_container" --network "$network" -v "${mongo_volume}:/data/db" mongo:4.4 \
+docker run -d --name "$mongo_container" --network "$network" -v "${mongo_volume}:/data/db" mongo:6.0 \
   mongod --auth --bind_ip_all --setParameter diagnosticDataCollectionEnabled=false >/dev/null
 docker run -d --name "$redis_container" --network "$network" -e "SCHEDULER_REDIS_PASSWORD=$SCHEDULER_REDIS_PASSWORD" -v "${redis_volume}:/data" redis:7-alpine \
   sh -ec 'exec redis-server --appendonly yes --requirepass "$SCHEDULER_REDIS_PASSWORD"' >/dev/null
