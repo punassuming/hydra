@@ -16,4 +16,4 @@ set -a
 . "$env_file"
 set +a
 exec env HYDRA_API_URL="${HYDRA_API_URL:-http://${HARNESS_HOST_IP:-127.0.0.1}:${HARNESS_API_PORT:-8000}}" \
-  "$repo/.venv/bin/python" "$repo/integrations/openclaw/live_acceptance.py"
+  "$repo/.venv/bin/python" "$repo/integrations/external_client/live_acceptance.py"

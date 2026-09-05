@@ -1,4 +1,4 @@
-from integrations.openclaw.client import HydraClient
+from integrations.external_client.client import HydraClient
 
 
 def test_client_keeps_domain_and_token_on_every_lifecycle_request(monkeypatch):

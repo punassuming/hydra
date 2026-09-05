@@ -19,7 +19,7 @@ from typing import Any
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from integrations.openclaw.client import HydraClient, HydraError
+from integrations.external_client.client import HydraClient, HydraError
 
 
 def _id(value: dict[str, Any]) -> str:
