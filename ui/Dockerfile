@@ -16,7 +16,14 @@ USER root
 COPY --chown=101:101 --from=build /app/dist /usr/share/nginx/html
 COPY --chown=101:101 nginx.conf /etc/nginx/conf.d/default.conf
 COPY --chown=101:101 docker-entrypoint.sh /docker-entrypoint.sh
-RUN sed -i 's/\r$//' /docker-entrypoint.sh && chmod +x /docker-entrypoint.sh
+# COPY --chown only sets ownership on the copied *contents* (dist/'s files),
+# not on /usr/share/nginx/html itself, which already existed in the base
+# image (owned by root there) — docker-entrypoint.sh writes a new file
+# (runtime-config.js) directly into this directory at container start,
+# which needs write permission on the directory, not just its files. Without
+# this, UID 101 can't create that file and the container never starts.
+RUN sed -i 's/\r$//' /docker-entrypoint.sh && chmod +x /docker-entrypoint.sh \
+    && chown 101:101 /usr/share/nginx/html
 USER 101
 EXPOSE 8080
 
