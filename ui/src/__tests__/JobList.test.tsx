@@ -62,19 +62,26 @@ describe("JobList", () => {
     );
   });
 
-  it("calls onDelete only after confirmation", async () => {
-    const onDelete = vi.fn();
-    renderWithProviders(<JobList jobs={[jobs[0]]} onSelect={vi.fn()} onDelete={onDelete} />);
-    const user = userEvent.setup();
+  it(
+    "calls onDelete only after confirmation",
+    async () => {
+      const onDelete = vi.fn();
+      renderWithProviders(<JobList jobs={[jobs[0]]} onSelect={vi.fn()} onDelete={onDelete} />);
+      const user = userEvent.setup();
 
-    await user.click(screen.getByRole("button", { name: /delete/i }));
-    expect(onDelete).not.toHaveBeenCalled();
+      await user.click(screen.getByRole("button", { name: /delete/i }));
+      expect(onDelete).not.toHaveBeenCalled();
 
-    await user.click(await screen.findByRole("button", { name: /^Delete$/ }));
-    await waitFor(() =>
-      expect(onDelete).toHaveBeenCalledWith(expect.objectContaining({ _id: "job-1" })),
-    );
-  });
+      await user.click(await screen.findByRole("button", { name: /^Delete$/ }));
+      await waitFor(() =>
+        expect(onDelete).toHaveBeenCalledWith(expect.objectContaining({ _id: "job-1" })),
+      );
+    },
+    // AntD's Popconfirm portal mount is slower than the 5s default under
+    // the current vitest/jsdom stack — not a hang, just tight (passes
+    // comfortably around 7s locally).
+    15000,
+  );
 
   it("shows a bulk action bar after selecting rows and invokes bulk handlers", async () => {
     const onBulkPause = vi.fn();
