@@ -174,6 +174,26 @@ def test_audit_export_is_domain_scoped(capsys):
     assert client.calls == [("GET", "/history/", None, {"domain": "research"})]
 
 
+def test_audit_export_falls_back_to_the_global_domain_flag(capsys):
+    # A real bug: "audit export"'s own --domain shares an argparse dest with
+    # the top-level --domain unless given a distinct one, so parsing
+    # "export" (which the user didn't pass --domain to) would silently
+    # overwrite an already-parsed top-level value with None.
+    client = FakeClient({("GET", "/history/"): [{"_id": "run-1"}]})
+
+    assert invoke(client, "--domain", "research", "audit", "export", "-o", "json") == 0
+
+    assert client.calls == [("GET", "/history/", None, {"domain": "research"})]
+
+
+def test_audit_export_domain_overrides_the_global_domain_flag(capsys):
+    client = FakeClient({("GET", "/history/"): [{"_id": "run-1"}]})
+
+    assert invoke(client, "--domain", "prod", "audit", "export", "--domain", "research", "-o", "json") == 0
+
+    assert client.calls == [("GET", "/history/", None, {"domain": "research"})]
+
+
 def test_logs_prints_stdout_and_stderr(capsys):
     client = FakeClient({("GET", "/runs/run-1"): {"stdout": "done\n", "stderr": "warning\n"}})
 

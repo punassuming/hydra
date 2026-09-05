@@ -117,7 +117,13 @@ def build_parser() -> argparse.ArgumentParser:
     audit = commands.add_parser("audit", parents=[output_parent], help="Export domain-scoped run history")
     audit_commands = audit.add_subparsers(dest="audit_command", required=True)
     export = audit_commands.add_parser("export", parents=[output_parent], help="Write the API-visible run history")
-    export.add_argument("--domain", help="Admin-only domain filter")
+    # A distinct dest from the top-level --domain (shared by client_factory
+    # below): argparse applies a subparser argument's own default even when
+    # the user didn't pass it on that subcommand, so reusing "domain" here
+    # would silently overwrite an already-parsed top-level --domain with
+    # None the moment `audit export` runs, regardless of what came before it
+    # on the command line.
+    export.add_argument("--domain", dest="audit_domain", default=None, help="Admin-only domain filter (defaults to --domain)")
     return parser
 
 
@@ -181,7 +187,8 @@ def main(argv: list[str] | None = None, client_factory: type[HydraClient] = Hydr
         elif args.command == "watch":
             _watch(client, args)
         elif args.command == "audit":
-            _show(client.request("GET", "/history/", query={"domain": args.domain}), args.output)
+            domain = args.audit_domain if args.audit_domain is not None else args.domain
+            _show(client.request("GET", "/history/", query={"domain": domain}), args.output)
         return 0
     except (APIError, OSError, ValueError, yaml.YAMLError) as exc:
         write_error(str(exc))
