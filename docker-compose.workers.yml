@@ -19,11 +19,14 @@ x-worker-python-base: &worker-python-base
   build:
     context: .
     dockerfile: worker/Dockerfile
+    args:
+      HYDRA_WORKER_UID: ${HYDRA_WORKER_UID:-10001}
+      HYDRA_WORKER_GID: ${HYDRA_WORKER_GID:-10001}
   restart: unless-stopped
   # Runs as the dedicated non-root identity worker/Dockerfile creates, with a
   # read-only root filesystem — jobs may only write under /tmp (the tmpfs
   # below) or an explicitly configured writable path (HYDRA_TEMP_DIR).
-  user: "10001:10001"
+  user: "${HYDRA_WORKER_UID:-10001}:${HYDRA_WORKER_GID:-10001}"
   read_only: true
   tmpfs:
     - /tmp:rw,noexec,nosuid,size=256m
@@ -43,8 +46,11 @@ x-worker-go-base: &worker-go-base
   build:
     context: ./go-worker
     dockerfile: Dockerfile
+    args:
+      HYDRA_WORKER_UID: ${HYDRA_WORKER_UID:-10001}
+      HYDRA_WORKER_GID: ${HYDRA_WORKER_GID:-10001}
   restart: unless-stopped
-  user: "10001:10001"
+  user: "${HYDRA_WORKER_UID:-10001}:${HYDRA_WORKER_GID:-10001}"
   read_only: true
   tmpfs:
     - /tmp:rw,noexec,nosuid,size=256m

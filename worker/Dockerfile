@@ -4,9 +4,14 @@ WORKDIR /app
 
 RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
 
-# Compose runs the worker as this dedicated non-root identity.
-RUN groupadd --gid 10001 hydra \
-    && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin hydra
+# Compose runs the worker as this dedicated non-root identity. Override at
+# build time (--build-arg) if these need to change; docker-compose.yml's
+# HYDRA_WORKER_UID/GID (see .env.example) pass the same values through so
+# the build and the compose `user:` field stay in sync from one source.
+ARG HYDRA_WORKER_UID=10001
+ARG HYDRA_WORKER_GID=10001
+RUN groupadd --gid "${HYDRA_WORKER_GID}" hydra \
+    && useradd --uid "${HYDRA_WORKER_UID}" --gid "${HYDRA_WORKER_GID}" --no-create-home --shell /usr/sbin/nologin hydra
 
 RUN pip install --no-cache-dir uv==0.5.13
 COPY pyproject.toml uv.lock ./

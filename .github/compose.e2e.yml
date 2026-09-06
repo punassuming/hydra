@@ -9,7 +9,10 @@ services:
     build:
       context: .
       dockerfile: worker/Dockerfile
-    user: "10001:10001"
+      args:
+        HYDRA_WORKER_UID: ${HYDRA_WORKER_UID:-10001}
+        HYDRA_WORKER_GID: ${HYDRA_WORKER_GID:-10001}
+    user: "${HYDRA_WORKER_UID:-10001}:${HYDRA_WORKER_GID:-10001}"
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=256m
