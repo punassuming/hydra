@@ -440,8 +440,12 @@ def detach_worker(worker_id: str, request: Request):
 def worker_operations(worker_id: str, request: Request):
     r = get_redis()
     domain, _key, _data = _resolve_worker_key(request, worker_id)
-    limit = max(20, min(int(request.query_params.get("limit", "200")), 1000))
-    raw_events = r.lrange(f"worker_ops:{domain}:{worker_id}", -limit, -1) or []
+    try:
+        limit = max(1, min(int(request.query_params.get("limit", "50")), 200))
+        before_ts = float(request.query_params["before_ts"]) if request.query_params.get("before_ts") else None
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="limit and before_ts must be numeric") from exc
+    raw_events = r.lrange(f"worker_ops:{domain}:{worker_id}", 0, -1) or []
     events = []
     for raw in raw_events:
         try:
@@ -449,4 +453,14 @@ def worker_operations(worker_id: str, request: Request):
         except Exception:
             continue
     events.sort(key=lambda e: float(e.get("ts") or 0), reverse=True)
-    return {"worker_id": worker_id, "domain": domain, "events": events}
+    if before_ts is not None:
+        events = [event for event in events if float(event.get("ts") or 0) < before_ts]
+    has_more = len(events) > limit
+    events = events[:limit]
+    return {
+        "worker_id": worker_id,
+        "domain": domain,
+        "events": events,
+        "next_before_ts": events[-1].get("ts") if has_more and events else None,
+        "has_more": has_more,
+    }

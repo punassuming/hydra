@@ -12,7 +12,7 @@ export function HistoryPage() {
   const { domain } = useActiveDomain();
   const { data, isLoading } = useQuery({
     queryKey: ["history", domain],
-    queryFn: fetchHistory,
+    queryFn: () => fetchHistory(),
     refetchInterval: 5000,
   });
   const [logModal, setLogModal] = useState<{ visible: boolean; run?: JobRun }>({ visible: false });
@@ -49,7 +49,7 @@ export function HistoryPage() {
     },
   ];
 
-  const runs = (data ?? []).map((run) => ({ ...run, key: run._id }));
+  const runs = (data?.items ?? []).map((run) => ({ ...run, key: run._id }));
 
   return (
     <Card

@@ -25,12 +25,12 @@ export function JobsDashboard() {
 
   const historyQuery = useQuery({
     queryKey: ["history", domain],
-    queryFn: fetchHistory,
+    queryFn: () => fetchHistory(),
     refetchInterval: 5000,
   });
 
   const overview = overviewQuery.data ?? [];
-  const history = historyQuery.data ?? [];
+  const history = historyQuery.data?.items ?? [];
 
   // Calculate metrics
   const totalJobs = overview.length;

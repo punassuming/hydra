@@ -453,6 +453,22 @@ def backfill_job(job_id: str, body: BackfillRequest, request: Request):
     }
 
 
+@router.get("/runs/{run_id}")
+def get_run(run_id: str, request: Request):
+    """Return one run for the shared UI run inspector."""
+    db = get_db()
+    domain = getattr(request.state, "domain", "prod")
+    is_admin = getattr(request.state, "is_admin", False)
+    query = {"_id": run_id}
+    if not is_admin:
+        query["domain"] = domain
+    doc = db.job_runs.find_one(query)
+    if not doc:
+        raise HTTPException(status_code=404, detail="run not found")
+    doc["_id"] = str(doc["_id"])
+    return doc
+
+
 @router.post("/runs/{run_id}/kill")
 def kill_run(run_id: str, request: Request):
     """Send a kill signal to a currently running job identified by its run_id."""

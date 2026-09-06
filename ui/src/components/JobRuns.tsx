@@ -1,14 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
-import { Table, Modal, Typography, Space, Divider, Button } from "antd";
+import { Table, Typography, Space, Button } from "antd";
 import { JobRun } from "../types";
 import { fetchJobRuns } from "../api/jobs";
-import { useEffect, useState } from "react";
-import { runStreamUrl } from "../api/client";
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useActiveDomain } from "../context/ActiveDomainContext";
 import { StatusBadge } from "./StatusBadge";
-import { LogViewer } from "./LogViewer";
-import { FailureInsight } from "./FailureInsight";
+import { RunInspector } from "./RunInspector";
 
 interface Props {
   jobId?: string | null;
@@ -28,45 +26,6 @@ export function JobRuns({ jobId, runs: providedRuns, loading, onKillRun }: Props
     refetchInterval: shouldQuery ? 5000 : false,
   });
   const [logModal, setLogModal] = useState<{ visible: boolean; run?: JobRun }>({ visible: false });
-  const [liveLogs, setLiveLogs] = useState<{ stdout: string; stderr: string }>({ stdout: "", stderr: "" });
-  const [source, setSource] = useState<EventSource | null>(null);
-
-  useEffect(() => {
-    if (!logModal.visible || !logModal.run) {
-      source?.close();
-      setSource(null);
-      return;
-    }
-    const baseStdout = logModal.run.stdout_tail ?? logModal.run.stdout ?? "";
-    const baseStderr = logModal.run.stderr_tail ?? logModal.run.stderr ?? "";
-    setLiveLogs({ stdout: baseStdout, stderr: baseStderr });
-
-    if (logModal.run.status !== "running") {
-      return;
-    }
-    const es = new EventSource(runStreamUrl(logModal.run._id));
-    es.onmessage = (evt) => {
-      try {
-        const payload = JSON.parse(evt.data) as { text?: string; stream?: string };
-        if (!payload?.text) return;
-        setLiveLogs((prev) => {
-          const key = payload.stream === "stderr" ? "stderr" : "stdout";
-          return { ...prev, [key]: (prev as any)[key] + payload.text };
-        });
-      } catch {
-        // ignore
-      }
-    };
-    es.onerror = () => {
-      es.close();
-      setSource(null);
-    };
-    setSource(es);
-    return () => {
-      es.close();
-      setSource(null);
-    };
-  }, [logModal]);
 
   const columns = [
     {
@@ -115,7 +74,7 @@ export function JobRuns({ jobId, runs: providedRuns, loading, onKillRun }: Props
       key: "actions",
       render: (_: unknown, record: any) => (
         <Space>
-          <Typography.Link onClick={() => setLogModal({ visible: true, run: record })}>View Logs</Typography.Link>
+          <Typography.Link onClick={() => setLogModal({ visible: true, run: record })}>Inspect</Typography.Link>
           {record.status === "running" && onKillRun && (
             <Button size="small" danger onClick={() => onKillRun(record._id)}>Stop</Button>
           )}
@@ -135,39 +94,7 @@ export function JobRuns({ jobId, runs: providedRuns, loading, onKillRun }: Props
       ) : (
         <Table dataSource={combinedRuns} columns={visibleColumns} loading={tableLoading} pagination={{ pageSize: 10 }} size="small" />
       )}
-      <Modal open={!!logModal?.visible} onCancel={() => setLogModal({ visible: false })} footer={null} width={1000} title="Run Logs">
-        {logModal?.run ? (
-          <Space direction="vertical" style={{ width: "100%" }}>
-            <Space>
-              <StatusBadge status={logModal.run.status} />
-              <Typography.Text type="secondary">Run ID: {logModal.run._id}</Typography.Text>
-              {logModal.run.worker_id && <Typography.Text type="secondary">Worker: {logModal.run.worker_id}</Typography.Text>}
-            </Space>
-            <Typography.Text>
-              Started: {logModal.run.start_ts ? new Date(logModal.run.start_ts).toLocaleString() : "-"} · Finished:{" "}
-              {logModal.run.end_ts ? new Date(logModal.run.end_ts).toLocaleString() : "-"} · Duration:{" "}
-              {typeof logModal.run.duration === "number" ? `${logModal.run.duration.toFixed(1)}s` : "-"}
-            </Typography.Text>
-            <Typography.Text>
-              Exit: {logModal.run.returncode ?? "-"} · Reason: {logModal.run.completion_reason ?? "-"} · Queue latency:{" "}
-              {logModal.run.queue_latency_ms ? `${logModal.run.queue_latency_ms.toFixed(0)}ms` : "-"}
-            </Typography.Text>
-            <Divider />
-            <LogViewer stdout={liveLogs.stdout} stderr={liveLogs.stderr} maxHeight={400} />
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              Showing tail of last 4KB. Live streaming for running jobs.
-            </Typography.Text>
-            <FailureInsight
-              runId={logModal.run._id}
-              stdout={liveLogs.stdout || logModal.run.stdout || ""}
-              stderr={liveLogs.stderr || logModal.run.stderr || ""}
-              exitCode={logModal.run.returncode || 1}
-            />
-          </Space>
-        ) : (
-          <Typography.Text type="secondary">No logs available.</Typography.Text>
-        )}
-      </Modal>
+      <RunInspector run={logModal.run} open={logModal.visible} onClose={() => setLogModal({ visible: false })} />
     </>
   );
 }

@@ -185,6 +185,12 @@ export interface JobRun {
   bypass_concurrency?: boolean;
 }
 
+export interface HistoryPage {
+  items: JobRun[];
+  next_cursor: string | null;
+  has_more: boolean;
+}
+
 export interface JobOverview {
   job_id: string;
   name: string;

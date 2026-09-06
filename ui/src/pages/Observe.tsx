@@ -212,7 +212,7 @@ function HistoryTab() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const { data, isLoading } = useQuery({
     queryKey: ["history", domain],
-    queryFn: fetchHistory,
+    queryFn: () => fetchHistory(),
     refetchInterval: 5000,
   });
   const jobsQuery = useQuery({
@@ -245,7 +245,7 @@ function HistoryTab() {
 
   const statusOptions = useMemo(() => {
     const set = new Set<string>();
-    for (const run of data ?? []) {
+    for (const run of data?.items ?? []) {
       set.add((run.status ?? "unknown").toLowerCase());
     }
     return Array.from(set).sort();
@@ -253,7 +253,7 @@ function HistoryTab() {
 
   const filteredRuns = useMemo(() => {
     const needle = searchText.trim().toLowerCase();
-    return (data ?? []).filter((run) => {
+    return (data?.items ?? []).filter((run) => {
       const status = (run.status ?? "unknown").toLowerCase();
       if (statusFilter !== "all" && status !== statusFilter) {
         return false;

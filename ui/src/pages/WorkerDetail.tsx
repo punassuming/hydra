@@ -6,6 +6,7 @@ import { fetchWorkerMetrics, fetchWorkerOperations, fetchWorkers, fetchWorkerTim
 import { apiClient } from "../api/client";
 import { WorkerMetricPoint, WorkerOperation, WorkerTimelineData, WorkerTimelineEntry } from "../types";
 import { useActiveDomain } from "../context/ActiveDomainContext";
+import { RunInspector } from "../components/RunInspector";
 
 function statusColor(status: string) {
   if (status === "success") return "#22c55e";
@@ -93,7 +94,7 @@ function MetricLineChart({
   );
 }
 
-function WorkerTimeline({ data }: { data?: WorkerTimelineData }) {
+function WorkerTimeline({ data, onInspect }: { data?: WorkerTimelineData; onInspect: (runId: string) => void }) {
   if (!data?.entries?.length) {
     return <Typography.Text type="secondary">No worker executions in the selected window.</Typography.Text>;
   }
@@ -141,6 +142,7 @@ function WorkerTimeline({ data }: { data?: WorkerTimelineData }) {
                     title={`${entry.job_name || entry.job_id} | ${entry.status} | ${new Date(entry.start_ts * 1000).toLocaleTimeString()} - ${new Date(entry.end_ts * 1000).toLocaleTimeString()}`}
                   >
                     <div
+                      onClick={() => onInspect(entry.run_id)}
                       style={{
                         position: "absolute",
                         left: `${left}%`,
@@ -159,6 +161,7 @@ function WorkerTimeline({ data }: { data?: WorkerTimelineData }) {
                         color: "#f8fafc",
                         fontSize: 11,
                         padding: "2px 6px",
+                        cursor: "pointer",
                       }}
                     >
                       {entry.job_name || entry.job_id}
@@ -189,6 +192,7 @@ export function WorkerDetailPage() {
       Number(localStorage.getItem("hydra_worker_timeline_window"));
     return Number.isFinite(v) && v > 0 ? v : 30;
   });
+  const [inspectedRunId, setInspectedRunId] = useState<string>();
   const { data, isLoading } = useQuery({ queryKey: ["workers", domain], queryFn: fetchWorkers, refetchInterval: 5000 });
   const worker = data?.find((w) => w.worker_id === workerId);
   const metricsQuery = useQuery({
@@ -205,7 +209,7 @@ export function WorkerDetailPage() {
   });
   const operationsQuery = useQuery({
     queryKey: ["worker-operations", domain, workerId],
-    queryFn: () => fetchWorkerOperations(workerId!, 300),
+    queryFn: () => fetchWorkerOperations(workerId!, 50),
     enabled: Boolean(workerId),
     refetchInterval: 5000,
   });
@@ -358,7 +362,7 @@ export function WorkerDetailPage() {
           </div>
         }
       >
-        <WorkerTimeline data={timelineQuery.data} />
+        <WorkerTimeline data={timelineQuery.data} onInspect={setInspectedRunId} />
       </Card>
 
       <Row gutter={16}>
@@ -454,7 +458,7 @@ export function WorkerDetailPage() {
           dataSource={operationsQuery.data?.events ?? []}
           locale={{ emptyText: "No operational events yet." }}
           renderItem={(event: WorkerOperation) => (
-            <List.Item>
+            <List.Item onClick={() => event.details?.run_id && setInspectedRunId(String(event.details.run_id))} style={{ cursor: event.details?.run_id ? "pointer" : "default" }}>
               <Space direction="vertical" style={{ width: "100%" }} size={2}>
                 <Space wrap>
                   <Tag color={opColor(event.type)}>{event.type}</Tag>
@@ -473,6 +477,7 @@ export function WorkerDetailPage() {
           )}
         />
       </Card>
+      <RunInspector runId={inspectedRunId} open={Boolean(inspectedRunId)} onClose={() => setInspectedRunId(undefined)} />
     </Space>
   );
 }

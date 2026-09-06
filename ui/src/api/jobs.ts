@@ -16,6 +16,7 @@ import {
   SourceConfig,
   QueueOverview,
   QueuePressure,
+  HistoryPage,
 } from "../types";
 
 export interface JobPayload {
@@ -94,11 +95,16 @@ export const detachWorker = (workerId: string, force = false) =>
     {},
   );
 export const fetchJobRuns = (jobId: string) => apiClient.get<JobRun[]>(`/jobs/${jobId}/runs`);
+export const fetchRun = (runId: string) => apiClient.get<JobRun>(`/runs/${runId}`);
 export const fetchJobOverview = () => apiClient.get<JobOverview[]>("/overview/jobs");
 export const fetchQueueOverview = () => apiClient.get<QueueOverview>("/overview/queue");
 export const fetchQueuePressure = () => apiClient.get<QueuePressure>("/overview/pressure");
 export const fetchJobStatistics = () => apiClient.get<JobStatistics>("/overview/statistics");
-export const fetchHistory = () => apiClient.get<JobRun[]>("/history/");
+export const fetchHistory = (cursor?: string, limit = 50) => {
+  const params = new URLSearchParams({ paged: "true", limit: String(limit) });
+  if (cursor) params.set("cursor", cursor);
+  return apiClient.get<HistoryPage>(`/history/?${params}`);
+};
 export const fetchJobGrid = (jobId: string) => apiClient.get<JobGridData>(`/jobs/${jobId}/grid`);
 export const fetchJobGantt = (jobId: string) => apiClient.get<JobGanttData>(`/jobs/${jobId}/gantt`);
 export const fetchJobGraph = (jobId: string) => apiClient.get<JobGraphData>(`/jobs/${jobId}/graph`);

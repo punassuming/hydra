@@ -8,7 +8,7 @@ import { useActiveDomain } from "../context/ActiveDomainContext";
 export function BrowsePage() {
   const { domain } = useActiveDomain();
   const jobsQuery = useQuery({ queryKey: ["jobs", domain], queryFn: () => fetchJobs(), refetchInterval: 5000 });
-  const historyQuery = useQuery({ queryKey: ["history", domain], queryFn: fetchHistory, refetchInterval: 5000 });
+  const historyQuery = useQuery({ queryKey: ["history", domain], queryFn: () => fetchHistory(), refetchInterval: 5000 });
 
   const items = [
     {
@@ -31,7 +31,7 @@ export function BrowsePage() {
           title="Runs"
           extra={<Typography.Text type="secondary">Recent runs across all jobs. Click logs to inspect output.</Typography.Text>}
         >
-          <JobRuns runs={historyQuery.data ?? []} loading={historyQuery.isLoading} />
+          <JobRuns runs={historyQuery.data?.items ?? []} loading={historyQuery.isLoading} />
         </Card>
       ),
     },

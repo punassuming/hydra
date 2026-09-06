@@ -25,7 +25,7 @@ export function WorkersPage() {
   const { domain } = useActiveDomain();
   const [setupDrawerOpen, setSetupDrawerOpen] = useState(false);
   const { data, isLoading } = useQuery({ queryKey: ["workers", domain], queryFn: fetchWorkers, refetchInterval: 5000 });
-  const historyQuery = useQuery({ queryKey: ["history", domain], queryFn: fetchHistory, refetchInterval: 5000 });
+  const historyQuery = useQuery({ queryKey: ["history", domain], queryFn: () => fetchHistory(), refetchInterval: 5000 });
   const navigate = useNavigate();
   const setStateMutation = useMutation({
     mutationFn: ({ workerId, state }: { workerId: string; state: string }) =>
@@ -178,7 +178,7 @@ export function WorkersPage() {
   const operationsQueries = useQueries({
     queries: workerIds.map((workerId) => ({
       queryKey: ["worker-operations", domain, workerId],
-      queryFn: () => fetchWorkerOperations(workerId, 120),
+      queryFn: () => fetchWorkerOperations(workerId, 50),
       enabled: Boolean(workerId),
       refetchInterval: 8000,
     })),
@@ -206,7 +206,7 @@ export function WorkersPage() {
   const executionRows = useMemo(() => {
     const now = Date.now();
     const windowStartMs = now - executionWindowSeconds * 1000;
-    const runs = (historyQuery.data ?? []).filter((run) => run.worker_id);
+    const runs = (historyQuery.data?.items ?? []).filter((run) => run.worker_id);
     return runs
       .map((run) => {
         const startMs = run.start_ts ? new Date(run.start_ts).getTime() : undefined;

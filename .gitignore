@@ -11,6 +11,7 @@ ui/src/*.js
 ui/src/*.js.map
 .resume
 .claude
+.worktrees/
 *.egg-info/
 go-worker/hydra-go-worker
 go-worker/hydra-go-worker-*

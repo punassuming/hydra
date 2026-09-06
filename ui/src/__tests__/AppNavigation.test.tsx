@@ -25,7 +25,7 @@ vi.mock("../components/EventsFeed", () => ({
 vi.mock("../api/jobs", () => ({
   fetchWorkers: (...args: unknown[]) => mockFetchWorkers(...args),
   fetchJobs: vi.fn().mockResolvedValue([]),
-  fetchHistory: vi.fn().mockResolvedValue([]),
+  fetchHistory: vi.fn().mockResolvedValue({ items: [], next_cursor: null, has_more: false }),
   fetchJobOverview: vi.fn().mockResolvedValue([]),
   fetchQueueOverview: vi.fn().mockResolvedValue({ pending: [], upcoming: [] }),
   fetchQueuePressure: vi.fn().mockResolvedValue({}),
