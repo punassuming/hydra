@@ -12,7 +12,7 @@ spec:
   ports:
     - name: http
       port: {{ .Values.ui.service.port }}
-      targetPort: 80
+      targetPort: 8080
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -52,7 +52,7 @@ spec:
           imagePullPolicy: {{ .Values.imagePullPolicy }}
           ports:
             - name: http
-              containerPort: 80
+              containerPort: 8080
           env:
             # docker-entrypoint.sh regenerates runtime-config.js from this at
             # container start (see ui/src/api/client.ts for the consumer side).
@@ -65,13 +65,13 @@ spec:
           readinessProbe:
             httpGet:
               path: /
-              port: 80
+              port: 8080
             initialDelaySeconds: 3
             periodSeconds: 10
           livenessProbe:
             httpGet:
               path: /
-              port: 80
+              port: 8080
             initialDelaySeconds: 10
             periodSeconds: 15
 {{- end }}

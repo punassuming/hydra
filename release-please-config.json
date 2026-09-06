@@ -25,7 +25,12 @@
       "extra-files": [
         { "type": "toml", "path": "pyproject.toml", "jsonpath": "$.project.version" },
         { "type": "json", "path": "ui/package.json", "jsonpath": "$.version" },
-        { "type": "yaml", "path": "deploy/helm/hydra/Chart.yaml", "jsonpath": "$.version" }
+        { "type": "yaml", "path": "deploy/helm/hydra/Chart.yaml", "jsonpath": "$.version" },
+        { "type": "yaml", "path": "deploy/helm/hydra/values.yaml", "jsonpath": "$.scheduler.image.tag" },
+        { "type": "yaml", "path": "deploy/helm/hydra/values.yaml", "jsonpath": "$.ui.image.tag" },
+        { "type": "yaml", "path": "deploy/helm/hydra/values.yaml", "jsonpath": "$.workers[0].image.tag" },
+        { "type": "yaml", "path": "deploy/helm/hydra/values.yaml", "jsonpath": "$.workers[1].image.tag" },
+        { "type": "yaml", "path": "deploy/helm/hydra/values.yaml", "jsonpath": "$.domainSeed.image.tag" }
       ]
     }
   }

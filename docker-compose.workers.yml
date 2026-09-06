@@ -19,23 +19,48 @@ x-worker-python-base: &worker-python-base
   build:
     context: .
     dockerfile: worker/Dockerfile
+    args:
+      HYDRA_WORKER_UID: ${HYDRA_WORKER_UID:-10001}
+      HYDRA_WORKER_GID: ${HYDRA_WORKER_GID:-10001}
   restart: unless-stopped
+  # Runs as the dedicated non-root identity worker/Dockerfile creates, with a
+  # read-only root filesystem — jobs may only write under /tmp (the tmpfs
+  # below) or an explicitly configured writable path (HYDRA_TEMP_DIR).
+  user: "${HYDRA_WORKER_UID:-10001}:${HYDRA_WORKER_GID:-10001}"
+  read_only: true
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,size=256m
+  security_opt: ["no-new-privileges:true"]
   env_file:
     - .env
   depends_on:
     scheduler:
       condition: service_healthy
+  # scheduler lives on the base file's internal "backend" network — a
+  # service introduced here rather than overriding one already in
+  # docker-compose.yml otherwise falls back to Compose's separate implicit
+  # "default" network and can't reach it.
+  networks: [backend]
 
 x-worker-go-base: &worker-go-base
   build:
     context: ./go-worker
     dockerfile: Dockerfile
+    args:
+      HYDRA_WORKER_UID: ${HYDRA_WORKER_UID:-10001}
+      HYDRA_WORKER_GID: ${HYDRA_WORKER_GID:-10001}
   restart: unless-stopped
+  user: "${HYDRA_WORKER_UID:-10001}:${HYDRA_WORKER_GID:-10001}"
+  read_only: true
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,size=256m
+  security_opt: ["no-new-privileges:true"]
   env_file:
     - .env
   depends_on:
     scheduler:
       condition: service_healthy
+  networks: [backend]
 
 services:
   worker-python:

@@ -23,6 +23,63 @@ def test_os_exec_echo():
     assert "hello" in out.strip().lower()
 
 
+def test_os_exec_timeout_uses_explicit_timeout_return_code():
+    shell = "cmd" if IS_WINDOWS else "bash"
+    command = "ping -n 3 127.0.0.1 > nul" if IS_WINDOWS else "sleep 3"
+    rc, _, _ = run_command(command, shell=shell, timeout=1)
+    assert rc == 124
+
+
+@pytest.mark.skipif(IS_WINDOWS, reason="exit code semantics differ on Windows")
+def test_os_exec_timeout_holder_distinguishes_real_timeout_from_exit_124():
+    # rc == 124 alone is ambiguous: a normally-exiting command can return it
+    # for its own reasons (matches GNU coreutils' `timeout` convention, but
+    # nothing stops an arbitrary script from returning it too). The holder
+    # must only be set for an actual timeout.
+    holder: dict = {}
+    rc, _, _ = run_command("sleep 3", shell="bash", timeout=1, timed_out_holder=holder)
+    assert rc == 124
+    assert holder.get("timed_out") is True
+
+    holder = {}
+    rc, _, _ = run_command("exit 124", shell="bash", timeout=5, timed_out_holder=holder)
+    assert rc == 124
+    assert holder.get("timed_out") is None
+
+
+@pytest.mark.skipif(IS_WINDOWS, reason="exit code semantics differ on Windows")
+def test_execute_job_timeout_holder_distinguishes_real_timeout_from_exit_124():
+    holder: dict = {}
+    job = {"executor": {"type": "shell", "script": "sleep 3", "shell": "bash"}, "timeout": 1}
+    rc, _, _ = execute_job(job, timed_out_holder=holder)
+    assert rc == 124
+    assert holder.get("timed_out") is True
+
+    holder = {}
+    job = {"executor": {"type": "shell", "script": "exit 124", "shell": "bash"}, "timeout": 5}
+    rc, _, _ = execute_job(job, timed_out_holder=holder)
+    assert rc == 124
+    assert holder.get("timed_out") is None
+
+
+@pytest.mark.skipif(IS_WINDOWS, reason="exit code semantics differ on Windows")
+def test_execute_job_with_log_callback_timeout_holder_distinguishes_exit_124():
+    # Providing a log callback routes through the streaming _run_with_callbacks
+    # path instead of run_external/_run — a separate implementation with its
+    # own timeout handling that needs the same distinction.
+    holder: dict = {}
+    job = {"executor": {"type": "shell", "script": "sleep 3", "shell": "bash"}, "timeout": 1}
+    rc, _, _ = execute_job(job, log_callback_out=lambda _line: None, timed_out_holder=holder)
+    assert rc == 124
+    assert holder.get("timed_out") is True
+
+    holder = {}
+    job = {"executor": {"type": "shell", "script": "exit 124", "shell": "bash"}, "timeout": 5}
+    rc, _, _ = execute_job(job, log_callback_out=lambda _line: None, timed_out_holder=holder)
+    assert rc == 124
+    assert holder.get("timed_out") is None
+
+
 def test_python_executor_runs_inline_code():
     rc, out, _ = run_python("print('hydra')", interpreter=PYTHON_INTERPRETER)
     assert rc == 0

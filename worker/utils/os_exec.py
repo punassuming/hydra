@@ -15,15 +15,34 @@ def _merged_env(extra: Optional[Dict[str, str]]) -> Dict[str, str]:
     return merged
 
 
-def _run(cmd: Sequence[str], timeout: Optional[int], env: Optional[Dict[str, str]], workdir: Optional[str]):
-    proc = subprocess.run(
-        list(cmd),
-        capture_output=True,
-        text=True,
-        timeout=timeout if timeout and timeout > 0 else None,
-        cwd=workdir,
-        env=_merged_env(env),
-    )
+def _run(
+    cmd: Sequence[str],
+    timeout: Optional[int],
+    env: Optional[Dict[str, str]],
+    workdir: Optional[str],
+    timed_out_holder: Optional[Dict[str, bool]] = None,
+):
+    try:
+        proc = subprocess.run(
+            list(cmd),
+            capture_output=True,
+            text=True,
+            timeout=timeout if timeout and timeout > 0 else None,
+            cwd=workdir,
+            env=_merged_env(env),
+        )
+    except subprocess.TimeoutExpired as exc:
+        # 124 is a portable, conventional sentinel (matches GNU coreutils'
+        # `timeout`), but a normally-exiting command can legitimately return
+        # 124 for its own reasons too — so it alone can't reliably tell a
+        # caller "this timed out" apart from "this exited with code 124".
+        # timed_out_holder carries that distinction explicitly for callers
+        # that need it (see worker.py's run-status determination); the
+        # sentinel return value is kept for existing/backward-compatible
+        # callers that only check the return code.
+        if timed_out_holder is not None:
+            timed_out_holder["timed_out"] = True
+        return 124, exc.stdout or "", exc.stderr or ""
     return proc.returncode, proc.stdout, proc.stderr
 
 
@@ -35,6 +54,7 @@ def _run_with_callbacks(
     on_stdout: Optional[Callable[[str], None]] = None,
     on_stderr: Optional[Callable[[str], None]] = None,
     kill_event: Optional["threading.Event"] = None,
+    timed_out_holder: Optional[Dict[str, bool]] = None,
 ) -> Tuple[int, str, str]:
     """
     Run a command, streaming stdout/stderr via callbacks while still returning full buffers.
@@ -85,15 +105,19 @@ def _run_with_callbacks(
         t_kill = threading.Thread(target=_watch_kill, daemon=True)
         t_kill.start()
 
+    timed_out = False
     try:
         proc.wait(timeout=timeout if timeout and timeout > 0 else None)
     except subprocess.TimeoutExpired:
+        timed_out = True
         proc.kill()
         proc.wait()
     for t in threads:
         t.join(timeout=1)
 
-    return proc.returncode, "".join(stdout_lines), "".join(stderr_lines)
+    if timed_out and timed_out_holder is not None:
+        timed_out_holder["timed_out"] = True
+    return (124 if timed_out else proc.returncode), "".join(stdout_lines), "".join(stderr_lines)
 
 
 def run_command(
@@ -102,6 +126,7 @@ def run_command(
     timeout: Optional[int] = None,
     env: Optional[Dict[str, str]] = None,
     workdir: Optional[str] = None,
+    timed_out_holder: Optional[Dict[str, bool]] = None,
 ) -> Tuple[int, str, str]:
     system = platform.system().lower()
     shell_lc = (shell or "bash").lower()
@@ -123,7 +148,7 @@ def run_command(
     else:
         cmd = [shell_path, "-lc", command]
 
-    return _run(cmd, timeout, env, workdir)
+    return _run(cmd, timeout, env, workdir, timed_out_holder=timed_out_holder)
 
 
 def run_python(
@@ -133,11 +158,12 @@ def run_python(
     timeout: Optional[int] = None,
     env: Optional[Dict[str, str]] = None,
     workdir: Optional[str] = None,
+    timed_out_holder: Optional[Dict[str, bool]] = None,
 ) -> Tuple[int, str, str]:
     cmd = [interpreter, "-c", code]
     if args:
         cmd.extend(args)
-    return _run(cmd, timeout, env, workdir)
+    return _run(cmd, timeout, env, workdir, timed_out_holder=timed_out_holder)
 
 
 def run_external(
@@ -146,8 +172,9 @@ def run_external(
     timeout: Optional[int] = None,
     env: Optional[Dict[str, str]] = None,
     workdir: Optional[str] = None,
+    timed_out_holder: Optional[Dict[str, bool]] = None,
 ) -> Tuple[int, str, str]:
     cmd = [binary]
     if args:
         cmd.extend(args)
-    return _run(cmd, timeout, env, workdir)
+    return _run(cmd, timeout, env, workdir, timed_out_holder=timed_out_holder)

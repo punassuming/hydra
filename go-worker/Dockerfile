@@ -11,6 +11,16 @@ FROM alpine:3.20
 
 RUN apk add --no-cache ca-certificates bash git python3 openssh-client rsync
 
+# Compose runs the worker as this dedicated non-root identity — mirrors
+# worker/Dockerfile's Python worker for the same treatment on both. Override
+# at build time (--build-arg) if these need to change; docker-compose.yml's
+# HYDRA_WORKER_UID/GID (see .env.example) pass the same values through so
+# the build and the compose `user:` field stay in sync from one source.
+ARG HYDRA_WORKER_UID=10001
+ARG HYDRA_WORKER_GID=10001
+RUN addgroup -g "${HYDRA_WORKER_GID}" hydra \
+    && adduser -D -H -u "${HYDRA_WORKER_UID}" -G hydra -s /sbin/nologin hydra
+
 WORKDIR /app
 COPY --from=build /out/hydra-go-worker /usr/local/bin/hydra-go-worker
 

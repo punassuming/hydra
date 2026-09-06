@@ -390,7 +390,7 @@ def _handle_run_end(payload: Dict[str, Any]):
     if status == "success":
         # Trigger any dependent jobs
         _trigger_dependents(job_id, domain, db)
-    elif status == "failed":
+    elif status in {"failed", "timed_out"}:
         # Check for scheduler-level retries
         job_doc = db.job_definitions.find_one(
             {"_id": job_id},

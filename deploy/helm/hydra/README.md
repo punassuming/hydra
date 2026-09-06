@@ -8,7 +8,10 @@ placed), and the React UI.
 This chart does **not** assume you push images to a registry — the default
 workflow is build locally, load the images directly onto your cluster's
 nodes, then `helm install`. See [Building and loading images](#building-and-loading-images)
-below.
+below. The default values reference bare `hydra-*` image names tagged
+`0.1.0` — the same version release-please tracks for the whole project
+(`pyproject.toml`, `ui/package.json`, this chart's `Chart.yaml`, and these
+image tags all move together on release).
 
 ## What gets deployed
 
@@ -37,13 +40,16 @@ Hydra's own stack).
 
 ## Building and loading images
 
-Build all four images from the repo root:
+Build all four images from the repo root — tagged to match the version
+release-please tracks, so the chart's default `tag: "0.1.0"` values need no
+override:
 
 ```bash
-docker build -f scheduler/Dockerfile  -t hydra-scheduler:latest  .
-docker build -f worker/Dockerfile     -t hydra-worker:latest     .
-docker build -f go-worker/Dockerfile  -t hydra-go-worker:latest  go-worker
-docker build -f ui/Dockerfile         -t hydra-ui:latest         ui
+VERSION=$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')
+docker build -f scheduler/Dockerfile  -t hydra-scheduler:$VERSION  .
+docker build -f worker/Dockerfile     -t hydra-worker:$VERSION     .
+docker build -f go-worker/Dockerfile  -t hydra-go-worker:$VERSION  go-worker
+docker build -f ui/Dockerfile         -t hydra-ui:$VERSION         ui
 ```
 
 Then load them onto your cluster — the exact command depends on what you're
@@ -52,27 +58,27 @@ running:
 **k3s** (a very common home-lab choice):
 ```bash
 for img in hydra-scheduler hydra-worker hydra-go-worker hydra-ui; do
-  docker save "${img}:latest" | sudo k3s ctr images import -
+  docker save "${img}:${VERSION}" | sudo k3s ctr images import -
 done
 ```
 
 **kind:**
 ```bash
 for img in hydra-scheduler hydra-worker hydra-go-worker hydra-ui; do
-  kind load docker-image "${img}:latest"
+  kind load docker-image "${img}:${VERSION}"
 done
 ```
 
 **minikube:**
 ```bash
 for img in hydra-scheduler hydra-worker hydra-go-worker hydra-ui; do
-  minikube image load "${img}:latest"
+  minikube image load "${img}:${VERSION}"
 done
 ```
 
 **Any containerd node reachable over SSH** (generic fallback):
 ```bash
-docker save hydra-scheduler:latest | ssh <node> sudo ctr -n k8s.io images import -
+docker save "hydra-scheduler:${VERSION}" | ssh <node> sudo ctr -n k8s.io images import -
 # repeat per image/node
 ```
 

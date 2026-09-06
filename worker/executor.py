@@ -33,9 +33,7 @@ def _execute_powershell(
     """Execute a PowerShell script via pwsh or powershell."""
     shell = _resolve_shell(executor.get("shell", "pwsh"))
     cmd = _with_impersonation([shell, "-NoProfile", "-Command", script] + args)
-    if log_callback_out or log_callback_err:
-        return _run_cmd(cmd)
-    return run_external(binary=cmd[0], args=cmd[1:], timeout=timeout, env=merged_env, workdir=workdir)
+    return _run_cmd(cmd)
 
 
 def _execute_sql(executor: dict, timeout, merged_env, workdir, _run_cmd, log_callback_out, log_callback_err):
@@ -116,9 +114,7 @@ def _execute_sql(executor: dict, timeout, merged_env, workdir, _run_cmd, log_cal
         if not interp:
             return 1, "", "No Python interpreter found to run SQL driver script"
         cmd = [interp, tmp_path]
-        if log_callback_out or log_callback_err:
-            return _run_cmd(cmd)
-        return run_external(binary=cmd[0], args=cmd[1:], timeout=timeout, env=merged_env, workdir=workdir)
+        return _run_cmd(cmd)
     finally:
         try:
             os.unlink(tmp_path)
@@ -286,6 +282,7 @@ def execute_job(
     log_callback_err: Optional[Callable[[str], None]] = None,
     kill_event: Optional[object] = None,
     timings: Optional[Dict[str, float]] = None,
+    timed_out_holder: Optional[Dict[str, bool]] = None,
 ) -> Tuple[int, str, str]:
     executor = job.get("executor") or {}
     timeout = job.get("timeout", 0) or None
@@ -331,8 +328,11 @@ def execute_job(
                 on_stdout=log_callback_out,
                 on_stderr=log_callback_err,
                 kill_event=kill_event,
+                timed_out_holder=timed_out_holder,
             )
-        return run_external(binary=cmd[0], args=cmd[1:], timeout=timeout, env=merged_env, workdir=workdir)
+        return run_external(
+            binary=cmd[0], args=cmd[1:], timeout=timeout, env=merged_env, workdir=workdir, timed_out_holder=timed_out_holder
+        )
 
     _krb_ccache = kerberos.get("ccache") if (kerberos and kerberos.get("principal") and kerberos.get("keytab")) else None
     if kerberos and kerberos.get("principal") and kerberos.get("keytab"):
@@ -407,17 +407,7 @@ def execute_job(
                 with tmp_code:
                     tmp_code.write(code)
                 cmd_with_code = command + [tmp_code.name] + args
-                if log_callback_out or log_callback_err:
-                    rc, out, err = _run_cmd(_with_impersonation(cmd_with_code))
-                else:
-                    rc, out, err = run_external(
-                        binary=_with_impersonation(cmd_with_code)[0],
-                        args=_with_impersonation(cmd_with_code)[1:],
-                        timeout=timeout,
-                        env=merged_env,
-                        workdir=workdir,
-                    )
-                return rc, out, err
+                return _run_cmd(_with_impersonation(cmd_with_code))
             finally:
                 try:
                     os.unlink(tmp_code.name)
@@ -428,9 +418,7 @@ def execute_job(
         if exec_type == "external":
             binary = executor.get("command") or job.get("command", "")
             cmd = _with_impersonation([binary] + args)
-            if log_callback_out or log_callback_err:
-                return _run_cmd(cmd)
-            return run_external(binary=cmd[0], args=cmd[1:], timeout=timeout, env=merged_env, workdir=workdir)
+            return _run_cmd(cmd)
         if exec_type == "batch":
             script = executor.get("script") or job.get("command", "")
             shell = executor.get("shell", "cmd")
@@ -442,9 +430,7 @@ def execute_job(
                 with tmp_script:
                     tmp_script.write(script)
                 cmd = _with_impersonation(["cmd", "/c", tmp_script.name] if shell == "cmd" else [shell, tmp_script.name])
-                if log_callback_out or log_callback_err:
-                    return _run_cmd(cmd)
-                return run_external(binary=cmd[0], args=cmd[1:], timeout=timeout, env=merged_env, workdir=workdir)
+                return _run_cmd(cmd)
             finally:
                 try:
                     os.unlink(tmp_script.name)
@@ -504,9 +490,7 @@ def execute_job(
             else:
                 shell_cmd = [resolved_shell, tmp_script.name, *args]
             cmd = _with_impersonation(shell_cmd)
-            if log_callback_out or log_callback_err:
-                return _run_cmd(cmd)
-            return run_external(binary=cmd[0], args=cmd[1:], timeout=timeout, env=merged_env, workdir=workdir)
+            return _run_cmd(cmd)
         finally:
             try:
                 os.unlink(tmp_script.name)
