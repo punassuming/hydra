@@ -308,21 +308,21 @@ class TestHealthEndpoint(unittest.TestCase):
     def test_health_honors_domain_query_for_unauthenticated_probe(self):
         fake_redis = self._mock_redis()
         fake_redis.scan_iter.side_effect = lambda pattern: (
-            iter(["workers:openclaw-system:worker-1"])
-            if pattern == "workers:openclaw-system:*"
+            iter(["workers:example-tenant:worker-1"])
+            if pattern == "workers:example-tenant:*"
             else iter([])
         )
         fake_db = MagicMock()
         with patch("scheduler.api.health.get_redis", return_value=fake_redis), \
              patch("scheduler.api.health.get_db", return_value=fake_db):
-            resp = self.client.get("/health?domain=openclaw-system")
+            resp = self.client.get("/health?domain=example-tenant")
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json()["workers"], 1)
 
     def test_health_aggregates_workers_for_unauthenticated_probe(self):
         fake_redis = self._mock_redis()
         fake_redis.scan_iter.side_effect = lambda pattern: (
-            iter(["workers:openclaw-system:worker-1"])
+            iter(["workers:example-tenant:worker-1"])
             if pattern == "workers:*:*"
             else iter([])
         )

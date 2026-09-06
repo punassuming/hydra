@@ -6,18 +6,17 @@ or one of its variants for a worker) — see the main
 [`README.md`](../../README.md#docker-deployment) for that. This directory
 holds operational tooling *beyond* what `docker compose` itself provides:
 encrypted backup/restore, post-deploy live verification, and a worker
-network-boundary check. It was originally built for one specific always-on
-deployment and still defaults to that deployment's values, but every value is
-overridable — copy [`.env.example`](.env.example) to `.env` here to point it
-at a different host/checkout without editing the scripts.
+network-boundary check. Every value below is overridable — copy
+[`.env.example`](.env.example) to `.env` here to point it at a different
+host/checkout without editing the scripts.
 
 ## Prerequisites
 
 - Docker Engine with Compose v2 on the deployment host.
-- A git checkout at `HARNESS_REPO_ROOT` (default `/srv/openclaw/hydra`) that
+- A git checkout at `HYDRA_DEPLOY_REPO_ROOT` (default `/opt/hydra`) that
   is the intended deployed revision.
-- Protected secret files under `HARNESS_SECRETS_DIR` (default
-  `/srv/openclaw/secrets`), each mode `0600`, readable only by the service
+- Protected secret files under `HYDRA_DEPLOY_SECRETS_DIR` (default
+  `/opt/hydra/secrets`), each mode `0600`, readable only by the service
   operator, never committed:
   - `hydra-scheduler.env` — the scheduler's control-plane secrets (admin
     token, etc.), loaded via `docker-compose.yml`'s `env_file: .env` (point
@@ -38,8 +37,8 @@ procedures themselves.
 ## Scripts
 
 All read their protected secret files directly (mode-600-checked) and never
-print credentials. All pick up `HARNESS_*` overrides from a `.env` in this
-directory if present (see `.env.example`).
+print credentials. All pick up `HYDRA_DEPLOY_*` overrides from a `.env` in
+this directory if present (see `.env.example`).
 
 - `scripts/backup-volumes.sh [DEST]` — stops the stack briefly for a
   consistent raw-volume copy, encrypts Mongo and Redis separately (GPG
@@ -56,7 +55,3 @@ directory if present (see `.env.example`).
   hardening (non-root UID/GID, read-only rootfs, no added capabilities, no
   mounts, `no-new-privileges`) and that it can reach Redis/Mongo but not the
   open internet.
-- `scripts/run-openclaw-acceptance.sh` — runs
-  `integrations/external_client/live_acceptance.py`'s disposable two-domain
-  acceptance suite (creates and deletes real throwaway domains/jobs) against
-  the live deployment. An acceptance operation, not a routine health check.

@@ -2,15 +2,15 @@
 # Create a consistent encrypted backup of the canonical Hydra Mongo/Redis volumes.
 set -euo pipefail
 
-# Pick up HARNESS_* overrides from deploy/compose/.env (see .env.example)
+# Pick up HYDRA_DEPLOY_* overrides from deploy/compose/.env (see .env.example)
 # without requiring every script to duplicate a parsing step.
 set -a
 [ -f "$(dirname "$0")/../.env" ] && . "$(dirname "$0")/../.env"
 set +a
 
-repo="${HARNESS_REPO_ROOT:-/srv/openclaw/hydra}"
-secrets="${HARNESS_SECRETS_DIR:-/srv/openclaw/secrets}/hydra-backup.env"
-destination=${1:-${HARNESS_BACKUP_DIR:-/srv/openclaw/backups/hydra}/$(date -u +%Y%m%dT%H%M%SZ)}
+repo="${HYDRA_DEPLOY_REPO_ROOT:-/opt/hydra}"
+secrets="${HYDRA_DEPLOY_SECRETS_DIR:-/opt/hydra/secrets}/hydra-backup.env"
+destination=${1:-${HYDRA_DEPLOY_BACKUP_DIR:-/opt/hydra/backups}/$(date -u +%Y%m%dT%H%M%SZ)}
 scratch=$(mktemp -d)
 was_stopped=0
 

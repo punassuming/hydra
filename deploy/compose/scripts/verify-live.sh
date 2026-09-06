@@ -2,19 +2,19 @@
 # Verify the running deployment without printing credentials.
 set -euo pipefail
 
-# Pick up HARNESS_* overrides from deploy/compose/.env (see .env.example)
+# Pick up HYDRA_DEPLOY_* overrides from deploy/compose/.env (see .env.example)
 # without requiring every script to duplicate a parsing step.
 set -a
 [ -f "$(dirname "$0")/../.env" ] && . "$(dirname "$0")/../.env"
 set +a
 
-repo="${HARNESS_REPO_ROOT:-/srv/openclaw/hydra}"
+repo="${HYDRA_DEPLOY_REPO_ROOT:-/opt/hydra}"
 # scheduler/ui are defined in the standard docker-compose.yml; a worker
 # deployed alongside it comes from docker-compose.worker.yml (or one of its
 # variants). Resolve via `compose config` (not a raw grep of the YAML) since
 # image tags are templated (${HYDRA_IMAGE_TAG:-local}), not literal strings.
-api_url=${HYDRA_API_URL:-http://${HARNESS_HOST_IP:-127.0.0.1}:${HARNESS_API_PORT:-8000}}
-ui_url=${HYDRA_UI_URL:-http://${HARNESS_HOST_IP:-127.0.0.1}:${HARNESS_UI_PORT:-5173}}
+api_url=${HYDRA_API_URL:-http://${HYDRA_DEPLOY_HOST_IP:-127.0.0.1}:${HYDRA_DEPLOY_API_PORT:-8000}}
+ui_url=${HYDRA_UI_URL:-http://${HYDRA_DEPLOY_HOST_IP:-127.0.0.1}:${HYDRA_DEPLOY_UI_PORT:-5173}}
 
 test "$(git -C "$repo" status --porcelain)" = ""
 resolved=$(cd "$repo" && docker compose -f docker-compose.yml -f docker-compose.worker.yml config --format json)

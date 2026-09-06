@@ -3,8 +3,8 @@
 Durable operator procedures for deploying, verifying, backing up, and rolling
 back a Docker Compose deployment of Hydra using the root `docker-compose.yml`
 (+ a worker compose file). Commands below use the defaults from
-[`README.md`](README.md)'s prerequisites (`HARNESS_REPO_ROOT`,
-`HARNESS_SECRETS_DIR`, etc.) — substitute your own via a local `.env` (see
+[`README.md`](README.md)'s prerequisites (`HYDRA_DEPLOY_REPO_ROOT`,
+`HYDRA_DEPLOY_SECRETS_DIR`, etc.) — substitute your own via a local `.env` (see
 [`.env.example`](.env.example)) if they differ.
 
 ## Prerequisites
@@ -18,13 +18,13 @@ Run from the repository root — this matters because Compose build contexts
 are relative to it.
 
 ```bash
-cd "${HARNESS_REPO_ROOT:-/srv/openclaw/hydra}"
+cd "${HYDRA_DEPLOY_REPO_ROOT:-/opt/hydra}"
 git switch main
 git status --short                 # must be empty
 git rev-parse HEAD                 # record the commit you're about to deploy
 docker compose -p hydra -f docker-compose.yml -f docker-compose.worker.yml config -q
 docker volume inspect hydra_redis-data hydra_mongo-data
-stat -c '%n %a %U:%G' "${HARNESS_SECRETS_DIR:-/srv/openclaw/secrets}"/hydra-{scheduler,worker}.env
+stat -c '%n %a %U:%G' "${HYDRA_DEPLOY_SECRETS_DIR:-/opt/hydra/secrets}"/hydra-{scheduler,worker}.env
 ```
 
 Build application images:
@@ -92,9 +92,9 @@ access succeeding, all services healthy with no workload disruption.
 ## Encrypted backup and isolated restore
 
 ```bash
-install -d -m 700 "${HARNESS_BACKUP_DIR:-/srv/openclaw/backups/hydra}"
-scripts/backup-volumes.sh "${HARNESS_BACKUP_DIR:-/srv/openclaw/backups/hydra}/$(date -u +%Y%m%dT%H%M%SZ)"
-scripts/restore-isolated.sh "${HARNESS_BACKUP_DIR:-/srv/openclaw/backups/hydra}/<the timestamp above>"
+install -d -m 700 "${HYDRA_DEPLOY_BACKUP_DIR:-/opt/hydra/backups}"
+scripts/backup-volumes.sh "${HYDRA_DEPLOY_BACKUP_DIR:-/opt/hydra/backups}/$(date -u +%Y%m%dT%H%M%SZ)"
+scripts/restore-isolated.sh "${HYDRA_DEPLOY_BACKUP_DIR:-/opt/hydra/backups}/<the timestamp above>"
 ```
 
 `backup-volumes.sh` briefly stops the deployment for a consistent raw-volume
@@ -118,7 +118,7 @@ If a build or startup fails, preserve the failed images/logs, then restore a
 known-good revision without deleting volumes:
 
 ```bash
-cd "${HARNESS_REPO_ROOT:-/srv/openclaw/hydra}"
+cd "${HYDRA_DEPLOY_REPO_ROOT:-/opt/hydra}"
 git switch --detach <last known-good reviewed commit>
 docker compose -p hydra -f docker-compose.yml -f docker-compose.worker.yml up -d --build --force-recreate
 ```

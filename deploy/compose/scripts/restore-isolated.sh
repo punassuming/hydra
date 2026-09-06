@@ -2,14 +2,14 @@
 # Restore an encrypted volume backup into disposable, internal-only Docker state.
 set -euo pipefail
 
-# Pick up HARNESS_* overrides from deploy/compose/.env (see .env.example)
+# Pick up HYDRA_DEPLOY_* overrides from deploy/compose/.env (see .env.example)
 # without requiring every script to duplicate a parsing step.
 set -a
 [ -f "$(dirname "$0")/../.env" ] && . "$(dirname "$0")/../.env"
 set +a
 
 backup_dir=${1:?usage: restore-isolated.sh BACKUP_DIR}
-secrets_dir="${HARNESS_SECRETS_DIR:-/srv/openclaw/secrets}"
+secrets_dir="${HYDRA_DEPLOY_SECRETS_DIR:-/opt/hydra/secrets}"
 secrets="$secrets_dir/hydra-backup.env"
 datastore_secrets="$secrets_dir/hydra-datastore.env"
 scratch=$(mktemp -d)
