@@ -56,7 +56,7 @@ jobs:
           context: ${{ matrix.context }}
           file: ${{ matrix.file }}
           push: false
-          tags: registry.eieio.cc/${{ matrix.image }}:${{ steps.version.outputs.value }}
+          tags: ${{ matrix.image }}:${{ steps.version.outputs.value }}
           cache-from: type=gha,scope=${{ matrix.image }}
           cache-to: type=gha,mode=max,scope=${{ matrix.image }}
           provenance: mode=max

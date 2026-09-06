@@ -5,12 +5,13 @@ environment: Redis, MongoDB, the scheduler (FastAPI control plane), one or
 more worker "pools" (Python and/or Go workers, each independently scaled and
 placed), and the React UI.
 
-The default values reference immutable `0.1.0` images in the homelab registry
-(`registry.eieio.cc`) — the same version release-please tracks for the whole
-project (`pyproject.toml`, `ui/package.json`, this chart's `Chart.yaml`, and
-these image tags all move together on release). Build and push them from a
-trusted LAN workstation before installation, or override the repositories and
-use the local build/import workflow below.
+This chart does **not** assume you push images to a registry — the default
+workflow is build locally, load the images directly onto your cluster's
+nodes, then `helm install`. See [Building and loading images](#building-and-loading-images)
+below. The default values reference bare `hydra-*` image names tagged
+`0.1.0` — the same version release-please tracks for the whole project
+(`pyproject.toml`, `ui/package.json`, this chart's `Chart.yaml`, and these
+image tags all move together on release).
 
 ## What gets deployed
 
@@ -39,10 +40,9 @@ Hydra's own stack).
 
 ## Building and loading images
 
-If you'd rather not depend on `registry.eieio.cc` being reachable from your
-cluster, build all four images locally from the repo root — tagged to match
-the version release-please tracks, so the override below stays a single,
-consistent value:
+Build all four images from the repo root — tagged to match the version
+release-please tracks, so the chart's default `tag: "0.1.0"` values need no
+override:
 
 ```bash
 VERSION=$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')
@@ -82,24 +82,11 @@ docker save "hydra-scheduler:${VERSION}" | ssh <node> sudo ctr -n k8s.io images 
 # repeat per image/node
 ```
 
-With images loaded, point the chart at your locally-built names instead of
-the registry default — `imagePullPolicy: IfNotPresent` (the chart default)
-then means Kubernetes uses the locally-loaded image instead of trying to
-pull:
-
-```bash
-helm install hydra deploy/helm/hydra -n hydra --create-namespace \
-  --set scheduler.image.repository=hydra-scheduler,scheduler.image.tag=$VERSION \
-  --set ui.image.repository=hydra-ui,ui.image.tag=$VERSION \
-  --set workers[0].image.repository=hydra-worker,workers[0].image.tag=$VERSION \
-  --set workers[1].image.repository=hydra-go-worker,workers[1].image.tag=$VERSION \
-  --set domainSeed.image.repository=hydra-scheduler,domainSeed.image.tag=$VERSION
-```
-
-If you *do* push to your own registry (GHCR, a private registry, etc.)
-instead, set `imagePullPolicy: Always` and each component's
-`image.repository`/`tag` to your registry path, plus `imagePullSecrets` if
-it's private.
+With images loaded, `imagePullPolicy: IfNotPresent` (the chart default) means
+Kubernetes uses the locally-loaded image instead of trying to pull from a
+registry. If you *do* push to a registry (GHCR, a private registry, etc.),
+set `imagePullPolicy: Always` and each component's `image.repository`/`tag`
+to your registry path, plus `imagePullSecrets` if it's private.
 
 ## Installing
 
