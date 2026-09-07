@@ -24,13 +24,13 @@ export function JobsDashboard() {
   });
 
   const historyQuery = useQuery({
-    queryKey: ["history", domain],
-    queryFn: fetchHistory,
+    queryKey: ["history-summary", domain],
+    queryFn: () => fetchHistory(undefined, 50),
     refetchInterval: 5000,
   });
 
   const overview = overviewQuery.data ?? [];
-  const history = historyQuery.data ?? [];
+  const history = historyQuery.data?.items ?? [];
 
   // Calculate metrics
   const totalJobs = overview.length;

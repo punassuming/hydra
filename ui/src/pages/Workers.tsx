@@ -8,6 +8,11 @@ import { apiClient } from "../api/client";
 import { useNavigate } from "react-router-dom";
 import { useActiveDomain } from "../context/ActiveDomainContext";
 import { WorkerSetupDrawer } from "../components/WorkerSetupDrawer";
+import { RunInspector } from "../components/RunInspector";
+import { InfiniteScrollSentinel } from "../components/InfiniteScrollSentinel";
+
+const OPERATIONS_PAGE_SIZE = 120;
+const OPERATIONS_MAX = 200;
 
 function connectivityTag(status?: string) {
   const normalized = status === "online" ? "online" : "offline";
@@ -25,7 +30,11 @@ export function WorkersPage() {
   const { domain } = useActiveDomain();
   const [setupDrawerOpen, setSetupDrawerOpen] = useState(false);
   const { data, isLoading } = useQuery({ queryKey: ["workers", domain], queryFn: fetchWorkers, refetchInterval: 5000 });
-  const historyQuery = useQuery({ queryKey: ["history", domain], queryFn: fetchHistory, refetchInterval: 5000 });
+  const historyQuery = useQuery({
+    queryKey: ["history-summary", domain, "workers-execution"],
+    queryFn: () => fetchHistory(undefined, 200),
+    refetchInterval: 5000,
+  });
   const navigate = useNavigate();
   const setStateMutation = useMutation({
     mutationFn: ({ workerId, state }: { workerId: string; state: string }) =>
@@ -175,17 +184,20 @@ export function WorkersPage() {
   const workers = data ?? [];
   const onlineWorkers = workers.filter((w) => (w.connectivity_status ?? w.status) === "online");
   const workerIds = useMemo(() => workers.map((w) => w.worker_id), [workers]);
+  const [operationsLimit, setOperationsLimit] = useState(OPERATIONS_PAGE_SIZE);
   const operationsQueries = useQueries({
     queries: workerIds.map((workerId) => ({
-      queryKey: ["worker-operations", domain, workerId],
-      queryFn: () => fetchWorkerOperations(workerId, 120),
+      queryKey: ["worker-operations", domain, workerId, operationsLimit],
+      queryFn: () => fetchWorkerOperations(workerId, operationsLimit),
       enabled: Boolean(workerId),
       refetchInterval: 8000,
     })),
   });
   const operationsLoading = operationsQueries.some((q) => q.isLoading);
+  const operationsHasMore = operationsQueries.some((q) => q.data?.has_more) && operationsLimit < OPERATIONS_MAX;
+  const [inspectedRunId, setInspectedRunId] = useState<string | undefined>(undefined);
   const businessEvents = useMemo(() => {
-    const rows: Array<{ ts: number; worker_id: string; type: string; message: string }> = [];
+    const rows: Array<{ ts: number; worker_id: string; type: string; message: string; run_id?: string }> = [];
     operationsQueries.forEach((q, idx) => {
       const workerId = workerIds[idx];
       const events = q.data?.events ?? [];
@@ -195,18 +207,19 @@ export function WorkersPage() {
           worker_id: workerId,
           type: event.type || "event",
           message: event.message || "",
+          run_id: typeof event.details?.run_id === "string" ? event.details.run_id : undefined,
         });
       });
     });
     rows.sort((a, b) => b.ts - a.ts);
-    return rows.slice(0, 120);
-  }, [operationsQueries, workerIds]);
+    return rows.slice(0, operationsLimit);
+  }, [operationsQueries, workerIds, operationsLimit]);
 
   const executionWindowSeconds = 24 * 3600;
   const executionRows = useMemo(() => {
     const now = Date.now();
     const windowStartMs = now - executionWindowSeconds * 1000;
-    const runs = (historyQuery.data ?? []).filter((run) => run.worker_id);
+    const runs = (historyQuery.data?.items ?? []).filter((run) => run.worker_id);
     return runs
       .map((run) => {
         const startMs = run.start_ts ? new Date(run.start_ts).getTime() : undefined;
@@ -419,28 +432,43 @@ export function WorkersPage() {
               key: "business",
               label: "Business Timeline",
               children: (
-                <List
-                  loading={operationsLoading}
-                  dataSource={businessEvents}
-                  locale={{ emptyText: "No recent worker operation events." }}
-                  renderItem={(event) => (
-                    <List.Item>
-                      <Space wrap>
-                        <Typography.Text type="secondary">
-                          {new Date(event.ts * 1000).toLocaleString()}
-                        </Typography.Text>
-                        <Tag>{event.worker_id}</Tag>
-                        <Tag color="blue">{event.type}</Tag>
-                        <Typography.Text>{event.message}</Typography.Text>
-                      </Space>
-                    </List.Item>
-                  )}
-                />
+                <>
+                  <List
+                    loading={operationsLoading}
+                    dataSource={businessEvents}
+                    locale={{ emptyText: "No recent worker operation events." }}
+                    renderItem={(event) => (
+                      <List.Item
+                        onClick={() => event.run_id && setInspectedRunId(event.run_id)}
+                        style={{ cursor: event.run_id ? "pointer" : undefined }}
+                      >
+                        <Space wrap>
+                          <Typography.Text type="secondary">
+                            {new Date(event.ts * 1000).toLocaleString()}
+                          </Typography.Text>
+                          <Tag>{event.worker_id}</Tag>
+                          <Tag color="blue">{event.type}</Tag>
+                          <Typography.Text>{event.message}</Typography.Text>
+                        </Space>
+                      </List.Item>
+                    )}
+                  />
+                  <InfiniteScrollSentinel
+                    onIntersect={() => setOperationsLimit((n) => Math.min(n + OPERATIONS_PAGE_SIZE, OPERATIONS_MAX))}
+                    enabled={operationsHasMore}
+                    loading={operationsLoading && operationsLimit > OPERATIONS_PAGE_SIZE}
+                  />
+                </>
               ),
             },
           ]}
         />
       </Card>
+      <RunInspector
+        runId={inspectedRunId}
+        open={Boolean(inspectedRunId)}
+        onClose={() => setInspectedRunId(undefined)}
+      />
     </Space>
   );
 }

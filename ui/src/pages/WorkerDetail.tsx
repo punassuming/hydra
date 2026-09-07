@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, Col, Descriptions, Row, Space, Statistic, Tag, Typography, Button, List, Slider, Tooltip } from "antd";
 import { useNavigate, useParams } from "react-router-dom";
 import { fetchWorkerMetrics, fetchWorkerOperations, fetchWorkers, fetchWorkerTimeline } from "../api/jobs";
 import { apiClient } from "../api/client";
 import { WorkerMetricPoint, WorkerOperation, WorkerTimelineData, WorkerTimelineEntry } from "../types";
 import { useActiveDomain } from "../context/ActiveDomainContext";
+import { RunInspector } from "../components/RunInspector";
+import { InfiniteScrollSentinel } from "../components/InfiniteScrollSentinel";
 
 function statusColor(status: string) {
   if (status === "success") return "#22c55e";
@@ -93,7 +95,7 @@ function MetricLineChart({
   );
 }
 
-function WorkerTimeline({ data }: { data?: WorkerTimelineData }) {
+function WorkerTimeline({ data, onInspect }: { data?: WorkerTimelineData; onInspect?: (runId: string) => void }) {
   if (!data?.entries?.length) {
     return <Typography.Text type="secondary">No worker executions in the selected window.</Typography.Text>;
   }
@@ -141,6 +143,7 @@ function WorkerTimeline({ data }: { data?: WorkerTimelineData }) {
                     title={`${entry.job_name || entry.job_id} | ${entry.status} | ${new Date(entry.start_ts * 1000).toLocaleTimeString()} - ${new Date(entry.end_ts * 1000).toLocaleTimeString()}`}
                   >
                     <div
+                      onClick={() => onInspect?.(entry.run_id)}
                       style={{
                         position: "absolute",
                         left: `${left}%`,
@@ -159,6 +162,7 @@ function WorkerTimeline({ data }: { data?: WorkerTimelineData }) {
                         color: "#f8fafc",
                         fontSize: 11,
                         padding: "2px 6px",
+                        cursor: onInspect ? "pointer" : undefined,
                       }}
                     >
                       {entry.job_name || entry.job_id}
@@ -203,12 +207,19 @@ export function WorkerDetailPage() {
     enabled: Boolean(workerId),
     refetchInterval: 10000,
   });
-  const operationsQuery = useQuery({
+  const operationsQuery = useInfiniteQuery({
     queryKey: ["worker-operations", domain, workerId],
-    queryFn: () => fetchWorkerOperations(workerId!, 300),
+    queryFn: ({ pageParam }) => fetchWorkerOperations(workerId!, 50, pageParam),
+    initialPageParam: undefined as number | undefined,
+    getNextPageParam: (lastPage) => (lastPage.has_more ? (lastPage.next_before_ts ?? undefined) : undefined),
     enabled: Boolean(workerId),
     refetchInterval: 5000,
   });
+  const operationEvents = useMemo(
+    () => (operationsQuery.data?.pages ?? []).flatMap((page) => page.events),
+    [operationsQuery.data],
+  );
+  const [inspectedRunId, setInspectedRunId] = useState<string | undefined>(undefined);
   const metricPoints = useMemo(() => metricsQuery.data?.points ?? [], [metricsQuery.data?.points]);
   const windowMarks = useMemo(
     () => ({
@@ -358,7 +369,7 @@ export function WorkerDetailPage() {
           </div>
         }
       >
-        <WorkerTimeline data={timelineQuery.data} />
+        <WorkerTimeline data={timelineQuery.data} onInspect={setInspectedRunId} />
       </Card>
 
       <Row gutter={16}>
@@ -451,28 +462,44 @@ export function WorkerDetailPage() {
       <Card title="Operational Timeline">
         <List
           loading={operationsQuery.isLoading}
-          dataSource={operationsQuery.data?.events ?? []}
+          dataSource={operationEvents}
           locale={{ emptyText: "No operational events yet." }}
-          renderItem={(event: WorkerOperation) => (
-            <List.Item>
-              <Space direction="vertical" style={{ width: "100%" }} size={2}>
-                <Space wrap>
-                  <Tag color={opColor(event.type)}>{event.type}</Tag>
-                  <Typography.Text strong>{event.message}</Typography.Text>
-                  <Typography.Text type="secondary">{new Date(event.ts * 1000).toLocaleString()}</Typography.Text>
+          renderItem={(event: WorkerOperation) => {
+            const runId = typeof event.details?.run_id === "string" ? event.details.run_id : undefined;
+            return (
+              <List.Item
+                onClick={() => runId && setInspectedRunId(runId)}
+                style={{ cursor: runId ? "pointer" : undefined }}
+              >
+                <Space direction="vertical" style={{ width: "100%" }} size={2}>
+                  <Space wrap>
+                    <Tag color={opColor(event.type)}>{event.type}</Tag>
+                    <Typography.Text strong>{event.message}</Typography.Text>
+                    <Typography.Text type="secondary">{new Date(event.ts * 1000).toLocaleString()}</Typography.Text>
+                  </Space>
+                  {event.details && Object.keys(event.details).length > 0 && (
+                    <Typography.Text type="secondary">
+                      {Object.entries(event.details)
+                        .map(([k, v]) => `${k}=${typeof v === "string" ? v : JSON.stringify(v)}`)
+                        .join(" · ")}
+                    </Typography.Text>
+                  )}
                 </Space>
-                {event.details && Object.keys(event.details).length > 0 && (
-                  <Typography.Text type="secondary">
-                    {Object.entries(event.details)
-                      .map(([k, v]) => `${k}=${typeof v === "string" ? v : JSON.stringify(v)}`)
-                      .join(" · ")}
-                  </Typography.Text>
-                )}
-              </Space>
-            </List.Item>
-          )}
+              </List.Item>
+            );
+          }}
+        />
+        <InfiniteScrollSentinel
+          onIntersect={() => operationsQuery.fetchNextPage()}
+          enabled={Boolean(operationsQuery.hasNextPage)}
+          loading={operationsQuery.isFetchingNextPage}
         />
       </Card>
+      <RunInspector
+        runId={inspectedRunId}
+        open={Boolean(inspectedRunId)}
+        onClose={() => setInspectedRunId(undefined)}
+      />
     </Space>
   );
 }

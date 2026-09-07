@@ -1,12 +1,12 @@
 import { useMemo, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Card, Space, Typography, Button, Progress, Table, Tag, Modal, Tabs, Input, Select, Spin } from "antd";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Card, Space, Typography, Button, Progress, Table, Tag, Tabs, Input, Select, Spin } from "antd";
 import { fetchJobOverview, runJobNow, fetchHistory, fetchJobs, fetchWorkers } from "../api/jobs";
 import { JobOverview, JobRun, WorkerInfo } from "../types";
 import { useActiveDomain } from "../context/ActiveDomainContext";
 import { StatusBadge } from "../components/StatusBadge";
-import { LogViewer } from "../components/LogViewer";
-import { FailureInsight } from "../components/FailureInsight";
+import { RunInspector } from "../components/RunInspector";
+import { InfiniteScrollSentinel } from "../components/InfiniteScrollSentinel";
 import { useTheme } from "../theme";
 import {
   BarChartOutlined,
@@ -210,9 +210,11 @@ function HistoryTab() {
   const { domain } = useActiveDomain();
   const [searchText, setSearchText] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage } = useInfiniteQuery({
     queryKey: ["history", domain],
-    queryFn: fetchHistory,
+    queryFn: ({ pageParam }) => fetchHistory(pageParam),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (lastPage) => (lastPage.has_more ? (lastPage.next_cursor ?? undefined) : undefined),
     refetchInterval: 5000,
   });
   const jobsQuery = useQuery({
@@ -225,7 +227,9 @@ function HistoryTab() {
     queryFn: fetchWorkers,
     refetchInterval: 5000,
   });
-  const [logModal, setLogModal] = useState<{ visible: boolean; run?: JobRun }>({ visible: false });
+  const [inspectedRun, setInspectedRun] = useState<JobRun | undefined>(undefined);
+
+  const runsFlat = useMemo(() => (data?.pages ?? []).flatMap((page) => page.items), [data]);
 
   const jobsById = useMemo(() => {
     const map = new Map<string, string>();
@@ -245,15 +249,15 @@ function HistoryTab() {
 
   const statusOptions = useMemo(() => {
     const set = new Set<string>();
-    for (const run of data ?? []) {
+    for (const run of runsFlat) {
       set.add((run.status ?? "unknown").toLowerCase());
     }
     return Array.from(set).sort();
-  }, [data]);
+  }, [runsFlat]);
 
   const filteredRuns = useMemo(() => {
     const needle = searchText.trim().toLowerCase();
-    return (data ?? []).filter((run) => {
+    return runsFlat.filter((run) => {
       const status = (run.status ?? "unknown").toLowerCase();
       if (statusFilter !== "all" && status !== statusFilter) {
         return false;
@@ -339,7 +343,7 @@ function HistoryTab() {
       title: "Logs",
       key: "logs",
       render: (_: unknown, record: JobRun) => (
-        <Typography.Link onClick={() => setLogModal({ visible: true, run: record })}>View Logs</Typography.Link>
+        <Typography.Link onClick={() => setInspectedRun(record)}>View Logs</Typography.Link>
       ),
     },
   ];
@@ -372,37 +376,14 @@ function HistoryTab() {
           </Space>
         }
       >
-        <Table dataSource={runs} columns={columns} loading={isLoading} size="small" pagination={{ pageSize: 10 }} />
+        <Table dataSource={runs} columns={columns} loading={isLoading} size="small" pagination={false} />
+        <InfiniteScrollSentinel
+          onIntersect={() => fetchNextPage()}
+          enabled={Boolean(hasNextPage)}
+          loading={isFetchingNextPage}
+        />
       </Card>
-      <Modal open={logModal.visible} onCancel={() => setLogModal({ visible: false })} footer={null} width={1000} title="Run Logs">
-        {logModal.run ? (
-          <Space direction="vertical" style={{ width: "100%" }}>
-            <Space>
-              <StatusBadge status={logModal.run.status} />
-              <Typography.Text type="secondary">Run ID: {logModal.run._id}</Typography.Text>
-              {logModal.run.worker_id && <Typography.Text type="secondary">Worker: {logModal.run.worker_id}</Typography.Text>}
-            </Space>
-            <Typography.Text>
-              Started: {logModal.run.start_ts ? new Date(logModal.run.start_ts).toLocaleString() : "-"} · 
-              Finished: {logModal.run.end_ts ? new Date(logModal.run.end_ts).toLocaleString() : "-"} · 
-              Duration: {typeof logModal.run.duration === "number" ? `${logModal.run.duration.toFixed(1)}s` : "-"}
-            </Typography.Text>
-            <LogViewer
-              stdout={logModal.run.stdout_tail ?? logModal.run.stdout}
-              stderr={logModal.run.stderr_tail ?? logModal.run.stderr}
-              maxHeight={400}
-            />
-            <FailureInsight
-              runId={logModal.run._id}
-              stdout={logModal.run.stdout || ""}
-              stderr={logModal.run.stderr || ""}
-              exitCode={logModal.run.returncode || 1}
-            />
-          </Space>
-        ) : (
-          <Typography.Text type="secondary">No logs available.</Typography.Text>
-        )}
-      </Modal>
+      <RunInspector run={inspectedRun} open={Boolean(inspectedRun)} onClose={() => setInspectedRun(undefined)} />
     </>
   );
 }
