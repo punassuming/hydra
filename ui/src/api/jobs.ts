@@ -16,6 +16,7 @@ import {
   SourceConfig,
   QueueOverview,
   QueuePressure,
+  HistoryPage,
 } from "../types";
 
 export interface JobPayload {
@@ -86,19 +87,27 @@ export const fetchWorkerMetrics = (workerId: string, minutes = 30) =>
   apiClient.get<WorkerMetricsData>(`/workers/${workerId}/metrics?minutes=${minutes}`);
 export const fetchWorkerTimeline = (workerId: string, minutes = 180) =>
   apiClient.get<WorkerTimelineData>(`/workers/${workerId}/timeline?minutes=${minutes}`);
-export const fetchWorkerOperations = (workerId: string, limit = 250) =>
-  apiClient.get<WorkerOperationsData>(`/workers/${workerId}/operations?limit=${limit}`);
+export const fetchWorkerOperations = (workerId: string, limit = 50, beforeTs?: number) => {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (beforeTs !== undefined) params.set("before_ts", String(beforeTs));
+  return apiClient.get<WorkerOperationsData>(`/workers/${workerId}/operations?${params.toString()}`);
+};
 export const detachWorker = (workerId: string, force = false) =>
   apiClient.post<{ ok: boolean; domain: string; worker_id: string; detached: boolean; requeued_jobs: number }>(
     `/workers/${workerId}/detach${force ? "?force=true" : ""}`,
     {},
   );
 export const fetchJobRuns = (jobId: string) => apiClient.get<JobRun[]>(`/jobs/${jobId}/runs`);
+export const fetchRun = (runId: string) => apiClient.get<JobRun>(`/runs/${runId}`);
 export const fetchJobOverview = () => apiClient.get<JobOverview[]>("/overview/jobs");
 export const fetchQueueOverview = () => apiClient.get<QueueOverview>("/overview/queue");
 export const fetchQueuePressure = () => apiClient.get<QueuePressure>("/overview/pressure");
 export const fetchJobStatistics = () => apiClient.get<JobStatistics>("/overview/statistics");
-export const fetchHistory = () => apiClient.get<JobRun[]>("/history/");
+export const fetchHistory = (cursor?: string, limit = 50) => {
+  const params = new URLSearchParams({ paged: "true", limit: String(limit) });
+  if (cursor) params.set("cursor", cursor);
+  return apiClient.get<HistoryPage>(`/history/?${params.toString()}`);
+};
 export const fetchJobGrid = (jobId: string) => apiClient.get<JobGridData>(`/jobs/${jobId}/grid`);
 export const fetchJobGantt = (jobId: string) => apiClient.get<JobGanttData>(`/jobs/${jobId}/gantt`);
 export const fetchJobGraph = (jobId: string) => apiClient.get<JobGraphData>(`/jobs/${jobId}/graph`);

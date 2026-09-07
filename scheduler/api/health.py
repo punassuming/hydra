@@ -28,15 +28,24 @@ def demo_mode_enabled() -> bool:
 @router.get("/health")
 def health(request: Request):
     r = get_redis()
-    domain = getattr(request.state, "domain", "prod")
+    # Health is intentionally auth-exempt, so unauthenticated probes do not
+    # pass through the auth middleware that normally sets request.state.domain.
+    # Honor an explicit domain for targeted probes; otherwise report aggregate
+    # stats across domains rather than silently checking the unrelated `prod`
+    # namespace.
+    domain = getattr(request.state, "domain", None) or request.query_params.get("domain")
     # Ping Mongo too — job/admin APIs depend on it, so a Redis-only check would
     # keep reporting "ok" (and keep passing Docker/k8s readiness) during a Mongo
     # outage. Letting this raise on failure is intentional: FastAPI turns it into
     # a 500, which is what marks the container/pod unhealthy.
     get_db().command("ping")
     # Return lightweight health stats
-    workers_count = len(list(r.scan_iter(f"workers:{domain}:*")))
-    pending = r.zcard(f"job_queue:{domain}:pending")
+    if domain:
+        workers_count = len(list(r.scan_iter(f"workers:{domain}:*")))
+        pending = r.zcard(f"job_queue:{domain}:pending")
+    else:
+        workers_count = len(list(r.scan_iter("workers:*:*")))
+        pending = sum(r.zcard(key) for key in r.scan_iter("job_queue:*:pending"))
     return {
         "status": "ok",
         "workers": workers_count,

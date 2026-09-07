@@ -157,6 +157,34 @@ jobs:
           print("OK: env/envFrom rendered correctly with demoMode + extraEnv set")
           PY
 
+      - name: helm template — UI container port (regression check for the nginx-unprivileged 8080 switch)
+        run: |
+          helm template hydra deploy/helm/hydra > /tmp/default-render.yaml
+          python3 - <<'PY'
+          import yaml
+
+          docs = list(yaml.safe_load_all(open("/tmp/default-render.yaml")))
+          ui_service = next(
+              d for d in docs
+              if d and d.get("kind") == "Service" and d["metadata"]["name"] == "hydra-ui"
+          )
+          ui_deploy = next(
+              d for d in docs
+              if d and d.get("kind") == "Deployment" and d["metadata"]["name"] == "hydra-ui"
+          )
+          container = ui_deploy["spec"]["template"]["spec"]["containers"][0]
+
+          # ui/Dockerfile switched to nginxinc/nginx-unprivileged, which can't
+          # bind port 80 — the chart's Service targetPort, container
+          # containerPort, and both probes must all agree on 8080, or the UI
+          # silently fails readiness/liveness and the Service routes nowhere.
+          assert ui_service["spec"]["ports"][0]["targetPort"] == 8080, ui_service["spec"]["ports"]
+          assert container["ports"][0]["containerPort"] == 8080, container["ports"]
+          assert container["readinessProbe"]["httpGet"]["port"] == 8080, container["readinessProbe"]
+          assert container["livenessProbe"]["httpGet"]["port"] == 8080, container["livenessProbe"]
+          print("OK: UI Service/Deployment/probes all agree on container port 8080")
+          PY
+
   ui:
     runs-on: ubuntu-latest
     permissions:

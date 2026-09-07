@@ -25,7 +25,8 @@ vi.mock("../components/EventsFeed", () => ({
 vi.mock("../api/jobs", () => ({
   fetchWorkers: (...args: unknown[]) => mockFetchWorkers(...args),
   fetchJobs: vi.fn().mockResolvedValue([]),
-  fetchHistory: vi.fn().mockResolvedValue([]),
+  fetchHistory: vi.fn().mockResolvedValue({ items: [], next_cursor: null, has_more: false }),
+  fetchRun: vi.fn().mockResolvedValue(null),
   fetchJobOverview: vi.fn().mockResolvedValue([]),
   fetchQueueOverview: vi.fn().mockResolvedValue({ pending: [], upcoming: [] }),
   fetchQueuePressure: vi.fn().mockResolvedValue({}),
@@ -37,7 +38,7 @@ vi.mock("../api/jobs", () => ({
   fetchJobGraph: vi.fn().mockResolvedValue({ nodes: [], links: [] }),
   fetchWorkerMetrics: vi.fn().mockResolvedValue({ points: [] }),
   fetchWorkerTimeline: vi.fn().mockResolvedValue({ entries: [], max_concurrency: 1, window_start_ts: 0, window_end_ts: 0 }),
-  fetchWorkerOperations: vi.fn().mockResolvedValue({ events: [] }),
+  fetchWorkerOperations: vi.fn().mockResolvedValue({ events: [], next_before_ts: null, has_more: false }),
   detachWorker: vi.fn().mockResolvedValue({ ok: true, worker_id: "", detached: true, requeued_jobs: 0 }),
   fetchTemplates: vi.fn().mockResolvedValue([]),
   generateJob: vi.fn(),

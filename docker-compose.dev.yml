@@ -33,3 +33,8 @@ services:
         condition: service_healthy
     volumes:
       - ./worker:/app/worker
+    # redis/scheduler live on the base file's internal "backend" network —
+    # without this, a service newly introduced here (rather than overriding
+    # one already in docker-compose.yml) falls back to Compose's separate
+    # implicit "default" network and can't reach either.
+    networks: [backend]

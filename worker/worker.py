@@ -315,15 +315,18 @@ def worker_main():
             success = False
             timings: dict = {}
             first_attempt = True
+            timed_out_holder: dict = {}
             for _ in range(max(1, attempts)):
                 run_start_time = time.time()
                 attempt_timings: dict = {}
+                timed_out_holder = {}
                 rc, stdout, stderr = execute_job(
                     job,
                     log_callback_out=handle_stdout,
                     log_callback_err=lambda text: stream_log("stderr", text),
                     kill_event=kill_event,
                     timings=attempt_timings,
+                    timed_out_holder=timed_out_holder,
                 )
                 # Capture timings from the first attempt only
                 if first_attempt:
@@ -341,7 +344,13 @@ def worker_main():
                     break
 
             end_ts = time.time()
-            status = "success" if success else "failed"
+            # rc == 124 alone isn't reliable: a normally-exiting command can
+            # legitimately return 124 for its own reasons, which would
+            # otherwise be misreported as a timeout (and become eligible for
+            # scheduler-level retry, potentially rerunning non-idempotent
+            # work). timed_out_holder is set explicitly by the subprocess
+            # layer only when a wait actually timed out.
+            status = "success" if success else ("timed_out" if timed_out_holder.get("timed_out") else "failed")
             publish_run_event(
                 {
                     "type": "run_end",

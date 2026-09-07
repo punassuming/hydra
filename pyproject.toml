@@ -30,6 +30,7 @@ include = ["cli*", "scheduler*", "worker*"]
 
 [dependency-groups]
 dev = [
+    "httpx",
     "pytest==8.3.5",
     "ruff==0.15.22",
 ]

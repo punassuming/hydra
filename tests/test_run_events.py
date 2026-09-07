@@ -180,6 +180,19 @@ class TestHandleRunEndIdempotency:
         mock_retry.assert_not_called()
         mock_op.assert_not_called()
 
+    def test_timed_out_run_is_eligible_for_scheduler_retry(self):
+        existing = {"_id": "r1", "status": "running", "start_ts": datetime.now(timezone.utc)}
+        db = _make_db(existing_doc=existing)
+        db.job_runs.update_one.return_value = SimpleNamespace(matched_count=1, upserted_id=None)
+        db.job_definitions.find_one.return_value = {"max_retries": 1, "retry_delay_seconds": 0, "priority": 5}
+
+        with patch("scheduler.run_events.get_db", return_value=db), \
+             patch("scheduler.run_events.append_worker_op"), \
+             patch("scheduler.run_events._enqueue_job_for_retry") as mock_retry:
+            _handle_run_end(_run_end_payload(status="timed_out"))
+
+        mock_retry.assert_called_once()
+
     def test_run_end_missing_run_id_is_silently_dropped(self):
         db = _make_db()
         with patch("scheduler.run_events.get_db", return_value=db):

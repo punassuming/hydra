@@ -92,7 +92,7 @@ scheduler:
   replicas: 1
   image:
     repository: hydra-scheduler
-    tag: latest
+    tag: "0.1.0"
   service:
     type: ClusterIP
     port: 8000
@@ -144,7 +144,7 @@ ui:
   replicas: 1
   image:
     repository: hydra-ui
-    tag: latest
+    tag: "0.1.0"
   service:
     type: ClusterIP
     port: 80
@@ -182,7 +182,7 @@ workers:
     requireRedisAcl: true
     image:
       repository: hydra-worker
-      tag: latest
+      tag: "0.1.0"
     resources:
       requests:
         cpu: 100m
@@ -209,7 +209,7 @@ workers:
     requireRedisAcl: true
     image:
       repository: hydra-go-worker
-      tag: latest
+      tag: "0.1.0"
     resources:
       requests:
         cpu: 50m
@@ -247,7 +247,7 @@ domainSeed:
   extraDomains: []
   image:
     repository: hydra-scheduler
-    tag: latest
+    tag: "0.1.0"
 
 # ---------------------------------------------------------------------------
 # Ingress (optional) — off by default. Turn on if you run an ingress

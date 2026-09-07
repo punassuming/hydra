@@ -374,6 +374,14 @@ export interface WorkerOperationsData {
   worker_id: string;
   domain: string;
   events: WorkerOperation[];
+  next_before_ts: number | null;
+  has_more: boolean;
+}
+
+export interface HistoryPage {
+  items: JobRun[];
+  next_cursor: string | null;
+  has_more: boolean;
 }
 
 export interface SchedulerEvent {
