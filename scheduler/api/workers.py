@@ -440,8 +440,23 @@ def detach_worker(worker_id: str, request: Request):
 def worker_operations(worker_id: str, request: Request):
     r = get_redis()
     domain, _key, _data = _resolve_worker_key(request, worker_id)
-    limit = max(20, min(int(request.query_params.get("limit", "200")), 1000))
-    raw_events = r.lrange(f"worker_ops:{domain}:{worker_id}", -limit, -1) or []
+    try:
+        limit = max(1, min(int(request.query_params.get("limit", "50")), 200))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="limit must be an integer") from exc
+
+    before_ts_param = request.query_params.get("before_ts")
+    before_ts = None
+    if before_ts_param is not None:
+        try:
+            before_ts = float(before_ts_param)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="before_ts must be a number") from exc
+
+    # append_worker_op() LTRIMs this list to 1000 entries on every write, so
+    # a full-list fetch is bounded/cheap — simpler than reimplementing cursor
+    # semantics against Redis's list-only (no secondary index) indexing.
+    raw_events = r.lrange(f"worker_ops:{domain}:{worker_id}", 0, -1) or []
     events = []
     for raw in raw_events:
         try:
@@ -449,4 +464,16 @@ def worker_operations(worker_id: str, request: Request):
         except Exception:
             continue
     events.sort(key=lambda e: float(e.get("ts") or 0), reverse=True)
-    return {"worker_id": worker_id, "domain": domain, "events": events}
+    if before_ts is not None:
+        events = [e for e in events if float(e.get("ts") or 0) < before_ts]
+
+    has_more = len(events) > limit
+    page = events[:limit]
+    next_before_ts = page[-1]["ts"] if has_more and page else None
+    return {
+        "worker_id": worker_id,
+        "domain": domain,
+        "events": page,
+        "next_before_ts": next_before_ts,
+        "has_more": has_more,
+    }
