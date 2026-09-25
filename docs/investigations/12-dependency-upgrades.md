@@ -10,25 +10,48 @@
 ### Production Dependencies
 
 #### croniter==2.0.5
-**Status:** PENDING  
-**Current Pinned:** 2.0.5
+**Status:** BEHIND (Major version jump)  
+**Current Pinned:** 2.0.5  
+**Latest Stable:** 6.2.4 (as of July 2026)  
+**Classification:** Behind  
+**Breaking Changes:** Major version jump from 2.0.5 → 6.2.4. Versions 2 and 6 have different cron grammar implementations. Requires compatibility testing.  
+**Effort:** Medium (may need to test cron expressions)  
+**Recommendation:** Upgrade to 6.2.4 as part of a larger compatibility review. Validate all cron schedule expressions after upgrade.
 
 #### cryptography>=46.0.5
-**Status:** PENDING  
-**Current Pinned:** >=46.0.5
+**Status:** BEHIND  
+**Current Pinned:** >=46.0.5 (flexible constraint)  
+**Latest Stable:** 49.0.0  
+**Classification:** Behind  
+**Security Notes:** 46.0.5 (Feb 10, 2026) fixed CVE-2026-26007 (binary elliptic curve attack). Current constraint allows upgrade. No newer CVEs noted for 49.0.0.  
+**Effort:** Low (minor version upgrade)  
+**Recommendation:** Update constraint to `>=49.0.0` or `>=49.0` if testing confirms no breaking changes. Security-sensitive: review changelog for any OpenSSL/cryptography algorithm changes.
 
 #### fastapi==0.115.0
-**Status:** PENDING  
-**Current Pinned:** 0.115.0
+**Status:** BEHIND  
+**Current Pinned:** 0.115.0  
+**Latest Stable:** 0.141.1 (as of July 29, 2026)  
+**Classification:** Behind  
+**Effort:** Low (minor version upgrade within 0.x series)  
+**Recommendation:** Upgrade to 0.141.1. Review changelog for any deprecated parameters or middleware changes.
 
 #### google-generativeai==0.3.2
-**Status:** PENDING  
+**Status:** DEPRECATED/EOL (URGENT)  
 **Current Pinned:** 0.3.2  
-**Note:** Already known-deprecated per AGENTS.md investigation lesson. Will verify status.
+**Replacement Package:** `google-genai` (new unified Google GenAI SDK)  
+**Classification:** Deprecated/EOL — Urgent Migration Required  
+**Details:** Google has officially deprecated the google-generativeai package. The package emits FutureWarning on every import and is no longer receiving updates or bug fixes. Google Vertex AI SDK migration deadline was June 24, 2026 (already passed).  
+**Effort:** High (requires code changes to migrate from google-generativeai to google-genai)  
+**Recommendation:** URGENT. Migrate to `google-genai` package immediately. This is a breaking change that requires rewriting the AI integration code in `scheduler/api/ai.py`.
 
 #### openai==1.12.0
-**Status:** PENDING  
-**Current Pinned:** 1.12.0
+**Status:** BEHIND (Critical — Major version)  
+**Current Pinned:** 1.12.0  
+**Latest Stable:** 3.19.2 (as of September 24, 2026)  
+**Classification:** Behind — Major version jump (1.x → 3.x)  
+**Breaking Changes:** Significant version jump. OpenAI SDK v3.x has breaking changes compared to v1.12.0. Likely requires rewriting calls in `scheduler/api/ai.py`.  
+**Effort:** High (requires testing all OpenAI integration code)  
+**Recommendation:** Upgrade to 3.19.2, but allocate time for thorough testing of all LLM calls. Review OpenAI SDK changelog for v2.0 and v3.0 breaking changes.
 
 #### pydantic==2.9.2
 **Status:** PENDING  
