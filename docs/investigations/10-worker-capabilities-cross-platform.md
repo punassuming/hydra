@@ -250,7 +250,38 @@ def _with_impersonation(cmd: list[str]) -> list[str]:
 *Investigating: Go worker build matrix, OS-conditional code, and positioning (Linux/container-only vs. multi-platform).*
 
 ### Findings
-(To be updated as investigation proceeds...)
+
+**Build & Test Coverage:**
+- ✓ CI builds Go worker on `ubuntu-latest` only (`.github/workflows/python-ci.yml` line 249).
+- ✓ No multi-platform (macOS, Windows) test matrix for Go worker.
+- ✓ Container image build (`.github/workflows/container-images.yml`) targets Linux only (line 26: `runs-on: ubuntu-latest`).
+- ✓ `go-worker/Dockerfile` explicitly sets `GOOS=linux GOARCH=amd64` (line 8).
+- ✓ README shows manual cross-compile examples for Linux, Windows, macOS (lines 74-80), but these are theoretical — not tested in CI.
+
+**OS-Conditional Code:**
+- ✓ `go-worker/internal/executor/executor.go` checks `runtime.GOOS == "windows"` for shell detection (DetectShells).
+- ✓ Impersonation explicitly guards: `runtime.GOOS != "linux" && runtime.GOOS != "darwin"` (same as Python worker).
+- ✓ Metrics collection uses Linux-specific syscalls guarded by `runtime.GOOS == "linux"` in `internal/worker/metrics.go`.
+
+**Documented Feature Gaps vs. Python Worker:**
+- ❌ SQL executor: not implemented (README line 37).
+- ❌ Impersonation / Kerberos: explicitly marked Linux-specific (README line 38).
+- ✓ Shell, external, batch, python, powershell: all supported.
+- ✓ Heartbeat, metrics, concurrency, source fetching, log streaming: all supported.
+
+**Positioning & Operator Expectations:**
+- README explicitly advertises cross-compile commands for Windows/macOS (lines 74-80).
+- BUT README does NOT claim production support for Windows/macOS deployments.
+- README emphasizes "feature-complete" but lists SQL and Impersonation/Kerberos as unsupported.
+- Helm chart in `deploy/helm/hydra` and Compose files (`docker-compose.worker.go.yml`) assume Linux containers.
+- **Gap:** An operator reading the cross-compile section might reasonably attempt a Windows deployment without realizing it's untested.
+
+**Summary — Current State:**
+- ✓ Linux deployment is well-tested and production-ready.
+- ✓ Windows/macOS code paths exist and compile, but untested in CI.
+- ⚠ README's cross-compile examples suggest Windows/macOS are supported, but no disclaimer that it's untested.
+- ⚠ Metrics collection will silently degrade on non-Linux (no load averages exported).
+- Recommendation: Either (1) add CI test matrix for Windows/macOS, or (2) update README to clarify "Linux-only" and move cross-compile examples to a separate "Development" section.
 
 ---
 
@@ -259,7 +290,47 @@ def _with_impersonation(cmd: list[str]) -> list[str]:
 *Investigating: tests exercising capability detection across simulated OS conditions — coverage gaps.*
 
 ### Findings
-(To be updated as investigation proceeds...)
+
+**Location:** `tests/test_worker.py` lines 573-1143 (capability tests), 760-780+ (affinity tests).
+
+**Capability Detection Tests (`test_worker.py`):**
+- ✓ `test_detect_capabilities_includes_http()` (line 573): Verifies http capability is always present.
+- ✓ `test_detect_capabilities_sql_depends_on_drivers()` (line 583): Mocks sqlalchemy import to test SQL detection.
+- ✓ `test_detect_capabilities_shell_requires_working_shell()` (line 1091): Mocks subprocess.run to simulate shell failure.
+- ✓ `test_detect_capabilities_sql_requires_python()` (line 1106): Mocks _find_python() to test Python dependency.
+- ✓ `test_detect_capabilities_sensor_always_present()` (line 1116): Verifies sensor is always advertised.
+- ✓ `test_detect_capabilities_no_false_positive_sql_without_driver()` (line 1124): Tests SQL not advertised without sqlalchemy.
+
+**Cross-Platform Test Coverage Gaps:**
+- ❌ NO tests mock `platform.system()` to simulate Linux vs. Windows vs. macOS.
+- ❌ NO tests verify batch executor is/isn't advertised on different platforms.
+- ❌ NO tests verify powershell detection on Windows vs. unavailable on Linux.
+- ❌ NO tests simulate missing cmd.exe on Windows (to test batch robustness).
+- ❌ Capability detection runs only on the CI OS (Linux for Python tests, never on Windows/macOS).
+
+**Affinity Tests:**
+- ✓ `test_affinity_executor_type()` (line 765+): Tests impersonation jobs are rejected on Windows workers.
+- Uses hardcoded `{"os": "windows"}` worker metadata to simulate Windows platform.
+- ✓ Affinity checks reject impersonation jobs on non-Linux/macOS.
+
+**Scheduler-Side Capability Checks:**
+- `scheduler/utils/affinity.py` contains job-to-worker matching logic.
+- Tests verify affinity matching, but capability-to-executor mapping not explicitly tested from scheduler perspective.
+
+**Missing Test Scenarios:**
+1. Batch executor advertised on Linux (shouldn't be) — not tested.
+2. Batch executor advertised on Windows without cmd.exe (false positive) — not tested.
+3. PowerShell executor behavior across Windows/Linux/macOS — not tested.
+4. Shell detection fallback (bash → sh → pwsh) — partially tested, but not per OS.
+5. Python executor on workers with Python missing — not tested (likely caught by "no executor" case).
+
+**Summary:**
+- ✓ Core capability detection mechanisms are tested via mocking.
+- ⚠ Platform-specific tests are limited to affinity (impersonation on Windows).
+- ⚠ No cross-OS mocking in capability tests; all tests run on the CI OS (Linux).
+- ⚠ Batch executor (Windows-only) has no dedicated test, no verification of cmd.exe.
+- Recommendation: Add parameterized tests that mock `platform.system()` to simulate Windows, macOS, Linux and verify correct executor type advertis.
+
 
 ---
 
@@ -268,10 +339,102 @@ def _with_impersonation(cmd: list[str]) -> list[str]:
 *Investigating: UI display of worker OS, deployment type, and advertised capabilities.*
 
 ### Findings
-(To be updated as investigation proceeds...)
+
+**Location:** `ui/src/pages/WorkerDetail.tsx` lines 395-396 (OS/Deployment), 447-450 (Shells/Capabilities); `ui/src/components/WorkersPanel.tsx` line 19 (Deployment in list).
+
+**Worker Detail Page Display (WorkerDetail.tsx):**
+- ✓ **OS:** Displayed prominently in "Details" card (line 395).
+- ✓ **Deployment Type:** Displayed in "Details" card (line 396).
+- ✓ **Capabilities:** Displayed as cyan tags in "Affinity tags" section (line 450).
+- ✓ **Shells:** Displayed as blue tags in "Affinity tags" section (line 447).
+- ✓ **Python Version:** Displayed to help diagnose Python executor availability (line 398).
+- ✓ **Connectivity Status:** Shows online/offline to help diagnose heartbeat issues (line 400).
+- ✓ **Run User:** Helps diagnose impersonation capability (line 399).
+
+**Workers List Page (WorkersPanel.tsx):**
+- ✓ **Deployment Type:** Visible in table columns (line 19).
+- Other columns likely include hostname, status, concurrency.
+
+**Operator Diagnostic Workflow:**
+1. Operator submits a batch job (Windows-only executor).
+2. Job sits in pending queue (no eligible worker).
+3. Operator goes to Workers detail page.
+4. Sees: OS = linux, Deployment = docker, Capabilities = [shell, python, http, sensor].
+5. Realizes: batch executor is not advertised because this is a Linux worker, not Windows.
+6. Clears action: add a Windows worker or convert job to shell executor.
+
+**Assessment & Gaps:**
+
+- ✓ **OS, Deployment Type, Capabilities, Shells** are clearly displayed.
+- ✓ **Affinity tags** section is well-organized and easy to scan.
+- ⚠ **NO "Affinity Guidance" for Impersonation:** Worker detail doesn't explicitly warn "impersonation not supported on this OS" even if job config requires it. Operator must infer from (OS = windows or macOS) × (Capabilities does not include impersonate).
+- ⚠ **NO "Suggested Fixes" in Pending Queue:** When a job is pending with no eligible worker, the UI should suggest "This job requires X capability, available on Y workers" or similar. Currently, operator must manually inspect each worker.
+- ✓ **Starvation Visibility:** AGENTS.md mentions "starvation warnings" in logs and `/overview/pressure` endpoint (line 57), but unclear if UI surfaces this.
+
+**UI Feature Opportunity:**
+- Could add a "Why isn't my job running?" help panel in the Pending Jobs section that cross-references:
+  - Job's executor type → required capabilities.
+  - Worker's advertised capabilities → why job isn't a match.
+  - Affinity/tags mismatches.
+
+**Summary:**
+- ✓ Core information (OS, Deployment, Capabilities, Shells) is displayed clearly.
+- ✓ Operator can diagnose "why no worker" by inspecting worker detail.
+- ⚠ UX could be improved with explicit affinity mismatch explanations in pending job view.
+- ⚠ No warning for OS-incompatible features (batch on Linux, impersonation on Windows).
 
 ---
 
 ## Summary — Top 5 Priorities
 
-(To be completed after investigation concludes...)
+Ranked by **Correctness Risk × Effort** (highest impact / lowest cost first):
+
+### 1. **Batch Executor cmd.exe Verification** (HIGH IMPACT, VERY LOW EFFORT)
+- **Risk:** False-positive capability advertisement on Windows Nano or stripped images lacking cmd.exe. Jobs fail at runtime instead of being rejected at dispatch.
+- **Fix:** Add `cmd /c "exit 0"` test to `_detect_shells()` in `worker/runtime.py` (line 78-92), mirroring powershell test.
+- **Effort:** ~10 lines of code.
+- **File:** `/home/user/Hydra/worker/runtime.py` lines 78-92.
+
+### 2. **Go Worker Cross-Platform Testing or Documentation Clarification** (MEDIUM IMPACT, MEDIUM EFFORT)
+- **Risk:** README's cross-compile examples (lines 74-80) suggest Windows/macOS support without CI verification. Operators may attempt untested deployments.
+- **Options:**
+  - (A) Add Windows/macOS test matrix to `.github/workflows/python-ci.yml` (medium effort, ~20 lines).
+  - (B) Update README to clarify "Linux-only for production; cross-compile examples are for development only" (low effort, ~5 lines).
+- **Recommendation:** Option B first (low-hanging fix), then pursue Option A if cross-platform support is a strategic goal.
+- **File:** `/home/user/Hydra/go-worker/README.md` line 67-81.
+
+### 3. **Cross-OS Capability Detection Test Coverage** (MEDIUM IMPACT, MEDIUM EFFORT)
+- **Risk:** Capabilities tested only on Linux CI. Platform-specific false positives/negatives (e.g., batch on Linux) and PowerShell behavior on different OSes are untested.
+- **Fix:** Add parameterized tests in `tests/test_worker.py` that mock `platform.system()` to simulate Windows, macOS, Linux and verify correct executor types advertised per platform.
+- **Effort:** ~50 lines of test code (parameterized test fixtures + test cases).
+- **File:** `/home/user/Hydra/tests/test_worker.py` (add around line 1143).
+
+### 4. **Deployment Type Auto-Detection Expansion** (LOW IMPACT, HIGH EFFORT)
+- **Risk:** Auto-detection misses Podman, Kubernetes, WSL, systemd containers. Operator gets `"standalone"` label even in managed environments, which is cosmetic (doesn't break functionality).
+- **Fix:** Check for:
+  - Kubernetes: Look for `KUBERNETES_SERVICE_HOST` env var or `/var/run/secrets/kubernetes.io` path.
+  - Podman: Check `/proc/1/cgroup` for `podman` string or `podman-owned` mount.
+  - WSL: Check `/proc/version` for "microsoft" string.
+- **Effort:** ~30 lines of platform detection logic + tests.
+- **File:** `/home/user/Hydra/worker/worker.py` lines 57-60 (extend auto-detection function).
+- **Note:** Low priority because it's metadata only; functionality is unaffected.
+
+### 5. **UI Affinity Mismatch Explanations** (LOW IMPACT, MEDIUM EFFORT)
+- **Risk:** When a job sits pending with no eligible worker, the UI doesn't explain why. Operator must manually compare job executor type vs. worker capabilities.
+- **Fix:** Add a helper card in the Pending Jobs section (or job detail view) that shows:
+  - Job's required executor type.
+  - Which capabilities are needed.
+  - Count of workers with/without those capabilities.
+  - Suggested actions (e.g., "Add a Windows worker" or "Use shell executor instead").
+- **Effort:** ~100 lines of React component + API endpoint to summarize per-job worker eligibility.
+- **File:** UI component + scheduler API endpoint (e.g., `GET /jobs/{id}/worker-eligibility`).
+- **Note:** Pure UX improvement, no correctness impact.
+
+---
+
+### Recommendations for Next Steps
+
+1. **Immediate (this sprint):** Fix batch executor cmd.exe test (Area 1, Priority #1).
+2. **Short-term (next sprint):** Clarify Go worker cross-platform story in README (Area 6, Priority #2).
+3. **Medium-term (Q4):** Add cross-OS capability tests with parameterization (Area 7, Priority #3).
+4. **Nice-to-have (backlog):** Improve deployment type detection and UI diagnostics (Areas 3 & 8, Priorities #4 & #5).
