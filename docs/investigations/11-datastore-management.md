@@ -472,6 +472,102 @@ Ranked by (operational risk avoided × urgency × implementation ease):
 
 ---
 
+## Independent Validation Pass (2026-09-25)
+
+**Validator**: Claude Haiku 4.5  
+**Method**: Verification of all 9 areas via codebase inspection, grep searches, and line-by-line file reads. Two WRONG claims found (confirmation bias breaks); all line numbers spot-checked.
+
+### Area-by-Area Summary
+
+| Area | Status | Key Finding |
+|------|--------|------------|
+| 1. Redis key-space design | PARTIALLY WRONG | `worker_ops:*` and `log_stream:*:history` are NOT unbounded; both have LTRIM + TTL |
+| 2. Redis connection management | CONFIRMED | Sentinel wiring, pooling, timeouts all verified at lines 26-72 of redis_client.py |
+| 3. MongoDB schema & indexing | CONFIRMED | Zero explicit `create_index()` calls found; tz_aware=True at mongo_client.py:21 verified |
+| 4. Data retention & growth | CONFIRMED | No retention loop, TTL index, or cleanup logic for job_runs; unbounded growth risk accurate |
+| 5. Backup & restore practices | CONFIRMED | All line numbers and features (GPG, SHA256SUMS, auth validation) verified in backup/restore scripts |
+| 6. Resilience & self-healing | CONFIRMED | ACL loop at scheduler.py:533-555 verified; Mongo resilience gap accurate |
+| 7. Observability of datastores | CONFIRMED | `/health` and `/health/orchestration` line ranges verified; no per-datastore status gap confirmed |
+| 8. Scaling guidance | CONFIRMED | Helm chart lines 20-21 confirm single-instance Redis/Mongo defaults |
+| 9. MongoDB query efficiency | CONFIRMED | Query line numbers (admin.py:56-74, history.py:45/67, investigations.py:75/102/136/171) all verified |
+
+### Critical Corrections
+
+**WRONG #1: `worker_ops:*` unbounded claim** (Section 1, Findings)  
+- **Report claims**: "worker_ops:* — unbounded (no trim cap observed)"
+- **Actual code** (scheduler/utils/worker_ops.py:25-26):
+  ```python
+  r.ltrim(key, -1000, -1)  # Trim to 1000 entries
+  r.expire(key, 7 * 24 * 3600)  # 7-day TTL
+  ```
+- **Impact**: NOT a growth risk; purges automatically every 7 days and keeps only 1000 most-recent entries per worker
+
+**WRONG #2: `log_stream:*:history` unbounded claim** (Section 1, Findings)  
+- **Report claims**: "log_stream:*:history — unbounded unless explicitly trimmed"
+- **Actual code** (worker/worker.py:264-266):
+  ```python
+  r.ltrim(history_key, -400, -1)  # Trim to 400 entries
+  r.expire(history_key, 3600)  # 1-hour TTL
+  ```
+- **Impact**: NOT a growth risk; automatically expires after 1 hour and keeps only 400 most-recent log lines per run
+
+### Detailed Verification by Area
+
+**Area 1 — Redis key-space design**
+- ✓ All 8 key patterns confirmed (job_queue, job_enqueue_meta, run_events, log_stream, worker_metrics, worker_ops, hydra:domains, hydra:orchestrator:heartbeat)
+- ✗ **worker_ops TTL/LTRIM**: Report says unbounded; code shows `r.ltrim(key, -1000, -1)` + `r.expire(7d)` (lines scheduler/utils/worker_ops.py:25-26)
+- ✗ **log_stream history TTL/LTRIM**: Report says unbounded; code shows `r.ltrim(history_key, -400, -1)` + `r.expire(3600)` (lines worker/worker.py:264-266)
+- ✓ worker_metrics LTRIM claim verified (worker/utils/heartbeat.py:196-197)
+- ✓ job_enqueue_meta 24h TTL verified (multiple locations: failover.py:81, run_events.py:59, etc.)
+
+**Area 2 — Redis connection management**  
+- ✓ Sentinel support fully wired (scheduler/redis_client.py:32-61)
+- ✓ Sentinel auth optional (`REDIS_SENTINEL_USERNAME`/`REDIS_SENTINEL_PASSWORD`)
+- ✓ Socket timeout 2s default (line 34, 52)
+- ✓ Connection pooling via `redis.from_url()` (line 71)
+- ✓ No explicit retry-backoff gap noted accurately
+
+**Area 3 — MongoDB schema & indexing**  
+- ✓ Zero `create_index()` or `ensure_index()` calls found (full grep search)
+- ✓ `tz_aware=True` at mongo_client.py:21 (verified with context: prevents naive datetime bugs)
+- ✓ Query patterns accurately identified (admin.py, history.py, investigations.py)
+
+**Area 4 — Data retention & growth**  
+- ✓ No retention cleanup loop for job_runs (confirmed via grep: no matches for `RETENTION_DAYS`, `purge`, `delete.*run`)
+- ✓ Unbounded growth projection (3.6M docs/year, 500GB+) is reasonable estimate
+
+**Area 5 — Backup & restore practices**  
+- ✓ backup-volumes.sh: 62 lines, stops services (line 36), GPG-AES256 (lines 45-47), SHA256SUMS (lines 51-52)
+- ✓ restore-isolated.sh: 83 lines, decrypt (49-51), isolated network (60), auth validation (75-80)
+- ✓ All specific assertions verified
+
+**Area 6 — Resilience & self-healing**  
+- ✓ redis_acl_reconciliation_loop at scheduler.py:533-555 (verified; idempotent via `ensure_worker_acl_user`)
+- ✓ Interval default 30s (from `REDIS_ACL_RECONCILE_INTERVAL`, line 549 shows it logged)
+- ✓ No Mongo equivalent confirmed (no `mongo_connection_monitor_loop` found)
+
+**Area 7 — Observability of datastores**  
+- ✓ `/health` at scheduler/api/health.py:28-54 (tests Redis + Mongo, blurs failures into 500)
+- ✓ `/health/orchestration` at scheduler/api/health.py:57-97 (checks heartbeat freshness)
+- ✓ No per-datastore status in response (both must succeed or fail together)
+
+**Area 8 — Scaling guidance**  
+- ✓ Helm chart README lines 20-21 state single instance + no Sentinel/ReplicaSet
+- ✓ Sentinel support in code confirmed (redis_client.py)
+- ✓ Scaling tiers recommendation aligns with actual capabilities
+
+**Area 9 — MongoDB query efficiency**  
+- ✓ admin.py:62-63: `count_documents({"domain": d})` without index (confirmed)
+- ✓ history.py:45: unsorted `find(query).sort("start_ts", -1)` (confirmed)
+- ✓ history.py:67: sorted query with compound sort `[("start_ts", -1), ("_id", -1)]` (confirmed)
+- ✓ investigations.py line 75, 102, 136, 171: all unindexed queries confirmed
+
+### Overall Verdict
+
+**Confidence: HIGH (7/10)** — Most claims verified and accurate; two material errors in Section 1 (worker_ops, log_stream history) both incorrectly described as unbounded when they have explicit retention. These errors do NOT impact the validity of the 5 Priority recommendations (indexes, retention, Mongo resilience, health endpoints, backup lifecycle) — those remain sound and urgent. The report's factual foundation is solid except for these two Redis key retention claims.
+
+---
+
 ## Documented Assumptions (For Operators)
 
 1. Single-instance Redis/Mongo are the default; operators should deploy Redis Sentinel for HA
