@@ -4,9 +4,10 @@ import os
 from enum import Enum
 from typing import List, Literal, Optional
 
-import google.generativeai as genai
 import openai
 from fastapi import APIRouter, HTTPException, Request
+from google import genai
+from google.genai import types as genai_types
 from pydantic import BaseModel, Field
 
 from ..models.job_definition import JobCreate
@@ -20,7 +21,7 @@ MAX_PREDICTION_SAMPLE_SIZE = 200  # Cap query size to keep estimation requests f
 STDERR_TAIL_CHARS = 6000
 STDOUT_TAIL_CHARS = 2500
 
-_DEFAULT_MODELS = {"gemini": "gemini-pro", "openai": "gpt-4o"}
+_DEFAULT_MODELS = {"gemini": "gemini-2.5-flash", "openai": "gpt-4o"}
 
 class AIProvider(str, Enum):
     GEMINI = "gemini"
@@ -106,17 +107,16 @@ Key fields (all optional except name + executor):
 Do not include "domain" (derived from auth context).
 """
 
-def _call_gemini(prompt: str, system: str = "", model_name: str = "gemini-pro") -> str:
+def _call_gemini(prompt: str, system: str = "", model_name: str = "gemini-2.5-flash") -> str:
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         raise HTTPException(status_code=500, detail="GEMINI_API_KEY not configured")
-    
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel(model_name)
-    
-    full_prompt = f"{system}\n\nRequest: {prompt}" if system else prompt
+
+    client = genai.Client(api_key=api_key, http_options=genai_types.HttpOptions(timeout=30_000))
+    config = genai_types.GenerateContentConfig(system_instruction=system) if system else None
+
     try:
-        response = model.generate_content(full_prompt)
+        response = client.models.generate_content(model=model_name, contents=prompt, config=config)
         return response.text
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Gemini Error: {str(e)}")
@@ -126,7 +126,7 @@ def _call_openai(prompt: str, system: str = "", model_name: str = "gpt-3.5-turbo
     if not api_key:
         raise HTTPException(status_code=500, detail="OPENAI_API_KEY not configured")
     
-    client = openai.OpenAI(api_key=api_key)
+    client = openai.OpenAI(api_key=api_key, timeout=30)
     messages = []
     if system:
         messages.append({"role": "system", "content": system})
