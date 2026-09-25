@@ -263,10 +263,83 @@ Go (`go-worker/internal/executor/executor.go:672-690`):
 ## 9. Protocol Versioning & Drift Risk
 *Investigating: explicit version fields, implicit compatibility, silent-break risks*
 
-### Under Investigation...
+### FINDING: No explicit protocol versioning — high risk of silent breaks in mixed deployments
+
+**Current state**:
+- No PROTOCOL_VERSION field in any Redis key, envelope, or run event
+- No version negotiation between scheduler and workers
+- No explicit documentation of the "worker protocol contract"
+- Compatibility is **purely implicit** — both implementations happen to agree today
+
+**Silent-break scenarios**:
+1. **Scheduler adds new run_end field**: If scheduler expects a field Go worker never populates, it gets null. If that field is later used in filtering/analysis without null checks, queries fail silently.
+2. **Worker stops publishing a field**: If scheduler relies on presence without null-checking, logic breaks. Python and Go could drift independently.
+3. **Redis key format change**: If scheduler changes `workers:{domain}:{worker_id}` to `workers:{domain}:{worker_id}:meta`, Go worker continues writing to old key, creating stale data.
+4. **Envelope envelope format**: New required job fields added to Python path but not Go deserialization — Go silently ignores, jobs behave differently.
+
+**Evidence of existing drift already documented in this investigation**:
+- Run event timing fields missing in Go (total_run_ms, source_fetch_ms, env_prep_ms)
+- Heartbeat metrics missing in Go worker hash (load_1m, load_5m) but present in history
+- Capability gap (sensor not advertised by Go)
+- Startup duration missing from Go registration
+
+**Mitigation options** (not currently implemented):
+1. **Explicit version field**: Add `worker_protocol_version: "1.0"` to registration and envelopes
+2. **Compatibility matrix**: Document which scheduler versions work with which worker versions
+3. **Backward compatibility tests**: CI job that runs mixed Python+Go pools and verifies full compatibility
+4. **Dead-letter mechanism**: Go worker (like Python) should move unparseable envelopes to dead-letter queue
+
+**Risk: CRITICAL** — Silent data loss and feature degradation in mixed Python+Go deployments without explicit protocol versioning or compatibility assertions.
 
 ---
 
 ## Summary — Top 5 Priorities
-*To be completed after investigation*
+
+Ranked by (risk of silent breakage × effort to fix):
+
+### 1. **Add timing fields to Go worker run_end events** (CRITICAL, Low effort)
+- **Risk**: Duration prediction, outlier detection, regression analysis broken for Go-worker jobs
+- **Gap**: Go doesn't populate `total_run_ms`, `source_fetch_ms`, `env_prep_ms`
+- **Fix**: 
+  - Calculate `total_run_ms = (end_ts - start_ts) * 1000` in Go worker
+  - Pass timings from executor Result struct to run_end event
+  - **Effort**: ~1-2 hours (add field calculation in `worker.go:541-565`)
+- **Test**: Mixed Python+Go pool, verify duration stats are identical for same jobs
+
+### 2. **Extend Go worker capability detection to include "sensor"** (CRITICAL, Low effort)
+- **Risk**: Scheduler dispatches sensor jobs to Go workers, jobs fail silently with "unsupported executor type" error
+- **Gap**: Go's `DetectCapabilities()` doesn't include "sensor"
+- **Fix**:
+  - Add "sensor" to capabilities list in `go-worker/internal/executor/executor.go:690`
+  - Implement sensor executor handler (poll HTTP/SQL, report results)
+  - **Effort**: ~2-4 hours (sensor polling logic + HTTP client)
+- **Alternative**: If sensor is Python-only by design, document it and add dispatcher check to forbid sensor→Go routing
+
+### 3. **Add load_1m/load_5m to Go worker Redis hash on each heartbeat** (HIGH, Low effort)
+- **Risk**: UI displays null for load averages for Go workers; history alleviates but creates inconsistency
+- **Gap**: Go collects load metrics but doesn't persist to worker hash
+- **Fix**: Store load_1m and load_5m in the `rdb.HSet()` call at `worker.go:216-220`
+- **Effort**: ~30 minutes (one-line fix)
+
+### 4. **Add explicit worker protocol versioning** (HIGH, Medium effort)
+- **Risk**: Future changes to Python worker accidentally break Go worker (or vice versa) without detection
+- **Gap**: No PROTOCOL_VERSION field in registration, envelopes, or run events
+- **Fix**:
+  - Add `"worker_protocol_version": "1.0"` to worker registration hash
+  - Scheduler validates both workers are compatible version on startup
+  - CI test: mixed Python+Go pool, assert full compatibility
+  - **Effort**: ~3-5 hours (version field additions, validation logic, CI test)
+
+### 5. **Standardize dead-letter handling across workers** (MEDIUM, Low effort)
+- **Risk**: Go worker silently skips malformed envelopes; Python moves to dead-letter queue. Operator loses visibility
+- **Gap**: Go doesn't have dead-letter mechanism for unparseable jobs
+- **Fix**: Add dead-letter queue to Go worker like Python (`job_queue:{domain}:dead_letter`)
+- **Effort**: ~1 hour
+
+---
+
+## Confidence Summary
+- **Well-aligned areas** (low risk): Dispatch envelope format, log streaming, operations log, state/lifecycle
+- **Partially aligned** (medium risk): Heartbeat (metrics collected but not all stored), registration (minor field gaps)
+- **Critical gaps** (high risk): Timing fields missing in Go, sensor capability gap, no protocol versioning
 

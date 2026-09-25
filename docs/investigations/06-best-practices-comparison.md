@@ -1,8 +1,14 @@
 # Hydra Jobs vs. Airflow, Dagster, Argo: Best Practices Comparison
 
 **Date:** 2026-09-25  
-**Status:** Live Investigation - In Progress  
+**Status:** ✅ Investigation Complete  
 **Researcher:** Claude Code Agent  
+
+---
+
+**Summary**: Compared Hydra's job orchestration capabilities against Apache Airflow 3.x, Dagster (2025-2026), and Argo Workflows. Identified 8 key areas for standardization. **Top 3 priorities**: (1) Multi-step DAG support within jobs (unblocks templates, aligns with industry), (2) Job versioning (quick win: audit trail + reproducibility), (3) GitOps reconciliation loop (true declarative deployment).
+
+---
 
 ---
 
@@ -489,4 +495,56 @@ In `scheduler/models/job_definition.py`, `scheduler/models/job_run.py`, `schedul
 
 ## Summary — Top 5 Priorities
 
-*To be filled after investigation completion...*
+Ranked by **(industry-alignment value) / (implementation effort)**, considering both gap-closing impact and feasibility:
+
+### 1. **Multi-Step DAG Support Within Jobs** (Area 1 — HIGH PRIORITY)
+- **Gap**: Hydra's single-executor model forces N jobs for N-step workflows; hides job structure; conflicts with Airflow/Dagster/Argo mental models
+- **Alignment value**: 9/10 (closes fundamental gap; all competitors support this)
+- **Effort**: 6/10 (moderate; requires `steps` field + scheduler sequencing + job API versioning)
+- **Payoff**: Unblocks templates, composition, asset lineage; vastly improves developer experience
+- **File**: `scheduler/models/job_definition.py`, `scheduler/api/jobs.py`, scheduler orchestration logic
+- **ROI**: HIGH — enables future template/asset work; reduces job proliferation
+
+### 2. **Job Versioning** (Area 1 — MEDIUM-HIGH PRIORITY)
+- **Gap**: No audit trail; can't reproduce old runs; differs from Airflow 3.0's DAG versioning
+- **Alignment value**: 8/10 (matches Airflow 3.0 best practice; compliance/forensics)
+- **Effort**: 3/10 (low; mainly Mongo schema + API endpoints)
+- **Payoff**: Audit trail, reproducibility, compliance; quick win
+- **File**: `scheduler/models/job_definition.py`, `scheduler/api/jobs.py`
+- **ROI**: EXCELLENT — high impact, minimal effort
+
+### 3. **GitOps Reconciliation Loop** (Areas 2, 7 — HIGH PRIORITY)
+- **Gap**: No automatic Git sync; `hydra-apply.py` is manual; conflicts with Argo CD/modern GitOps patterns
+- **Alignment value**: 9/10 (matches industry-standard declarative/continuous-reconciliation model)
+- **Effort**: 6/10 (moderate; requires Git polling loop, state tracking)
+- **Payoff**: True GitOps; operator deploys via Git push; self-healing on drift
+- **File**: New `scheduler/gitops_loop.py`, environment variable config
+- **ROI**: HIGH — game-changing for deployment; unlocks CI/CD integration
+
+### 4. **Exponential Backoff for Retries** (Area 4 — MEDIUM PRIORITY, QUICK WIN)
+- **Gap**: Fixed `retry_delay_seconds` only; no progressive backoff; differs from Airflow/Argo resilience patterns
+- **Alignment value**: 6/10 (important for transient failures; standard practice)
+- **Effort**: 2/10 (low; simple math: `delay = retry_delay * (factor ** attempt)`)
+- **Payoff**: Better resilience; simple implementation
+- **File**: `scheduler/models/job_definition.py` (add `retry_backoff_factor`, `retry_max_delay_seconds`)
+- **ROI**: EXCELLENT — quick win; high immediate value for failure handling
+
+### 5. **RBAC Layer** (Area 6 — MEDIUM PRIORITY)
+- **Gap**: No role-based access control; all domain users have same permissions; blocks enterprise/multi-team adoption
+- **Alignment value**: 7/10 (aligns with Airflow/Dagster/industry governance standards)
+- **Effort**: 5/10 (moderate; new subsystem but not complex)
+- **Payoff**: Compliance, data governance, multi-team support; foundation for enterprise
+- **File**: New `scheduler/models/rbac.py`, `scheduler/api/rbac.py`, token validation in existing endpoints
+- **ROI**: GOOD — foundation for enterprise adoption; unlocks regulated industries
+
+### Quick-Win Checklist (Low-effort, immediate impact)
+- ✅ Job versioning (Effort: 3) — start here
+- ✅ Exponential backoff (Effort: 2) — quick win
+- ✅ Create terminology glossary doc (Effort: 2) — onboarding aid
+- ✅ Expand hydra-ctl CLI (Effort: 4) — developer experience
+
+### Strategic Sequencing (Recommended implementation order)
+1. **Phase 1 (Months 1-2)**: Job versioning + Exponential backoff (quick wins)
+2. **Phase 2 (Months 2-3)**: Multi-step DAG support (foundation for future)
+3. **Phase 3 (Months 3-4)**: GitOps reconciliation loop (deployment story)
+4. **Phase 4 (Months 4+)**: RBAC layer + Job templates (enterprise readiness)
