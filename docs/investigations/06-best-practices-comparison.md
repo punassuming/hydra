@@ -355,15 +355,135 @@ Hydra's current simple domain model is actually appropriate for many use cases a
 
 ## 7. CLI/GitOps Parity
 
-### Investigation Status
-*Starting...*
+### What Others Do
+
+**Airflow (3.x, 2025)**
+- **`airflow dags` CLI**: List, validate, trigger, backfill DAGs from command line
+- **DAG folder**: DAGs live in Git; Airflow scans `dags_folder` from config (default: `[AIRFLOW_HOME]/dags`)
+- **Git sync**: DAG Bundles or Git sync sidecar pulls latest code from Git repo at intervals
+- **No centralized `apply`**: DAGs are picked up automatically from file system; no declarative deployment model like Kubernetes
+- **Backfill command**: `airflow dags backfill DAG_ID -s DATE -e DATE --task-regex REGEX`
+- **Workflow**: Dev writes DAG in Git → CI tests → Git push → Airflow auto-syncs (or sidecar pulls)
+
+**Dagster (2025-2026)**
+- **`dagster` CLI**: Project create, asset materialize, job execute; can run without server
+- **Code-first**: Assets/jobs defined in Python files; repository is the single source of truth
+- **`dagster-cloud` CLI**: Remote CLI for Dagster Cloud; trigger runs, manage deployments
+- **No GitOps reconciliation**: Code changes are live on next scheduler poll, not declarative sync
+- **Deployment branches**: Dagster Cloud can deploy different Git branches to different deployments
+- **Workflow**: Dev writes asset → Git push → CI→ deploy to Dagster Cloud → auto-materialized by schedules/sensors
+
+**Argo Workflows (2025)**
+- **`argo` CLI**: Submit workflows, list, watch, delete; native Kubernetes integration
+- **`kubectl apply`**: Workflows are CRDs; submit via `kubectl apply -f workflow.yaml` or `argo submit workflow.yaml`
+- **GitOps reconciliation**: Argo CD watches Git repo; auto-applies Workflow/CronWorkflow manifests; self-healing on drift
+- **WorkflowTemplates**: Cluster-resident reusable templates; applied via kubectl like any Kubernetes object
+- **Git is source of truth**: Workflows live in Git; ArgoCD continuously reconciles cluster to match
+- **Workflow**: Dev writes YAML → Git push → ArgoCD detects change → applies to Kubernetes → Argo Workflows executes
+
+### How Hydra Does It
+
+In `cli/__main__.py`, `scripts/hydra-apply.py`, `scripts/hydra-ctl`:
+- **`hydra-ctl` CLI**: kubectl-style CLI with `get`, `describe`, `apply`, `delete`, `run`, `kill`, `logs`, `retry` subcommands
+- **`hydra apply` command**: Upsert jobs from YAML/JSON file (like kubectl apply); idempotent, matches by name
+- **`hydra-apply.py` script**: Manual GitOps tool; reads file, applies via API (create or update by name match)
+- **No automatic Git sync**: `hydra-apply.py` must be called manually or via CI/CD pipeline
+- **No reconciliation loop**: Changes to job definition via API are not auto-synced back to Git
+- **Workflow**: Dev writes YAML → Git push → CI calls `hydra-apply.py --file jobs.yaml` → Hydra API upserts jobs
+- **Dry-run support**: `hydra-apply.py --dry-run` previews changes without applying
+
+### Gap Assessment & Recommendations
+
+**Strengths:**
+- ✅ `hydra-ctl` is intuitive kubectl-style interface; approachable to Kubernetes users
+- ✅ `hydra-apply.py` is simple, idempotent, and works well for CI/CD integration
+- ✅ Dry-run support is valuable for safety
+- ✅ YAML/JSON format is portable and git-friendly
+
+**Gaps:**
+1. **No automatic Git sync** – Unlike Argo CD's declarative reconciliation; must call `hydra-apply.py` manually or via CI
+2. **No reconciliation loop** – Hydra doesn't continuously compare Git state to actual state; drift is possible
+3. **No server-side GitOps** – Operator must set up CI pipeline or cron job to apply; no Hydra-native `git-ops` mode
+4. **Limited CLI parity** – Unlike Airflow's full CLI feature set (backfill, test, dags list, etc.), Hydra CLI is smaller
+5. **No code-based definition option** – Unlike Dagster (Python) or Airflow (Python); Hydra is YAML/JSON/API-only
+
+**Recommendations:**
+1. **Implement GitOps reconciliation loop (HIGH)** → New `scheduler/gitops_loop.py` (see Area 2): Watch Git repo; auto-apply changes via internal API. Expose `HYDRA_GIT_REPO`, `HYDRA_GIT_BRANCH`, `HYDRA_GIT_POLL_INTERVAL_SECONDS` env vars. Benefit: True GitOps; operator deploys by pushing to Git; no manual CLI calls.
+2. **Expand `hydra-ctl` feature set (MEDIUM)** → Add subcommands: `hydra-ctl validate -f jobs.yaml`, `hydra-ctl backfill JOB_NAME -s DATE -e DATE`, `hydra-ctl test JOB_NAME` (dry-run with sample inputs). Benefit: Closer to Airflow/Dagster CLI; better local developer experience.
+3. **Add `--watch` flag to `hydra-apply.py` (LOW)** → Poll Git repo; auto-apply on changes. Benefit: Quick win for GitOps story without full reconciliation loop.
+4. **Document CI/CD integration patterns (LOW)** → Add `docs/gitops.md` with examples: GitHub Actions workflow calling `hydra-apply.py`, GitLab CI pipeline, Jenkins job. Show dry-run → approval → apply pattern. Benefit: Lowers barrier to GitOps adoption.
+5. **Consider ArgoCD plugin (FUTURE)** → Develop Argo CD plugin to sync Hydra job definitions from Git. Benefit: Integrates with existing ArgoCD deployments; enables GitOps at organizational scale.
 
 ---
 
 ## 8. Naming/Terminology Standardization
 
-### Investigation Status
-*Starting...*
+### What Others Do (Standard Industry Terms)
+
+**Airflow (de facto standard for job orchestration)**
+- **DAG**: Directed Acyclic Graph (workflow definition)
+- **DAG Run**: One execution of a DAG (what Hydra calls a "run")
+- **Task**: Unit of work within a DAG (what Hydra calls an "executor")
+- **Task Instance**: One execution of a Task in a DAG Run (fine-grained tracking)
+- **Operator**: Executable unit (what Hydra calls "executor type")
+- **Sensor**: Trigger/monitor (Hydra has this term too)
+- **Schedule**: Trigger for DAG runs (Airflow uses "schedule", Hydra uses "schedule" + "cron"/"interval")
+
+**Dagster (asset-centric alternative)**
+- **Asset**: Data object with lineage (not a Hydra concept; fundamental difference)
+- **Materialization**: One compute of an asset (execution)
+- **Partition**: Slice of data (Hydra has no partition concept yet)
+- **Op**: Reusable computation unit (being phased out in favor of assets)
+- **Job**: Container for assets/ops to materialize (not same as Hydra's "job")
+- **Sensor**: Trigger when condition met (same as Airflow)
+
+**Argo Workflows (Kubernetes-native)**
+- **Workflow**: Top-level execution (like Airflow's DAG Run)
+- **WorkflowTemplate**: Reusable definition (like Airflow's DAG)
+- **Step** / **Node**: Unit of work (in steps or DAG templates)
+- **Pod**: Kubernetes pod executing a step (infrastructure detail)
+- **Template**: Reusable task definition
+
+### How Hydra Does It
+
+In `scheduler/models/job_definition.py`, `scheduler/models/job_run.py`, `scheduler/models/executor.py`:
+- **Job**: Static definition (similar to Airflow's DAG or Argo's WorkflowTemplate)
+- **Run**: One execution of a Job (similar to Airflow's DAG Run or Argo's Workflow)
+- **Executor**: Executable unit within a Job (similar to Airflow's Operator or Task)
+- **Worker**: Process executing jobs (Hydra-specific; not in other tools' primary vocab)
+- **Domain**: Tenant/isolation scope (similar to Kubernetes namespace or Airflow team)
+- **Task**: Not used; Hydra's single-executor-per-job model doesn't have sub-tasks
+
+### Terminology Overlap & Confusion Risks
+
+| Concept | Airflow | Dagster | Argo | Hydra | Risk |
+|---------|---------|---------|------|-------|------|
+| **Workflow definition** | DAG | Asset/Job | WorkflowTemplate | Job | ✅ Clear |
+| **One execution** | DAG Run | Materialization | Workflow | Run | ✅ Clear |
+| **Executable unit** | Task/Operator | Op/Asset | Step/Node | Executor | ⚠️ "Executor" can mean Kubernetes executor concept |
+| **Repeatable pattern** | Operator | Op | Template | (none) | ~ Hydra lacks reusable job templates |
+| **Trigger mechanism** | Sensor/Schedule | Sensor/Schedule | Sensor/Trigger | Sensor/Schedule | ✅ Clear |
+| **Tenant/isolation** | Team/RBAC | Workspace | Namespace | Domain | ✅ Clear (but Hydra's domain is simpler) |
+| **Sub-task/step** | Task Instance | (not applicable) | Node | (none; single executor) | ⚠️ Hydra can't express multi-step workflows |
+
+### Gap Assessment & Recommendations
+
+**Strengths:**
+- ✅ Hydra's terminology is mostly clear within Hydra; no internal conflicts
+- ✅ "Job" + "Run" is understandable to all audiences
+
+**Gaps:**
+1. **"Executor" is ambiguous** – In Kubernetes/Docker, "executor" often means the runtime engine (Docker executor, Kubernetes executor); in Hydra it means the job's payload. New users from Airflow/Argo may misunderstand.
+2. **No standard reusable pattern name** – Unlike Airflow's Operator, Dagster's Asset, Argo's Template, Hydra has no name for "reusable job template"
+3. **Missing "task instance" level** – Airflow distinguishes DAG Run → Task Instance; Hydra is Job → Run (flat). Hard to express multi-step job lineage.
+4. **"Worker" is non-standard** – Most tools call this "executor", "agent", or "pod"; "worker" is clearer but doesn't align with industry
+
+**Recommendations:**
+1. **Rename "executor" to "executor config" or "payload" in API docs (LOW)** → Add glossary to docs: clarify that Hydra's "executor" is the job's runnable spec (shell/python/http/etc.), not a runtime engine like Kubernetes executor. Update API docs with this terminology.
+2. **Add "Job Template" or "JobTemplate" concept (MEDIUM, future)** → When templates are introduced (see Area 1), use term "JobTemplate" (like Argo) or "Job Template". Benefit: aligns with Argo/Kubernetes nomenclature; signals "reusable" via name.
+3. **Document multi-step roadmap in terminology section (LOW)** → When multi-step support is planned (Area 1), clarify that future Hydra jobs will support "steps" (Argo terminology) or "tasks" (Airflow terminology). Choose one and use consistently.
+4. **Consider renaming "Worker" in architecture docs (LOW-MEDIUM)** → If targeting Airflow/Argo refugees, consider adding alias "Agent" in docs: "Worker (also known as an Agent) is a process that executes jobs." Benefit: reduces cognitive load for newcomers; maintains Hydra's existing terminology.
+5. **Create terminology glossary in docs (LOW)** → New `docs/terminology.md`: side-by-side table (Airflow ↔ Dagster ↔ Argo ↔ Hydra). Include mapping: DAG→Job, Task Instance→Run, Operator→Executor, etc. Benefit: onboarding aid for engineers from other tools.
 
 ---
 

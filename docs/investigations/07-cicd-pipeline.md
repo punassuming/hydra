@@ -284,24 +284,247 @@ Cannot be read directly from the local repo, but inferred from workflow design:
 ## 7. Test-in-CI vs Test-Locally Gaps
 *Investigating: acceptance test opt-in, what should/should not run in CI*
 
-(Pending)
+**Current Test Matrix in CI:**
+
+✓ **Unit Tests:** `tests/` (excluding E2E) run on every commit across 3 OS × 2 Python versions. Fast (~3-5 min per matrix cell).
+  - Covers: models, API endpoints, job scheduling, worker selection, Redis/Mongo clients, AI endpoints, investigations, ACL reconciliation.
+  - Per AGENTS.md: `test_mongo_client.py` explicitly asserts timezone-aware BSON decoding; `test_ai.py` covers generate/analyze/predict/diagnose; `test_investigations.py` validates canned checks.
+
+✓ **E2E Smoke Test:** Full-stack Docker Compose (scheduler, worker, Redis, Mongo) + `tests/test_end_to_end.py`. ~2-4 min.
+  - Covers: API integration, job submission, worker dispatch, log streaming, end-to-end job execution.
+  - **Not** acceptance tests (no multi-domain isolation, no executor matrix, no chaos/resilience).
+
+✓ **UI Integration:** Cypress browser journey (`ui-browser` job). ~4-6 min.
+  - Covers: operator auth flow, basic UI navigation.
+  - Single Cypress spec: `operator-auth.cy.ts`. Limited scope.
+
+✓ **Helm Chart Validation:** 5 template/lint checks (default, separated, multi-domain, demoMode regression, port regression). ~1-2 min.
+  - Does not deploy to K8s; only validates templating and YAML structure.
+
+**Acceptance Tests (Deliberately Opt-Out of CI):**
+
+Per `tests/acceptance/README.md`:
+- Suite takes **minutes** (not seconds), requires real infrastructure, and tests chaos (worker death, Redis/Mongo restart).
+- Opt-in via `HYDRA_ACCEPTANCE=1`; never runs in CI.
+- Three backends: `docker` (dynamic provision), `kubectl` (existing Helm), `none` (bare API smoke check).
+- Covers: domain isolation, full executor matrix, mixed Python/Go worker routing, failover/resilience.
+
+**Assessment — Gap Analysis:**
+
+**What CI Tests Well:**
+- ✓ API correctness and scheduler logic (unit tests).
+- ✓ Python/Go worker code (unit + Go tests).
+- ✓ Helm templating (chart lint + 5 template checks).
+- ✓ Basic end-to-end integration (single E2E job).
+- ✓ UI auth + basic navigation (Cypress).
+
+**What CI **Does Not** Test:**
+- ❌ **Executor matrix:** E2E only tests shell/python executors; SQL, batch, powershell, http, external, sensor executors not validated in CI.
+- ❌ **Domain isolation:** No multi-domain testing in CI; only E2E uses a single `ci` domain.
+- ❌ **Worker pool routing:** Mixed Python + Go worker pools only tested in acceptance suite (opt-in).
+- ❌ **Failover/Resilience:** Worker death, Redis restart, Mongo restart scenarios only in acceptance suite.
+- ❌ **Multi-domain concurrency:** Load testing, starvation handling, bypass_concurrency not exercised in CI.
+
+**Risk Assessment:**
+
+⚠️ **Moderate Risk** — A regression in executor types (SQL, batch) or domain isolation would not be caught until acceptance test run (manual). However:
+- Executor implementations are deterministic (no dynamic dispatch errors likely).
+- Domain isolation is enforced at middleware level (likely to fail unit tests if broken).
+- Acceptance tests are documented and repeatable (`./scripts/run-acceptance-tests.sh`).
+
+✓ **Mitigation** — Acceptance tests are lightweight enough to add to pre-release CI jobs (e.g., trigger `docker` backend on release PRs). Not required for every PR, but strongly recommended before cutting a release.
+
+**Recommendation:**
+1. Keep unit/E2E/UI tests in CI (fast feedback).
+2. Add acceptance test (`docker` backend) as an optional matrix job on release PRs or tagged as `run-acceptance-tests` label.
+3. Document in CONTRIBUTING.md that release reviewers should ensure acceptance tests pass (even if not automated).
 
 ---
 
 ## 8. Deployment CD Story
 *Investigating: is there any deployment automation, or is that fully manual? GitOps story?*
 
-(Pending)
+**Current Deployment Architecture:**
+
+❌ **No CI/CD Deployment Workflow:** There is NO GitHub Actions workflow that deploys Hydra to any environment (staging, prod, dev, K8s cluster). All deployments are **100% manual**.
+
+**Local/Compose Deployment (Docker Compose):**
+- **Workflow:** Clone repo → build images locally → docker-compose up.
+- **CI** provides: validated Dockerfiles, docker-compose.yml syntax checks (indirectly via Helm), tests.
+- **Manual step:** Build + push images, edit `.env`, run `docker compose up`.
+- **Operational tooling:** `deploy/compose/` provides encrypted backup/restore (`backup-volumes.sh`/`restore-isolated.sh`) and live verification (`verify-live.sh`, `verify-worker-boundary.sh`). Scripts check consistency but do not automate deployment.
+
+**Kubernetes/Helm Deployment:**
+- **Workflow:** Clone repo → build images locally → load onto cluster nodes → helm install/upgrade.
+- **CI** provides: Helm lint + 5 template checks (no actual K8s deploy), image build validation.
+- **Manual steps:** Build images → load onto nodes (k3s ctr import / kind load / minikube image load / containerd SSH) → helm install/upgrade with custom values.
+- **Documentation:** Helm chart README clearly documents build + load + install steps. Repeatable but entirely manual.
+
+**GitOps / Registry Push Story:**
+
+❌ **No GitOps Tooling:** No ArgoCD, Flux, or other declarative deployment system.
+
+❌ **No Registry Push Workflow:** Container images are not pushed to any registry in CI/CD. For production use, deployment would look like:
+1. Developer builds images locally: `docker build -f scheduler/Dockerfile -t hydra-scheduler:0.1.0 .`
+2. Developer pushes manually: `docker push <registry>/hydra-scheduler:0.1.0` (repeat 4 times)
+3. Developer updates Helm values to point to registry: `--set scheduler.image.repository=<registry>/hydra-scheduler`
+4. Developer runs: `helm upgrade hydra deploy/helm/hydra -f <custom-values>`
+
+**Recommendation for Production GitOps:**
+
+A typical workflow would be:
+1. **On release tag (v0.1.0):** Trigger a `push-images` job that:
+   - Builds all 4 images.
+   - Pushes to GHCR (GitHub Container Registry) or private registry as `<registry>/hydra-scheduler:0.1.0`.
+   - Updates a Helm values file with the registry URLs.
+   - Commits the values update (or opens a PR for review) in a separate `deploy-config` branch.
+
+2. **Trigger ArgoCD/Flux:** GitOps controller pulls the deploy branch and applies the Helm chart.
+
+3. **Alternative (simpler):** Hook `helm upgrade` into a separate workflow that listens for release tags.
+
+**Current Maturity:**
+- ✓ Excellent for home-lab/development (manual Compose is fast and flexible).
+- ✓ Good Helm chart for K8s, but no automation to push images.
+- ❌ Not production-ready without external orchestration (manual push to registry, manual helm deploy).
+
+**Recommended Action:**
+Add a `push-images.yml` workflow that:
+- Triggers on `push` with tag `v*` (release tags from release-please).
+- Builds and pushes images to GHCR with tag matching the release version.
+- Optionally updates Helm values or creates a PR against a `deploy-values` branch for GitOps controllers to reconcile.
 
 ---
 
 ## 9. Developer Feedback Loop Speed
 *Investigating: wall-clock time for full PR-check suite to go green*
 
-(Pending)
+**Job Timeline & Parallelization:**
+
+python-ci.yml jobs and estimated runtimes:
+- `test` (6 matrix cells): Ubuntu + macOS (~3-4 min), **Windows (~5-7 min)** — parallelized.
+  - Bottleneck: Windows is ~2x slower than Linux.
+  - Other cells (Linux 3.11, 3.13; macOS 3.11, 3.13) finish in ~3-4 min.
+  
+- `lint` (1 job): ~30 sec (sequential, starts immediately).
+
+- `helm` (1 job, 5 template checks): ~1-2 min (sequential).
+
+- `ui` (1 job): npm ci → tsc → vitest → build: ~2-3 min (sequential).
+
+- `docker-build` (4 matrix cells: scheduler, worker, ui, go-worker):
+  - Without GHA cache (~2-3 min per image) = ~2-3 min parallel (all 4 run simultaneously).
+  - **Issue:** python-ci.yml doesn't use GHA cache (docker/build-push-action not used). Falls back to inline `docker build`. Container-images.yml **does** use GHA cache, making it ~30-60 sec per image on cache hit.
+
+- `go-test` (1 job): ~20 sec (sequential).
+
+- `end-to-end` (1 job): docker compose up + pytest + cleanup: ~2-4 min (includes DB startup time).
+
+- `ui-browser` (1 job): compose up + wait for UI + cypress: ~4-6 min (includes browser startup + test).
+
+**Parallelization Model:**
+
+```
+T=0:
+  - test[ubuntu-3.11] START
+  - test[ubuntu-3.13] START
+  - test[macos-3.11] START
+  - test[macos-3.13] START
+  - test[windows-3.11] START
+  - test[windows-3.13] START (slowest, 5-7 min)
+  - lint START (~30 sec)
+  - helm START (~1-2 min)
+  - ui START (~2-3 min)
+  - docker-build[scheduler] START
+  - docker-build[worker] START
+  - docker-build[ui] START
+  - docker-build[go-worker] START (all 4 in parallel, ~2-3 min)
+  - go-test START (~20 sec)
+
+T=5-7 min (Windows test finishes, all tests done):
+  - end-to-end START (~2-4 min)
+  - ui-browser START (~4-6 min, slower than E2E, bottleneck)
+
+T=11-13 min (ui-browser finishes):
+  - ALL DONE
+```
+
+**Wall-Clock Estimate:**
+- **Best case (all cached, fast runners):** ~9 min (7 min Windows + 2 min docker-build in parallel).
+- **Typical case (fresh cache on PR):** ~11-13 min (7 min Windows + 4-6 min ui-browser).
+- **Worst case (all cache misses, no GHA Docker cache):** ~13-15 min (7 min Windows + 6 min ui-browser).
+
+**Developer Experience:**
+
+⚠️ **Moderate Feedback Loop:** 11-13 minutes is acceptable for a PR check suite (not as fast as smaller projects, but not glacial). Developers wait ~2-3 min for initial feedback (lint/helm/Go tests), then ~10 min for full pass.
+
+**Opportunities to Speed Up:**
+
+1. **Docker caching (highest impact):** Use `docker/build-push-action` + GHA cache in python-ci.yml (like container-images.yml does). Could shave ~1-2 min.
+   - Current: 2-3 min per matrix job (all 4 in parallel).
+   - Cached: ~30-60 sec per matrix job.
+   - **Savings:** ~2 min on PR rebuild.
+
+2. **Windows test optimization:** Windows takes 2x longer than Linux. Could:
+   - Skip Windows on PRs, run only on main (saves 2 min).
+   - Profile Windows-specific slowness (pip, uv sync, pytest on Windows slower?).
+   - **Savings:** ~2 min, but sacrifices OS coverage.
+
+3. **Parallelize E2E and UI-browser more carefully:**
+   - Currently, if both start and contend for ports (redis 6379, mongo 27017, etc.), could fail.
+   - No explicit port mapping or isolation.
+   - **Risk:** race condition if runner is under-resourced.
+   - **Savings:** Already parallel, but fragile.
+
+4. **Reduce UI-browser scope:** Currently runs full Cypress suite (implied, one spec). Could split or reduce to smoke test only on PR.
+   - **Savings:** ~2 min if reduced to quick smoke test.
+
+5. **Matrix optimization:** `fail-fast: false` means all cells run even if one fails. Could set `fail-fast: true` for faster feedback on actual failures.
+   - **Savings:** Highly variable (0-5 min if early cell fails).
+
+**Recommendation:**
+
+✓ Current ~11-13 min is reasonable. Priority improvements:
+
+1. **Add Docker GHA cache to python-ci.yml** (2 min savings, low effort).
+2. **Consider skipping Windows on PRs, run only on main** (2 min savings, small regression risk).
+3. **Add `fail-fast: true` to matrix** (faster feedback on failures, optional).
+
+Do NOT add more tests to the critical path (E2E + UI-browser) — they already dominate runtime.
 
 ---
 
 ## Summary — Top 5 Priorities
-*(To be filled once investigation completes)*
+
+Ranked by (risk/impact reduced × implementation effort):
+
+### 1. **Add Registry Push Workflow (CRITICAL)**
+**Risk:** Blocking production deployments. Currently, images are only validated locally; no way to push to a registry for real deployments.  
+**Impact:** Enables GitOps and production cluster deployments.  
+**Effort:** Medium (new workflow `push-images.yml`, GHCR or registry credentials, ~50 lines).  
+**Recommendation:** Add job that triggers on release tags (`v*`), builds all 4 images, pushes to GHCR with version tag, optionally creates PR against `deploy-values` branch for GitOps reconciliation.
+
+### 2. **Enforce Conventional Commits at PR Time (HIGH)**
+**Risk:** Non-conventional commits (e.g., "update worker") silently bypass version bumping. No changelog entry, no release tag — creates version gaps and invisible changes.  
+**Impact:** Guarantees all commits reaching main are correctly parsed by release-please.  
+**Effort:** Low (add `commitlint` GitHub Action, ~10 lines).  
+**Recommendation:** Add `commitlint` action to python-ci.yml to reject non-conventional commits at PR open time, matching CONTRIBUTING.md's requirement.
+
+### 3. **Add Docker GHA Cache to python-ci.yml (MEDIUM)**
+**Risk:** Slow PR feedback loop (11-13 min). Docker images rebuild from scratch on every PR, wasting ~2 min.  
+**Impact:** Faster developer feedback (shave ~2 min, down to ~9-11 min).  
+**Effort:** Low (migrate `docker build` to `docker/build-push-action`, copy cache config from container-images.yml, ~15 lines).  
+**Recommendation:** Replace inline `docker build` in `docker-build` job with `docker/build-push-action@v6` + `cache-from: type=gha` + `cache-to: type=gha,mode=max` (already used in container-images.yml).
+
+### 4. **Configure RELEASE_PLEASE_TOKEN & Add Release PR CI (HIGH)**
+**Risk:** Release PRs are not tested before merge (if RELEASE_PLEASE_TOKEN not configured). Release could break main.  
+**Impact:** Release PRs get full CI matrix before merge, preventing bad releases.  
+**Effort:** Low (create fine-grained PAT, add as `RELEASE_PLEASE_TOKEN` secret in repo, already conditionally used by release-please.yml, ~5 min setup).  
+**Recommendation:** Repo owner creates fine-grained PAT (repo-scoped, `contents: write` + `pull-requests: write`), adds as `RELEASE_PLEASE_TOKEN` secret. Workflow already prefers it.
+
+### 5. **Add Acceptance Tests to Release PR Jobs (MEDIUM)**
+**Risk:** Executor matrix (SQL, batch, powershell, external, sensor) and domain isolation not tested before release. Bugs slip through.  
+**Impact:** Catches executor-type regressions and domain isolation bugs before release.  
+**Effort:** Medium (add job that runs `HYDRA_ACCEPTANCE=1 ACCEPTANCE_BACKEND=docker`, requires Docker resources, ~30 lines).  
+**Recommendation:** Add optional acceptance job to `python-ci.yml` (only on release PRs or labeled with `run-acceptance`), runs `docker` backend suite. Ensures executor matrix + failover scenarios pass before release.
 
