@@ -642,9 +642,9 @@ Located in `/home/user/Hydra/deploy/compose/scripts/`, these four scripts are de
    - **Not applicable here:** Multi-file composition is already the pattern; `extends:` is legacy and not recommended
 
 **Compose Spec version in use:**
-- No explicit `version:` field in any compose file — this means Docker Compose defaults to the latest spec version (currently 3.8+)
-- **Risk:** Implicit version can cause issues if Docker Compose version is downgraded; best practice is explicit version declaration
-- **Current state:** Works fine with modern Docker Compose (v2.x), but could be more explicit
+- No explicit `version:` field in any compose file.
+
+> **Correction (verified via WebSearch, 2026-09-25):** The original finding here had this backwards. The `version:` top-level key has been **obsolete since Docker Compose V2** (GA in 2022) — Compose V2 dropped the fixed-spec-version model entirely in favor of the continuously-updated Compose Specification, and `docker compose` now prints a warning ("the attribute `version` is obsolete, it will be ignored, please remove it to avoid potential confusion") if it's present. Omitting `version:` is the **current correct practice**, not a gap. The recommendation below to add `version: "3.8"` to every compose file is wrong and would introduce that warning on every `docker compose` invocation — do not act on it.
 
 **Recommendation to modernize:**
 
@@ -667,8 +667,83 @@ docker compose -f docker-compose.yml -f docker-compose.workers.yml up
 - No critical modernization needed; the multi-file approach is intentional and clear
 - Profiles and develop.watch could reduce file count and boilerplate, but require users to upgrade Docker Compose
 - YAML anchors are well-used in workers.yml for avoiding duplication
-- Explicit `version: "3.8"` or later would improve clarity and portability
+- ~~Explicit `version: "3.8"` or later would improve clarity and portability~~ — **retracted, see correction above: `version:` is obsolete, omitting it is correct.**
 
 ## Summary — Top 5 Priorities
 
-*Pending...*
+Ranked by **operational/security impact × effort to fix**:
+
+### 1. **Fix dev.yml environment replacement fragility** (HIGH impact, LOW effort)
+**Issue:** docker-compose.dev.yml's `environment:` block replaces (not merges) the base file's environment variables. If REDIS_URL or MONGO_URL are not in .env, the dev environment would lose these critical connection strings.
+
+**Verified from:** docker-compose.dev.yml lines 6–12; base file lines 93–112
+
+**Recommendation:** dev.yml should include the same environment defaults as the base file, particularly the `${REDIS_URL:-...}` and `${MONGO_URL:-...}` inline defaults. Alternatively, document that .env MUST include these variables when using the dev overlay.
+
+**Effort:** Add 5–10 lines to dev.yml to include base file's environment variable defaults  
+**Impact:** Prevents dev environment failures due to missing connection strings; clarifies assumptions
+
+---
+
+### 2. ~~Add explicit Compose Spec version declaration~~ — **RETRACTED (2026-09-25)**
+**This priority item is invalid and should not be acted on.** The original finding had it backwards: `version:` has been obsolete since Docker Compose V2 (2022+); modern `docker compose` prints a warning if it's present and ignores it either way. The compose files' current state — no `version:` key — is already correct practice, not a gap. See the corrected "Compose Spec version in use" note earlier in this document.
+
+---
+
+### 3. **Update operational scripts to handle custom Compose project names** (MEDIUM impact, MEDIUM effort)
+**Issue:** verify-live.sh and verify-worker-boundary.sh assume hardcoded service names like `hydra-worker-1`, which break if deployed with `docker compose -p custom-project-name`.
+
+**Verified from:** verify-live.sh line 22 (`hydra-${service}-1`), verify-worker-boundary.sh line 12 (`hydra-worker-1`)
+
+**Recommendation:** 
+- Accept `COMPOSE_PROJECT_NAME` env var (default to `hydra`)
+- Use `docker inspect hydra-${service}-1` → `docker inspect ${COMPOSE_PROJECT_NAME}-${service}-1`
+- Document in README.md that scripts require matching project name
+
+**Effort:** 3–5 line change per script + documentation  
+**Impact:** Operational flexibility; scripts work with any Compose project name
+
+---
+
+### 4. **Add timeouts to verify-live.sh and verify-worker-boundary.sh** (MEDIUM impact, LOW effort)
+**Issue:** `curl`, `docker exec`, and socket operations lack explicit timeouts. If a service is hung, scripts can block indefinitely.
+
+**Verified from:** verify-live.sh lines 28–30; verify-worker-boundary.sh lines 27, 33
+
+**Recommendation:**
+- `curl --max-time 5` (already partially used in verify-live.sh line 16 for api_url but not applied consistently)
+- `socket.create_connection(..., timeout=3)` (already in verify-worker-boundary.sh lines 27, 33)
+- Add explicit timeouts to all external operations
+
+**Effort:** 2–3 line changes per script  
+**Impact:** Prevents indefinite blocking; safer in CI/automation
+
+---
+
+### 5. **Document deployment prerequisites for operational scripts** (MEDIUM impact, LOW effort)
+**Issue:** Operational scripts (deploy/compose/scripts/*.sh) assume specific secret files, permissions, and .env structure with absolute paths. No README documents these prerequisites.
+
+**Verified from:** backup-volumes.sh lines 25–30, restore-isolated.sh lines 31–44, verify-live.sh lines 16–17, verify-worker-boundary.sh lines 16–17
+
+**Recommendation:** Create `deploy/compose/README.md` documenting:
+- Required secret files: `deploy/compose/.env`, `secrets/hydra-backup.env`, `secrets/hydra-datastore.env`
+- File permissions: all secrets must be mode 600
+- Environment variables: `HYDRA_DEPLOY_REPO_ROOT`, `HYDRA_DEPLOY_SECRETS_DIR`, etc.
+- Assumptions: container naming (Compose project name), service names, network configuration
+- Usage examples: backup workflow, restore-and-verify workflow, production health checks
+- Troubleshooting: "script hangs" → add timeouts; "container not found" → check project name
+
+**Effort:** Write 200–300 word README  
+**Impact:** Operators understand prerequisites; reduces troubleshooting time; improves deployment reliability
+
+---
+
+## Additional Findings (lower priority)
+
+- **✓ Network topology is solid:** backend internal network correctly isolates datastores; merge semantics verified in code comments
+- **✓ Security hardening is comprehensive:** non-root user, read-only rootfs, tmpfs flags, no-new-privileges all applied consistently across all worker images
+- **✓ Datastore auth opt-in works correctly:** Redis/Mongo gracefully degrade to no-auth when credentials unset; .env.example documents the pattern
+- **✓ Build efficiency is good:** multi-stage Go/UI images; cache-friendly Python layering; .dockerignore files present and covering key directories
+- **✗ Potential issue:** restore-isolated.sh's 30s retry loop could timeout on large backups; consider making retry count/sleep interval configurable
+- **✗ Potential issue:** docker-compose.workers.yml hard-depends on `scheduler: service_healthy` (line 37–38), which means workers can't start if scheduler is down (even temporarily); consider making this optional for worker-only deployments
+- **Compose best practices:** No critical gaps; use of anchors/DRY is good; profiles/develop.watch would modernize but aren't critical
