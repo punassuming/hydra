@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"net"
 	"os"
 	"os/user"
@@ -537,6 +538,17 @@ func (w *workerState) runJob(ctx context.Context, env *executor.JobEnvelope) {
 
 	endTS := float64(time.Now().UnixMilli()) / 1000.0
 
+	// source_fetch_ms/env_prep_ms are nil (not 0) when the corresponding step
+	// didn't run for this job, mirroring Python's timings.get(...) returning
+	// None in that case — so duration analytics aren't skewed by fake zeros.
+	var sourceFetchMs, envPrepMs interface{}
+	if result.SourceFetchMs > 0 {
+		sourceFetchMs = round2(result.SourceFetchMs)
+	}
+	if result.EnvPrepMs > 0 {
+		envPrepMs = round2(result.EnvPrepMs)
+	}
+
 	// Publish run_end event.
 	w.publishRunEvent(ctx, map[string]interface{}{
 		"type":                "run_end",
@@ -562,6 +574,9 @@ func (w *workerState) runJob(ctx context.Context, env *executor.JobEnvelope) {
 		"bypass_concurrency":  env.Job.BypassConcurrency,
 		"start_ts":            startedTS,
 		"scheduled_ts":        orDefault(env.DispatchTS, startedTS),
+		"total_run_ms":        round2((endTS - startedTS) * 1000),
+		"source_fetch_ms":     sourceFetchMs,
+		"env_prep_ms":         envPrepMs,
 	})
 
 	appendWorkerOp(ctx, w.rdb, w.cfg.Domain, w.cfg.WorkerID, "run_result",
@@ -707,4 +722,10 @@ func orDefault(v, def float64) float64 {
 		return v
 	}
 	return def
+}
+
+// round2 matches Python's round(x, 2) formatting used for the timing fields
+// in worker/worker.py's run_end event.
+func round2(v float64) float64 {
+	return math.Round(v*100) / 100
 }

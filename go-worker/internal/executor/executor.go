@@ -114,6 +114,12 @@ type ExecResult struct {
 	ReturnCode int
 	Stdout     string
 	Stderr     string
+	// SourceFetchMs and EnvPrepMs are populated by Execute/execPython when
+	// applicable, mirroring the Python worker's run_end timing fields
+	// (timings["source_fetch_ms"]/["env_prep_ms"] in worker/executor.py).
+	// Zero when the corresponding step didn't run for this job.
+	SourceFetchMs float64
+	EnvPrepMs     float64
 }
 
 // ---------------------------------------------------------------------------
@@ -160,7 +166,11 @@ func Execute(ctx context.Context, env *JobEnvelope, onStdout, onStderr func(stri
 	}
 
 	// Source fetching (git/copy/rsync).
+	var sourceFetchMs float64
+	hadSource := false
 	if src := env.Job.Source; src != nil && src.URL != "" {
+		hadSource = true
+		fetchStart := time.Now()
 		jobID := env.JobID
 		if jobID == "" {
 			jobID = env.Job.ID
@@ -205,26 +215,32 @@ func Execute(ctx context.Context, env *JobEnvelope, onStdout, onStderr func(stri
 		} else {
 			workdir = basePath
 		}
+		sourceFetchMs = float64(time.Since(fetchStart).Microseconds()) / 1000.0
 	}
 
+	var result *ExecResult
 	switch execType {
 	case "shell":
-		return execShell(ctx, spec, args, mergedEnv, workdir, impersonateUser, onStdout, onStderr)
+		result = execShell(ctx, spec, args, mergedEnv, workdir, impersonateUser, onStdout, onStderr)
 	case "external":
-		return execExternal(ctx, spec, args, mergedEnv, workdir, impersonateUser, onStdout, onStderr)
+		result = execExternal(ctx, spec, args, mergedEnv, workdir, impersonateUser, onStdout, onStderr)
 	case "batch":
-		return execBatch(ctx, spec, args, mergedEnv, workdir, onStdout, onStderr)
+		result = execBatch(ctx, spec, args, mergedEnv, workdir, onStdout, onStderr)
 	case "python":
-		return execPython(ctx, spec, args, mergedEnv, workdir, impersonateUser, onStdout, onStderr)
+		result = execPython(ctx, spec, args, mergedEnv, workdir, impersonateUser, onStdout, onStderr)
 	case "powershell":
-		return execPowershell(ctx, spec, args, mergedEnv, workdir, impersonateUser, onStdout, onStderr)
+		result = execPowershell(ctx, spec, args, mergedEnv, workdir, impersonateUser, onStdout, onStderr)
 	case "sql":
-		return execSQL(ctx, spec, mergedEnv, onStdout, onStderr)
+		result = execSQL(ctx, spec, mergedEnv, onStdout, onStderr)
 	case "http":
-		return execHTTP(ctx, spec, onStdout, onStderr)
+		result = execHTTP(ctx, spec, onStdout, onStderr)
 	default:
-		return &ExecResult{ReturnCode: 1, Stderr: fmt.Sprintf("unsupported executor type: %s", execType)}
+		result = &ExecResult{ReturnCode: 1, Stderr: fmt.Sprintf("unsupported executor type: %s", execType)}
 	}
+	if hadSource {
+		result.SourceFetchMs = sourceFetchMs
+	}
+	return result
 }
 
 // ---------------------------------------------------------------------------
@@ -310,6 +326,7 @@ func execBatch(ctx context.Context, spec *ExecutorSpec, args []string, env map[s
 }
 
 func execPython(ctx context.Context, spec *ExecutorSpec, args []string, env map[string]string, workdir, impersonateUser string, onStdout, onStderr func(string)) *ExecResult {
+	envPrepStart := time.Now()
 	code := spec.Code
 	if code == "" {
 		return &ExecResult{ReturnCode: 1, Stderr: "python executor requires non-empty code"}
@@ -334,7 +351,13 @@ func execPython(ctx context.Context, spec *ExecutorSpec, args []string, env map[
 	if impErr != nil {
 		return &ExecResult{ReturnCode: 1, Stderr: impErr.Error()}
 	}
-	return runCommand(ctx, cmd, env, workdir, onStdout, onStderr)
+	// env_prep_ms covers interpreter resolution + temp-file setup, mirroring
+	// worker/executor.py's timings["env_prep_ms"] (Python's venv/interpreter
+	// prep step) — measured up to but not including the actual run.
+	envPrepMs := float64(time.Since(envPrepStart).Microseconds()) / 1000.0
+	result := runCommand(ctx, cmd, env, workdir, onStdout, onStderr)
+	result.EnvPrepMs = envPrepMs
+	return result
 }
 
 func execPowershell(ctx context.Context, spec *ExecutorSpec, args []string, env map[string]string, workdir, impersonateUser string, onStdout, onStderr func(string)) *ExecResult {
