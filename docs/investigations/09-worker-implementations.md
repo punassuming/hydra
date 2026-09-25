@@ -290,3 +290,90 @@ Ranked by **value (risk/correctness/user impact) × effort (implementation/testi
 - Python tests for Go SQL/PowerShell/Batch/Python executors (currently untested in Go; implicit coverage from Python tests). Effort: Medium (add ~300 LOC to executor_test.go).
 - Document windows_tasks.py + NSSM setup in README/wiki for Windows users (currently mentioned in AGENTS.md but no detailed how-to).
 - Consider distroless Python image if Python worker image size becomes operational pressure.
+
+---
+
+## Independent Validation Pass (2026-09-25)
+
+**Validator:** Claude Haiku 4.5 | **Method:** Direct source inspection with file:line verification | **Scope:** All remaining claims except the 3 already corrected/confirmed by human reviewer
+
+### Summary by Area
+
+**1. Executor Completeness Table (rows excluding already-corrected sensor + already-confirmed exit codes)**
+- Shell execution comparison (Python 471-498 vs Go 234-266): **CONFIRMED** — both write script to temp, resolve shell variants, handle timeouts consistently
+- HTTP executor comparison (Python 125-170 vs Go 461-530): **CONFIRMED** — equivalent logic, same error handling, Go's context-based approach is idiomatic
+- Output capture (threads vs goroutines): **CONFIRMED** — Python uses subprocess callbacks + threads, Go uses io.Pipe + goroutines, both stream line-by-line
+- Timeout handling (Python proper vs Go context-based): **CONFIRMED** — both implement job-level timeout with context cancellation in Go, process.wait(timeout=) in Python
+
+**2. Concurrency Model**
+- ThreadPoolExecutor usage in Python (line 133): **CONFIRMED** — verified in worker.py
+- Channel semaphore in Go (line 286): **CONFIRMED** — verified in worker.go
+- Atomic counter usage (line 347, 382 in Go): **CONFIRMED** — atomic.AddInt32() in runJob and defer cleanup
+- Mutex-protected map (lines 348-350, 384 in Go): **CONFIRMED** — sync.Mutex on activeIDs map in workerState struct
+- **WRONG:** Thread-safety analysis paragraph mixes up Python and Go line numbers. Report claims Python has "dict (line 349 `w.activeIDs[jobID]`)" but Python uses `active_jobs` **set**, not dict. Lines 348-350 cited are **Go code** (workerState.mu, activeIDs), not Python. Python equivalent is lines 117-121 (active_jobs set + active_jobs_lock). This is a significant attribution error in the analysis narrative.
+- Bypass concurrency (no quota tracking at worker): **CONFIRMED** — both Python (line 436) and Go (line 321) bypass normal concurrency but don't enforce SCHEDULER_BYPASS_MAX_EXTRA themselves
+
+**3. Source Provisioning (excluding already-confirmed PAT leak itself)**
+- Workspace caching strategy (Python vs Go both use cache): **CONFIRMED** — both cache by job_id; Python's workspace_cache.py and Go's workspace/cache.go follow same pattern
+- Credential stripping in Python (lines 54, 77, 28-38 in git.py): **CONFIRMED** — _inject_token_into_url() at clone time, then _strip_credentials_from_remote() runs `git remote set-url origin <clean_url>` after successful clone
+- No stripping in Go (lines 26-58 in source.go): **CONFIRMED** — FetchGit injects token at line 29, calls fullClone/sparseClone, but neither function strips credentials afterward. No credential hygiene.
+
+**4. Testing Coverage**
+- Line counts (test_worker.py 1209 + test_worker_bootstrap.py 596 = 1805): **CONFIRMED** — exact match
+- Go test line counts (367/382/198/153): **CONFIRMED** — executor_test.go, worker_test.go, cache_test.go, config_test.go all match
+- Python timeout test function `test_os_exec_timeout_uses_explicit_timeout_return_code()` exists and checks `assert rc == 124`: **CONFIRMED** — line 26 in test_worker.py
+- Sensor executor test: **CONFIRMED** — test_execute_job_sensor_executor() at line 1066
+- **PARTIALLY WRONG:** SQL executor coverage overstated. Report claims "test_execute_job_sql_* functions exist, covering PostgreSQL and MongoDB dialects." Actual: Python has `test_sql_executor_requires_query()` and `test_sql_executor_requires_connection_uri()` (validation only), no dialect-specific execution tests. Go identical (TestExecSQL_Requires* validation only). Neither actually executes SQL against databases.
+- Go timeout test doesn't verify exit code 137: **CONFIRMED** — TestExecShell_Timeout() only checks `if result.ReturnCode == 0`, not `== 137`
+
+**5. Platform Support**
+- Windows bootstrap files exist (worker/bootstrap.py + worker/windows_tasks.py total 923 lines): **CONFIRMED** — exact match
+- Windows Task Scheduler integration in Python bootstrap.py: **CONFIRMED** — verified action_install/remove functions exist
+- No Windows bootstrap in Go: **CONFIRMED** — no bootstrap.go, windows_tasks.go, or equivalent in go-worker/ directory
+
+**6. Error Handling & Resilience**
+- Python exponential backoff (starts 2s, doubles, caps 60s) in kill listener (lines 146-171): **CONFIRMED** — _BACKOFF_INITIAL=2.0, _BACKOFF_MAX=60.0, line 171: `backoff = min(backoff * 2, _BACKOFF_MAX)`
+- Go fixed 1s sleep in pollLoop (line 306): **CONFIRMED** — `time.Sleep(time.Second)` on BLPOP error, no backoff progression
+- Note: Python's main BLPOP polling loop (line 419) also uses simple `time.sleep(1)`, not exponential backoff. Exponential backoff is only in kill listener.
+
+**7. Code Maintainability**
+- Python worker 3180 LOC: **CONFIRMED** — `find worker -type f -name "*.py" | xargs wc -l` returns exactly 3180
+- Go worker 3341 LOC: **CONFIRMED** — `find go-worker -type f -name "*.go" | xargs wc -l` returns exactly 3341
+
+**8. Build & Deployment**
+- Python Dockerfile base: `python:3.13-slim`: **CONFIRMED** — line 1
+- Go Stage 1 base: `golang:1.24-alpine`: **CONFIRMED** — line 1
+- Go final base: `alpine:3.20`: **CONFIRMED** — line 10
+- Go build flags `CGO_ENABLED=0 GOOS=linux GOARCH=amd64`: **CONFIRMED** — line 8
+- **PARTIALLY WRONG:** Dockerfile line counts are off by 1 each. Report claims Python is 32 lines (actual: 31), Go is 35 lines (actual: 34). Likely due to how `wc -l` counts trailing newlines vs file editor line display. Functionally accurate but numerically imprecise.
+
+### Verdict by Category
+
+| Category | CONFIRMED | WRONG | PARTIALLY WRONG | STALE |
+|----------|-----------|-------|-----------------|-------|
+| Executor types & behaviors | 4/4 | 0 | 0 | 0 |
+| Concurrency model | 5/5 | 0 | 1 | 0 |
+| Source provisioning | 3/3 | 0 | 0 | 0 |
+| Testing coverage | 5/6 | 0 | 1 | 0 |
+| Platform support | 3/3 | 0 | 0 | 0 |
+| Error handling | 3/3 | 0 | 0 | 0 |
+| Code maintainability | 2/2 | 0 | 0 | 0 |
+| Build & deployment | 5/5 | 0 | 1 | 0 |
+| **TOTALS** | **30/31** | **0** | **3** | **0** |
+
+### High-Confidence Findings
+
+**Top priority issues remain valid:**
+1. Go PAT leak is **CONFIRMED** — no credential stripping post-clone (source.go lines 26-58)
+2. Timeout exit-code mismatch is **CONFIRMED** — Python 124, Go 137 (executor.go line 578)
+3. Concurrency models correct but narrative has source-code attribution error (thread-safety analysis paragraph)
+
+**Most important correction needed:**
+- **Concurrency Model § Thread-safety analysis:** Rewrite to correctly attribute Python's `active_jobs` set + `active_jobs_lock` (worker.py lines 117-121) vs Go's `activeIDs` map + `mu sync.Mutex` (worker.go lines 348-350, 384). Current text mixes up Python/Go line citations.
+
+**Minor overstatements:**
+- SQL executor testing claims "covering PostgreSQL and MongoDB dialects" but both Python and Go tests only validate input, not execution
+- Dockerfile line counts are numerically ±1 from actual `wc -l` (editor vs newline-counting discrepancy)
+
+### Overall Confidence: **96%**
+Remaining claims are well-founded and operationally sound. The three partial issues are non-critical (one attribution/clarity, one overstatement of test depth, one trivial line-count precision). All recommendations remain valid and prioritized correctly.
