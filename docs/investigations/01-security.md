@@ -213,3 +213,135 @@ Ranked by **(impact × likelihood)**:
    - FastAPI has no built-in HTTPS enforcement; assumed handled by reverse proxy in production. Recommendation: Document requirement for reverse proxy TLS termination in production deployment guide.
 
 ---
+
+## Independent Validation Pass (2026-09-25)
+
+**Method:** Re-verified every specific line-numbered claim in the original report by reading the actual source code independently. Classification: CONFIRMED (code matches claim), WRONG (code doesn't match), PARTIALLY WRONG (mostly right but detail is off), or STALE LINE NUMBERS (conceptually right but lines changed).
+
+### Section 1: AuthN/AuthZ
+**Files:** `scheduler/utils/auth.py`, `scheduler/api/jobs.py`, `scheduler/api/logs.py`, `scheduler/api/events.py`, `scheduler/api/admin.py`
+
+- HMAC timing-safe comparison at line 64: **CONFIRMED** — `hmac.compare_digest(expected_hash, provided_hash)`
+- Domain token requires domain at 94-95: **CONFIRMED** — returns error if domain not provided for non-admin
+- Domain scoping in events.py:24 and logs.py:34: **CONFIRMED** — both check domain match before serving data
+- Admin domain validation at admin.py:32-34: **CONFIRMED** — validates domain exists in Redis before allowing
+- Token in query string at line 25: **CONFIRMED** — allows `?token=...` extraction
+
+**Status:** 5/5 claims CONFIRMED
+
+---
+
+### Section 2: Redis ACL Model
+**Files:** `scheduler/utils/redis_acl.py`, `scheduler/api/admin.py`, `scheduler/api/domain.py`, `scheduler/scheduler.py`
+
+- Tight key patterns (lines 25-36): **CONFIRMED** — all keys domain-scoped (`job_queue:{domain}:*`, etc.)
+- Tight channel patterns (lines 39-43): **CONFIRMED** — channels domain-scoped (`log_stream:{domain}:*`, `job_kill:{domain}`)
+- Minimal command whitelist (lines 46-63): **PARTIALLY WRONG** — Report states "Only 13 commands allowed" but code contains 15 commands: ping, exists, hexists, blpop, hset, hincrby, zadd, sadd, srem, rpush, ltrim, expire, del, publish, subscribe. (Lines 48-62 enumerate all 15.)
+- ACL password masking in admin.py:70: **CONFIRMED** — list_domains returns only `worker_redis_acl_user`, not password
+- ACL password on rotate/create (admin.py:106, 184; domain.py:89): **CONFIRMED** — full redis_acl dict returned only when needed
+- No password in logs at scheduler.py:529: **CONFIRMED** — `log.warning("Failed to reconcile Redis ACL user for domain %s: %s", domain, exc)` does not log password
+- ACL reconciliation idempotent at scheduler.py:526: **CONFIRMED** — idempotent password replay via `ensure_worker_acl_user(domain, password=password)`
+
+**Status:** 6/7 claims CONFIRMED, 1/7 PARTIALLY WRONG
+
+---
+
+### Section 3: Credential Handling
+**Files:** `scheduler/api/credentials.py`, `scheduler/api/jobs.py`, `worker/executor.py`
+
+- Credentials write-only at 4-5: **CONFIRMED** — docstring states "never read back the encrypted payload"
+- List operations return metadata only (lines 28-35): **CONFIRMED** — CredentialReference objects with no encrypted_payload
+- Job definitions sanitize SQL/Kerberos (lines 36-45 in jobs.py): **CONFIRMED** — connection_uri and keytab masked as "********"
+- SQL temp files secure at executor.py:109: **CONFIRMED** — `tempfile.mkstemp()` creates files with mode 0o600
+- Kerberos cleanup in finally block (executor.py:502-506): **CONFIRMED** — `kdestroy` is in finally block within the outer finally at line 499
+
+**Status:** 5/5 claims CONFIRMED
+
+---
+
+### Section 4: Executor Security
+**Files:** `worker/executor.py`, `worker/utils/git.py`, `worker/utils/os_exec.py`
+
+- No shell injection at lines 482, 487, 489, 491: **CONFIRMED** — commands passed as lists, not concatenated strings
+- PAT hygiene at git.py:54-77: **CONFIRMED** — token injected at line 54 for clone only, stripped at lines 76-77 via `_strip_credentials_from_remote()`
+- SQL temp file secure at executor.py:109: **CONFIRMED** (see Section 3)
+- Impersonation safe at executor.py:318: **CONFIRMED** — `["sudo", "-n", "-u", impersonate_user, "--"] + cmd` uses proper `--` separator
+- Kerberos cleanup at executor.py:502-506: **CONFIRMED** (see Section 3)
+- Python code execution safe at executor.py:405-410: **CONFIRMED** — code written to temp file; not using `python -c`
+- External command safe at executor.py:420: **CONFIRMED** — binary + args as list, no shell=True
+
+**Status:** 7/7 claims CONFIRMED
+
+---
+
+### Section 5: Network/Transport Security
+**Files:** `scheduler/main.py`, `docker-compose.yml`, `docker-compose.worker.yml`, `worker/Dockerfile`
+
+- CORS properly configured at main.py:73-83: **CONFIRMED** — default "*" allowed with allow_credentials=False when allow_all
+- Datastore network isolation at docker-compose.yml:159-167: **CONFIRMED** — Redis/Mongo on internal-only "backend" network; scheduler joins both backend and frontend
+- Worker runs as non-root at worker.yml:20: **CONFIRMED** — `user: "${HYDRA_WORKER_UID:-10001}:${HYDRA_WORKER_GID:-10001}"`
+- Worker read-only rootfs at worker.yml:21: **CONFIRMED** — `read_only: true`
+- tmpfs protections at worker.yml:23: **CONFIRMED** — `/tmp:rw,noexec,nosuid,size=256m`
+- Security_opt hardening (docker-compose.yml:35, 82, 126; worker.yml:24): **CONFIRMED** — all services have `security_opt: ["no-new-privileges:true"]`
+
+**Status:** 6/6 claims CONFIRMED
+
+---
+
+### Section 6: Secrets in Deployment Artifacts
+**Files:** `.env.example`, `deploy/helm/hydra/values.yaml`, `scheduler/Dockerfile`, `worker/Dockerfile`, `go-worker/Dockerfile`
+
+- .env.example clean with no hardcoded secrets: **CONFIRMED** — all values are empty or examples
+- ADMIN_TOKEN required at line 15: **CONFIRMED** — line 15 shows `ADMIN_TOKEN=` with no default; line 13 marks [REQUIRED]
+- Credential encryption key guidance at lines 22-29: **CONFIRMED** — lines 21-29 provide guidance and generation command
+- Redis/Mongo auth opt-in at lines 31-43: **CONFIRMED** — lines 35 and 42-43 show both are optional
+- Dockerfiles contain no embedded secrets: **CONFIRMED** — scanning found only config, no hardcoded secrets
+
+**Status:** 5/5 claims CONFIRMED
+
+---
+
+### Section 7: Dependency/Supply-Chain Risk
+**Files:** `pyproject.toml`, `ui/package.json`, `go.mod`
+
+- Python dependencies modern (pyproject.toml:9-23): **CONFIRMED** — FastAPI 0.115.0, Pydantic 2.9.2, SQLAlchemy 2.0.36, Redis 5.0.8, Cryptography >=46.0.5, PyYAML 6.0.3 all current
+- `google-generativeai==0.3.2` fully deprecated: **CONFIRMED** — (previously corrected to HIGH severity; no code change yet to migrate to google-genai)
+- UI dependencies modern (package.json:14-22): **CONFIRMED** — React 18.2, Antd 5.19, React Router 7.18 all current
+- Go dependencies minimal and recent (go.mod:5-9): **CONFIRMED** — only 3 direct deps (uuid, godotenv, redis), all recent
+
+**Status:** 4/4 claims CONFIRMED
+
+---
+
+### Section 8: AI Feature Risk
+**Files:** `scheduler/api/ai.py`, `scheduler/models/job_definition.py`
+
+- Generated jobs validated through schema at ai.py:174-175: **CONFIRMED** — `job = JobCreate(**data)` at line 175 validates against schema
+- API keys not logged at ai.py:110-143: **CONFIRMED** — API keys passed to libraries directly; not logged in code
+- LLM responses not executed at ai.py:244: **CONFIRMED** — analyze_run endpoint returns text only, no execution
+- User question interpolated at ai.py:226-231: **CONFIRMED** — `question` directly interpolated into prompt without escaping
+- Stdout/stderr interpolated at ai.py:182-183, 237: **CONFIRMED** — log text truncated but embedded in prompts without escaping
+
+**Status:** 5/5 claims CONFIRMED
+
+---
+
+### Summary of Validation Pass
+
+| Section | Total Claims | CONFIRMED | WRONG | PARTIALLY WRONG | STALE |
+|---------|--------------|-----------|-------|-----------------|-------|
+| 1. AuthN/AuthZ | 5 | 5 | 0 | 0 | 0 |
+| 2. Redis ACL | 7 | 6 | 0 | 1 | 0 |
+| 3. Credentials | 5 | 5 | 0 | 0 | 0 |
+| 4. Executor Security | 7 | 7 | 0 | 0 | 0 |
+| 5. Network/Transport | 6 | 6 | 0 | 0 | 0 |
+| 6. Secrets/Deployment | 5 | 5 | 0 | 0 | 0 |
+| 7. Dependencies | 4 | 4 | 0 | 0 | 0 |
+| 8. AI Features | 5 | 5 | 0 | 0 | 0 |
+| **TOTAL** | **44** | **43** | **0** | **1** | **0** |
+
+**Confidence Verdict:** 97.7% of specific line-numbered claims held up under independent verification. The single correction required is the Redis ACL command count (15, not 13). The top-5-priorities ranking remains valid; all findings are conceptually sound and the severity assessments are appropriate.
+
+**No NEW security issues discovered** during this pass — all code paths reviewed align with the report's conclusions. The report's documentation and recommendations are accurate.
+
+---
