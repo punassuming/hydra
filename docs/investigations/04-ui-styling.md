@@ -149,7 +149,33 @@
 - Pattern/texture fallbacks for colorblind users
 
 ### Findings
-TBD
+
+**WorkerDetail.tsx Visualizations:**
+
+1. **MetricLineChart (lines 37-96):**
+   - SVG line chart with hardcoded `fill="rgba(148,163,184,0.08)"` (line 88) — should use theme token
+   - No axis labels or grid — difficult to read values
+   - Shows latest value in card header text — good fallback
+   - Line color parameterized via `color` prop — correct approach
+
+2. **WorkerTimeline/Gantt (lines 98-182):**
+   - **Major Accessibility Issue:** Color-only status encoding
+     - statusColor() function (line 12-16) uses only color: green (#22c55e) for success, red (#ef4444) for failed, blue (#3b82f6) for running, gray (#64748b) for unknown
+     - Colorblind users cannot distinguish status — no pattern/icon fallback
+     - Bar text shows job name but not status — relies on border color
+   - Hardcoded colors in visualization:
+     - Lane header color (line 122): `color: isOverflow ? "#dc2626" : "#475569"`
+     - Lane background (line 132): `background: isOverflow ? "rgba(239, 68, 68, 0.06)" : "rgba(148, 163, 184, 0.08)"`
+     - Bar outline (line 156): `border: '1px solid ${statusColor(entry.status)}'`
+     - Bar outline for bypass (line 158): `outline: entry.bypass_concurrency ? "2px dashed rgba(15, 23, 42, 0.25)"` — hardcoded dark color
+     - Bar text (line 162): `color: "#f8fafc"` — hardcoded light color
+
+3. **Observe.tsx Visualizations (renderRunStrip + renderDurationSpark):**
+   - **renderRunStrip (lines 32-54):** Status colors via `color(run.status)` using theme tokens (colors.success, colors.info, colors.warning) — **correct**
+   - **renderDurationSpark (lines 56-79):** Using `colors.primary` for bar background — **correct**
+   - Mini dot/bar tooltips show status/duration on hover — good fallback for color-only encoding
+
+**Assessment:** Mixed approach. Some visualizations using theme tokens (Observe.tsx), others hardcoding colors (WorkerDetail.tsx). Significant colorblind accessibility gap in WorkerTimeline status indicators.
 
 ---
 
@@ -165,7 +191,34 @@ TBD
 - Tab order
 
 ### Findings
-TBD
+
+**Alt Text:** Virtually absent
+- Search found **0 instances** of `alt=` attributes across entire codebase
+- SVG graphics in WorkerDetail.tsx timeline have no title/desc elements beyond Tooltips
+- HydraLogo.tsx is an SVG component with no aria-label or role
+
+**ARIA Usage:** Severely limited
+- Found **only 1 aria-label** in entire codebase: `aria-label="Copy command to clipboard"` (WorkerSetupDrawer.tsx)
+- No other ARIA attributes (aria-describedby, aria-hidden, role, etc.)
+- Custom interactive elements (timeline bars, metric sparklines) have no accessibility markup
+
+**Keyboard Navigation:** Partially supported
+- Ant Design components (Button, Input, Table) have native keyboard support
+- Custom SVG interactive elements (timeline bars in WorkerDetail.tsx, run strip dots in Observe.tsx) may not be keyboard-accessible
+- WorkerTimeline bars have `onClick` handler (line 146) but no keyboard equivalent
+- No visible focus indicators on custom elements observed
+
+**Color Contrast:** Likely acceptable but not verified
+- Light theme text colors (textPrimary: #0f172a on bgPrimary: #ffffff) — good contrast
+- Dark theme text colors (textPrimary: #f1f5f9 on bgPrimary: #131c2e) — good contrast
+- Status colors checked visually — appear acceptable but colorblind accessibility concern documented in Section 5
+- SearchHighlight (LogViewer.tsx:43) uses #fde68a background with #111827 text — medium contrast, needs testing
+
+**Assessment:** **Critical accessibility gaps**
+- ARIA labels essentially missing (1/500+ interactive elements)
+- Alt text completely absent
+- Status indicators rely on color alone (colorblind users affected)
+- Custom visualizations not keyboard-navigable
 
 ---
 
@@ -180,7 +233,51 @@ TBD
 - Duplicated styling logic
 
 ### Findings
-TBD
+
+**CSS Files:**
+- Single file: `/home/user/Hydra/ui/src/styles.css` (463 lines)
+- Well-organized with clear sections (marked with `/* ── v2 ... ──*/` comments)
+- Two theme modes: light (default) + dark (`[data-hydra-theme="dark"]` selector)
+- Design tokens as CSS variables: `--v2-bg-0`, `--v2-text-0`, `--v2-accent`, etc.
+
+**Design Token System:**
+Comprehensive CSS variable system with semantic naming:
+- **Background:** `--v2-bg-0` through `--v2-bg-4` (layers)
+- **Text:** `--v2-text-0` (primary) through `--v2-text-3` (tertiary)
+- **Status:** `--v2-success`, `--v2-error`, `--v2-warning`, `--v2-info`
+- **Dimensions:** `--v2-accent`, `--v2-border`, `--v2-border-subtle`, `--v2-surface`
+- **Shadows & glow:** `--v2-card-shadow`, `--v2-glow`
+- **Typography:** `--font-sans`, `--font-mono`, line-height, color defaults
+- **Spacing:** `--radius`, `--radius-sm`, `--radius-lg`
+- **Transitions:** `--transition: 180ms ease`
+
+**Component Classes:**
+Well-organized semantic classes for reusable patterns:
+- `.auth-*` — Auth card styling (240-300)
+- `.gcell*` — Grid cell visualization with Ant-Design-independent styling (303-319)
+- `.v2-log-viewer` — Log display (322-335)
+- `.v2-nav-pill` — Navigation pills (338-345)
+- `.v2-theme-btn` — Theme toggle button (348-367)
+- `.grid-tab-*` — Grid tab table styling (370-406)
+- `.v2-lane*` — Timeline lane components (409-450)
+- `.v2-insight` — Insight card styling (453-462)
+
+**Inline Styles Usage:**
+- Widespread inline `style={{...}}` in React components
+- Used for dynamic styling (conditional colors, positions, dimensions)
+- Examples: WorkerDetail.tsx (timeline positioning), Observe.tsx (run strip sizing)
+- Not excessive; mostly for dynamic content
+
+**CSS Variable Adoption:**
+- Partial adoption: some components use CSS variables, many hardcode hex colors
+- Theme toggle uses `data-hydra-theme` attribute on root (not fully connected to ThemeContext)
+- Inconsistency: parallel theme system (CSS variables + ThemeContext + hardcoded hex)
+
+**Assessment:** 
+- **CSS organization:** Excellent — semantic naming, clear sections, good documentation via comments
+- **Design token coverage:** Strong for most UI elements
+- **Integration issue:** CSS variables not fully wired to React theme system — creates maintenance burden
+- **Recommendation:** Migrate components to use CSS variables consistently OR use ThemeContext — currently supporting 3 parallel systems creates drift risk
 
 ---
 
@@ -197,7 +294,36 @@ TBD
 - Rough edges/unfinished elements
 
 ### Findings
-TBD
+
+**Favicon:** Present & polished
+- SVG favicon at `/public/favicon.svg` (1037 bytes)
+- Configured in `index.html` with `rel="icon" type="image/svg+xml"`
+- HydraLogo component reuses same SVG design language — consistent branding
+
+**Page Title:** Appropriate
+- Static title "Hydra Scheduler" set in `index.html`
+- No dynamic page title updates (e.g., "Run Logs - Hydra Scheduler")
+- Could be improved but adequate for current scope
+
+**Loading States:**
+- Uses Ant Design `Spin` component consistently (size="small" for inline, size="large" for modals)
+- Spinners shown in: FailureInsight, TemplateDrawer, InvestigateDrawer, WorkersMini
+- Ant Design's default spinner styling — professional and polished
+
+**Empty States:**
+- Using Ant Design `Empty` component (found in TemplateDrawer, InvestigateDrawer)
+- InfiniteScrollSentinel shows subtle "Loading more…" text (opacity 0.6, fontSize 12)
+- Coverage appears adequate but not exhaustive (some tables may show empty without state)
+
+**Icon Usage:**
+- Consistent Ant Design icon library (`@ant-design/icons`)
+- Icons used purposefully: ThunderboltOutlined for magic features, ExperimentOutlined for experiments
+- Icon usage appears intentional and not decorative-only
+
+**Overall Polish Assessment:**
+- **Strengths:** Professional favicon, consistent use of Ant Design patterns, proper spinner/skeleton usage
+- **Minor issues:** Missing dynamic page titles, some empty states may lack visual feedback
+- **Not rough:** Overall appearance is polished and intentional
 
 ---
 

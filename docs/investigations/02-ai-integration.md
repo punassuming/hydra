@@ -169,13 +169,174 @@
 *Analyzing scheduler/api/investigations.py for existing checks and gaps vs competitors*
 
 ### Findings
-[To be populated]
+
+**File:** `/home/user/Hydra/scheduler/api/investigations.py` (lines 1-214)
+
+**Existing Checks (4 total):**
+
+1. **`failed_recent`** (lines 69-94)
+   - Finds jobs with failures/timeouts in last 24 hours (configurable via `?hours` param)
+   - Returns: count of failures, latest run timestamp
+   - Quality: Good — useful for incident response
+   - Performance: O(J*R) where J=jobs, R=recent runs per job
+
+2. **`long_running_outliers`** (lines 97-128)
+   - Finds in-progress runs exceeding 2x p90 duration (line 108)
+   - Reuses `duration_percentiles()` helper shared with AI endpoint (line 105)
+   - Returns: elapsed time ratio vs p90 baseline
+   - Quality: Excellent — early detection of hangs/resource contention
+   - Performance: O(J*R) for percentile calculation
+
+3. **`flaky_jobs`** (lines 131-158)
+   - Examines last 10 runs (line 22: FLAKY_SAMPLE_SIZE)
+   - Flags jobs with 20-80% failure rate (lines 24-25)
+   - Returns: failure rate percentage
+   - Quality: Good — helps identify unstable jobs
+   - Limitation: Only looks at recent runs, misses gradually-degrading jobs
+
+4. **`never_succeeded`** (lines 161-184)
+   - Finds jobs with 3+ runs but zero successes (lines 25, 166-170)
+   - Returns: total run count
+   - Quality: Good — flags broken jobs
+   - Limitation: Doesn't distinguish "never succeeded" from "recently broken"
+
+**Design Quality:**
+- ✅ Clean helper pattern: each check is a function taking (db, jobs)
+- ✅ Auth-aware: `_scope_query()` (line 58) respects domain/admin context
+- ✅ Consistent output schema: all return (job_id, job_name, domain, metric_label, metric_value, last_run_id, last_run_at)
+- ✅ No LLM dependency: all queries are deterministic
+- ⚠️ Hardcoded thresholds: FLAKY_SAMPLE_SIZE, LONG_RUNNING_MULTIPLIER, etc. are constants (lines 22-27)
+  - Not per-domain configurable
+  - Recommendation: Add `GET /investigations/{key}/config` endpoint to expose/customize thresholds
+
+**Gaps vs Modern Tools (Airflow, Dagster, Prefect):**
+
+| Feature | Hydra | Airflow | Dagster | Priority |
+|---------|-------|---------|---------|----------|
+| SLA miss tracking | ❌ | ✅ | ✅ | High |
+| Run duration trends (e.g., "getting slower") | ❌ | ✅ | ✅ | High |
+| Cascading failure analysis (DAG-level) | ❌ | ✅ | ✅ | Medium |
+| Retry storm detection | ❌ | ✅ | Partial | High |
+| Stale job detection (not run in N days) | ❌ | ✅ | ✅ | Medium |
+| Resource anomalies (CPU/memory outliers) | ❌ | ✅ | ✅ | Medium |
+| High-variance jobs (unstable duration) | ❌ | Partial | Partial | Low |
+
+**High-Value Quick Wins (LLM-Free):**
+
+1. **SLA Miss Tracking** — query jobs where `sla_seconds` is set and latest run took > sla_seconds
+   - Code effort: ~20 lines
+   - User value: High — helps operators meet commitments
+   
+2. **Retry Storm Detection** — jobs where `retry_count` is being hit repeatedly in past hour
+   - Code effort: ~30 lines (count runs with status=retry in past 1h)
+   - User value: High — indicates cascading/flapping issues
+   
+3. **Stale Job Detection** — scheduled jobs not run in N days
+   - Code effort: ~15 lines
+   - User value: Medium — helps surface abandoned jobs
+   
+4. **Duration Trend** — is this job getting slower over time?
+   - Code effort: ~40 lines (fit linear regression on last 20 runs)
+   - User value: Medium — early detection of performance degradation
+
+**Recommendation:**
+Add `sla_miss` and `retry_storms` checks immediately (cheap, high-value).
+Plan `duration_trend` check for next sprint (requires some stats work but very useful).
 
 ## Area 5: Testing Coverage
 *Reviewing test_ai.py and test_investigations.py for robustness*
 
 ### Findings
-[To be populated]
+
+**File:** `/home/user/Hydra/tests/test_ai.py` (lines 1-250)
+
+**AI Endpoint Tests:**
+
+1. **Provider tests** (lines 24-61)
+   - ✅ Missing API key handled (line 41-46: no GEMINI_API_KEY → 500)
+   - ✅ Gemini success path (line 48-54)
+   - ✅ OpenAI success path (line 56-61)
+   - ✅ Model names verified (line 54: "gemini-pro")
+
+2. **analyze_run tests** (lines 63-87)
+   - ✅ Plain text response handling (line 63-76)
+   - ✅ Invalid provider rejected (line 78-87: Pydantic validation)
+   - ⚠️ **Missing**: timeout/rate-limit scenarios
+   - ⚠️ **Missing**: empty LLM response handling
+   - ⚠️ **Missing**: prompt injection tests (custom question with malicious input)
+   - ⚠️ **Missing**: very long stdout/stderr truncation verification
+
+3. **predict_duration tests** (lines 90-135)
+   - ✅ Happy path with history (line 90-114: median/mean/p90 calculations)
+   - ✅ Empty history edge case (line 117-135)
+   - ✅ Percentile logic verified (line 114: p90 = 36.0 for [10,20,40])
+   - ⚠️ **Missing**: domain filtering test (auth-scoped results)
+   - ⚠️ **Missing**: sample_size cap verification (MAX_PREDICTION_SAMPLE_SIZE=200)
+
+4. **diagnose_regression tests** (lines 200-249)
+   - ✅ Run not found → 404 (line 181-185)
+   - ✅ No prior success → 422 with "no_prior_success" detail (line 188-197)
+   - ✅ Happy path with baseline comparison (line 200-229)
+   - ✅ Malformed LLM output → 500 (line 232-249)
+   - ✅ Duration comparison shown (line 228-229)
+   - ⚠️ **Missing**: low-confidence diagnosis handling
+   - ⚠️ **Missing**: timeout on LLM call
+
+**Critical Gaps:**
+
+| Scenario | Tested | Impact |
+|----------|--------|--------|
+| Missing API key | ✅ | High |
+| Network timeout | ❌ | High |
+| Rate limit (429) | ❌ | High |
+| Malformed JSON from LLM | ✅ (line 232-249) | Medium |
+| Very long prompts | ❌ | Medium |
+| Concurrent requests | ❌ | Medium |
+| Custom question prompt injection | ❌ | High |
+| OpenAI error handling | ⚠️ (only happy path) | Medium |
+
+**File:** `/home/user/Hydra/tests/test_investigations.py` (lines 1-181)
+
+**Investigation Tests:**
+
+1. **Catalog endpoint** (line 85-89)
+   - ✅ Lists all 4 investigations (failed_recent, long_running_outliers, flaky_jobs, never_succeeded)
+
+2. **failed_recent check** (line 97-110)
+   - ✅ Only recent failures included (1h window, 30h excluded)
+   - ✅ Count returned correctly
+   - ⚠️ **Missing**: configurable hours parameter test
+
+3. **long_running_outliers check** (line 113-132)
+   - ✅ Detects runs > 2x p90 duration
+   - ⚠️ **Missing**: runs exactly at 2x threshold (boundary)
+   - ⚠️ **Missing**: missing p90 baseline handling
+
+4. **flaky_jobs check** (line 135-158)
+   - ✅ Detects 50% failure rate (5/10 mixed outcomes)
+   - ✅ Excludes 100% success jobs
+   - ⚠️ **Missing**: boundary cases (20% and 80% exactly)
+   - ⚠️ **Missing**: jobs with < 10 runs
+
+5. **never_succeeded check** (line 161-180)
+   - ✅ Requires >= 3 runs (line 169-171: shows "new" job filtered)
+   - ✅ Counts timeout as failure
+   - ⚠️ **Missing**: partial success scenario (first 2 fail, 3rd succeeds)
+
+**Missing High-Value Tests:**
+1. **Timeout resilience**: Simulating slow LLM (>30s hang)
+2. **Prompt injection**: Custom question with `"ignore instructions..."` pattern
+3. **Concurrency**: Multiple analyze_run calls in parallel
+4. **Rate limiting**: Simulating 429 from provider
+5. **Domain scoping**: Verify domain-token cannot see other domain's analysis
+6. **Cache invalidation**: Re-analyze same run shows fresh results (no stale cache)
+
+**Recommendation:**
+Priority fixes:
+1. Add timeout tests to _call_llm and _call_openai/gemini (3 lines per test)
+2. Add prompt injection test for custom question (validate input sanitization)
+3. Add domain-scoped access tests for diagnose_regression
+4. Mock provider rate-limit errors (add exponential backoff retry logic + test)
 
 ## Area 6: Gaps vs State of the Art
 *Identifying missing AI-assisted operability features in modern tools*

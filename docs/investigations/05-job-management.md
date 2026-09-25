@@ -156,11 +156,159 @@
 
 ### 5. Concurrency & Affinity
 
+**Files:** `/home/user/Hydra/scheduler/utils/affinity.py` (71 lines), `selectors.py` (20 lines), `scheduler.py` (lines 191-290 for list_online_workers, scheduling_loop checks)
+
+### Key Findings
+
+**Affinity Model** (comprehensive):
+- 7 dimensions: os, tags, allowed_users, hostnames, subnets, deployment_types, executor_types
+- All checked via predicates in `passes_affinity()` (line 54-70)
+- Tag matching: job's tags must ALL be present in worker tags (line 12-17, not "any-of" but "all-of")
+- Executor types: auto-populated from job executor type if not explicitly set (line 39-51)
+- Linux-specific: impersonation/Kerberos require Linux/macOS worker (line 57-61)
+- **Strength:** Multi-faceted, flexible, covers common use cases (geo-affinity, user-based, capability-based)
+
+**Worker Selection Strategy** (lines 4-19 in selectors.py):
+- Deterministic: pick lowest-load worker by (current_running / max_concurrency, then absolute current_running)
+- Not random; load-based is optimal for tail latency
+- **Gap:** No priority-weighted selection (all jobs treated equally in load calculation)
+- **Gap:** No locality preference (if multiple workers at same load, picks first)
+- **Strength:** Simple, predictable, good for even distribution
+
+**Concurrency Control:**
+- Worker advertises `max_concurrency` (default 1, line 213 in scheduler.py)
+- Scheduler respects capacity: only dispatches if `current_running < max_concurrency` (line 225)
+- Real-time tracking: `current_running` updated by worker heartbeat (line 214)
+- **Bypass Concurrency:** Job can set `bypass_concurrency: true` to exceed worker's max_concurrency (line 255)
+  - Guarded by `SCHEDULER_BYPASS_MAX_EXTRA` (line 239): hard cap on extra bypass jobs per worker (default 0 = no cap)
+  - Warning logged when dispatching bypass job to overloaded worker (line 334-342)
+
+**Priority Handling:**
+- Job has `priority` field (default 5, line 78 in job_definition.py)
+- Scheduler uses `bzpopmax()` to pull highest-priority job from pending queue (line 245 in scheduler.py)
+- Priority respected during re-enqueue (line 308)
+- **Gap:** Priority doesn't influence worker selection (all candidates get same weight; only load matters)
+- **Gap:** No strict priority lanes or preemption (a low-priority job running can't be bumped by high-priority arrival)
+
+**Starvation Tracking:**
+- `no_worker_count` incremented when job requeued due to no eligible worker (line 294)
+- Warning logged at `SCHEDULER_STARVATION_WARN_THRESHOLD` (default 5) (line 295-300)
+- Visible in `/overview/queue` and `/overview/pressure` endpoints
+- **Strength:** Operators can see which jobs are starving
+
 ### 6. Observability of Job State
+
+**Files:** `/home/user/Hydra/scheduler/api/jobs.py` (endpoints at lines 589-943)
+
+### Key Findings
+
+**Observability Endpoints (Rich):**
+1. `/overview/queue` (line 589-685): Returns pending jobs + upcoming scheduled jobs
+   - Pending: job_id, name, user, domain, priority, schedule_mode, next_run_at, queue_score, enqueued_ts, reason, **no_worker_count**
+   - Includes `pending_total` per domain (total count before pagination)
+   - Filterable by `pending_limit` and `upcoming_limit`
+   - **Strength:** `no_worker_count` is visible — operators can identify starving jobs
+
+2. `/overview/pressure` (line 688-787): Backpressure summary per domain
+   - `pending_total`: queue depth
+   - `stalled_jobs`: list of job IDs with no_worker_count >= threshold
+   - `stalled_count`, `max_no_worker_count`: aggregate starvation metrics
+   - `worker_queue_depths`: per-worker dispatch queue depths (shows if dispatch lag is per-worker or global)
+   - `total_worker_queue_depth`: aggregate dispatch backlog
+   - `online_workers`, `total_running`, `total_capacity`: capacity visibility
+   - **Strength:** Single endpoint shows "why is the queue not running?" (lack of workers? no eligible workers? dispatch lag? queue full?)
+
+3. `/jobs/{job_id}/grid` (line 832-873): Run history grid (recent runs with success/failure status)
+4. `/jobs/{job_id}/gantt` (line 874-898): Timeline visualization of run executions
+5. `/jobs/{job_id}/graph` (line 899-942): Dependency DAG visualization
+6. `/overview/statistics` (line 943+): Aggregate stats (total jobs, runs by status, average duration, etc.)
+7. `/overview/jobs` (line 499-587): Job listing with counts
+8. Worker endpoints in `workers.py`: `/workers/`, `/workers/{worker_id}/metrics`, `/workers/{worker_id}/timeline`, `/workers/{worker_id}/operations`
+
+**Strengths:**
+- Comprehensive operational visibility: queue state, worker health, dispatch backlog, starvation tracking
+- Dependency graph endpoint allows visual inspection of complex job chains
+- Per-worker queue depths reveal dispatch bottlenecks
+- Starvation threshold configurable and metrics exposed
+
+**Gaps:**
+1. No "why was this job not eligible?" detailed breakdown — operators see `no_worker_count` but not which affinity constraint caused rejection
+2. No run performance ranking (longest-running jobs, slowest queued jobs, jobs with most retries)
+3. No alert/threshold API (admins must poll `/overview/pressure` manually to detect issues)
+4. No export/bulk-download API for run history (for compliance/audit)
 
 ### 7. CLI/Operator Tooling
 
+**Files:** `/home/user/Hydra/scripts/hydra-apply.py`, bash helpers in `/scripts/`
+
+### Key Findings
+
+**CLI Tools Available:**
+1. `hydra-apply.py` (YAML/JSON → API): GitOps-style job upsert; supports dry-run, domain targeting, custom API URL
+2. Bash helpers (standalone scripts):
+   - `create-domain.sh`: Create a new domain
+   - `provision-redis-acl.sh`: Rotate domain worker Redis ACL credentials
+   - `configure-external-redis-acl.sh`: Configure ACL user directly on external Redis
+   - `start-domain-workers.sh`: Agentic worker bring-up (Docker/Kubernetes/bare)
+   - `diagnose-domain-admin.sh`: Agentic diagnostics for domain auth and worker visibility
+   - `run-acceptance-tests.sh`: Home-lab acceptance suite
+
+**Gaps in CLI Parity:**
+1. **No job inspection CLI** (no `hydra-ctl job get/list/describe`)
+2. **No run management CLI** (no `hydra-ctl run retry/cancel/inspect`)
+3. **No watch/polling CLI** (no `hydra-ctl watch <job_id>` for real-time status)
+4. **No bulk operations** (no `hydra-ctl jobs disable-all` or `enable-pattern`)
+5. **No audit/export CLI** (no `hydra-ctl export-runs --since <date>`)
+6. **No doctor/diagnostics CLI** (no `hydra-ctl doctor --domain prod`)
+   - Note: bash scripts exist (`diagnose-domain-admin.sh`) but no unified CLI
+7. **No SLA/threshold management** (no CLI to set/view SLA policies)
+
+**Strengths:**
+- `hydra-apply.py` is well-designed, covers the main GitOps use case
+- Bash helpers cover domain/worker bootstrap
+- Scripts are discoverable and documented in `scripts/` directory
+
+**Recommendation:**
+- Develop a unified `hydra-ctl` CLI (Go binary or Python click-based) with subcommands:
+  - `job list/get/edit/delete/run-now`
+  - `run list/get/cancel/retry/inspect`
+  - `worker list/state/drain/evict`
+  - `domain create/list/delete/rotate-credentials`
+  - `admin config/apply` (for policy/SLA rules)
+  - `doctor/diagnose` (unified diagnostics)
+
 ### 8. Multi-Tenancy & Domain Isolation
+
+**Files:** `/home/user/Hydra/scheduler/api/jobs.py` (lines 251-300), `admin.py`, `credentials.py`, `scheduler.py` (lines 45-150 for credential resolution)
+
+### Key Findings
+
+**Domain Enforcement Pattern:**
+1. **API Token Scoping**: Every API request carries domain from token (line 256 in jobs.py); admin token bypasses domain scoping
+2. **Job Queries**: Always filtered by domain (line 258, 272, 287 in jobs.py)
+3. **Credential Access**: Domain-scoped queries (lines 65, 101, 127, 148 in scheduler.py)
+4. **Worker Queues**: Per-domain keys in Redis (`job_queue:<domain>:pending`, `workers:<domain>:*`, etc.)
+5. **Runs**: Domain stored in job_runs collection; queries filter by domain
+
+**Domain Isolation Audit (Spot Check):**
+- ✓ Job creation: domain derived from token (api/jobs.py line 76: `domain = getattr(request.state, "domain", "prod")`)
+- ✓ Job reads: forbidden if job's domain != request domain (line 258)
+- ✓ Job runs: filtered by domain (line 274: `domain_filter = force_domain or domain`)
+- ✓ Credentials: scoped to domain in Mongo queries (admin.py line 245: `{"name": ..., "domain": cred_domain}`)
+- ✓ Worker heartbeats: per-domain Redis keys (scheduler.py line 195: `f"workers:{domain}:*"`)
+- ✓ Worker ACL: per-domain Redis ACL user (AGENTS.md: worker uses `DOMAIN` as Redis username)
+- ✓ Redis queue dispatch: domain-scoped envelopes (scheduler.py line 354: `f"job_queue:{domain}:{wid}"`)
+
+**Potential Gaps (Minimal):**
+1. **No cross-domain job dependency**: A job in domain `prod` cannot depend on a job in `staging` — by design (safe)
+2. **Admin bypass**: Admin token can see all domains; operations cannot be fine-grained (e.g., admin over `staging` but not `prod`)
+   - Mitigation: API tokens are domain-scoped; admin tokens are org-scoped (no fine-grained admin roles)
+3. **No namespace validation at creation**: Job domain is trusted from token; no explicit namespace validation (but token is authoritative)
+
+**Strengths:**
+- Domain isolation is systematic and appears consistent across API, Mongo, and Redis layers
+- Worker auth is Redis ACL per-domain
+- No cross-domain leakage in queue/heartbeat/credential layers
 
 ### 9. Known Gaps: Queue-Based Routing
 

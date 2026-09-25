@@ -31,12 +31,43 @@ Live security audit of the Hydra Jobs distributed job runner, covering authentic
 ---
 
 ## 2. Redis ACL Model
-*To investigate: worker ACL channel patterns, credential rotation, secret masking in responses*
+**Status:** ✓ Reviewed | **Severity:** Low
+
+**Files Reviewed:** `scheduler/utils/redis_acl.py`, `scheduler/api/admin.py`, `scheduler/api/domain.py`, `scheduler/scheduler.py`
+
+### GOOD
+- **Tight key patterns** (`redis_acl.py:25-36`) — Worker ACL only grants access to domain-scoped keys: `job_queue:{domain}:*`, `workers:{domain}:*`, etc. Cannot cross-access other domains.
+- **Tight channel patterns** (`redis_acl.py:39-43`) — Restricted to `log_stream:{domain}:*` and `job_kill:{domain}` (domain-scoped). Cannot subscribe to other domains.
+- **Minimal command whitelist** (`redis_acl.py:46-63`) — Only 13 commands allowed (no KEYS, FLUSHDB, CONFIG, etc.). Commands are read/write ops for queues/state, nothing dangerous.
+- **ACL password properly masked in list operations** (`admin.py:70`) — GET /admin/domains returns only username, not password.
+- **ACL password only returned on rotate/create** (`admin.py:106, 184; domain.py:89`) — Returns full redis_acl dict only when needed for initial setup.
+- **No password in logs** — `scheduler.py:529` logs ACL failures without including password or sensitive details.
+- **ACL reconciliation idempotent** (`scheduler.py:526`) — Replays persisted passwords after Redis restart without logging them.
+
+### OBSERVATIONS
+- **Legacy username cleanup** (`redis_acl.py:84-88`) — Code removes old hashed usernames from previous implementation. Assumes Redis `DELUSER` on non-existent user is gracefully ignored (wrapped in try/except).
+
+**Recommendation:** No immediate issues. ACL model is well-scoped and secrets are properly masked.
 
 ---
 
 ## 3. Credential Handling
-*To investigate: storage/masking of Kerberos keytabs, SQL URIs, secrets in logs/API responses/job definitions*
+**Status:** ✓ Reviewed | **Severity:** Low
+
+**Files Reviewed:** `scheduler/api/credentials.py`, `scheduler/api/jobs.py`, `worker/executor.py`
+
+### GOOD
+- **Credentials write-only via API** (`credentials.py:4-5`) — Secrets are encrypted in Mongo and never returned in responses.
+- **List operations never return secrets** (`credentials.py:28-35`) — GET /credentials/ returns only metadata (name, type, dialect, timestamps), not encrypted payload.
+- **Job definitions sanitize sensitive fields** (`jobs.py:36-45`) — SQL connection_uri and Kerberos keytab are masked as "********" in API responses.
+- **SQL temp files secure** (`executor.py:109`) — Uses `tempfile.mkstemp()` which creates files with mode 0o600 (owner-only access, not world-readable).
+- **Kerberos ccache cleanup guaranteed** (`executor.py:499-506`) — `kdestroy` is in a finally block, ensuring cleanup even on exceptions.
+- **No keytab paths in logs** — grep found no logging of keytab paths or Kerberos credentials.
+
+### OBSERVATIONS
+- **Credentials stored encrypted in Mongo** (`credentials.py:48, 73`) — Uses `encrypt_payload()` utility. Looks robust; keytab/URI secrets never logged.
+
+**Recommendation:** Credential handling is solid. Ensure `encrypt_payload()` uses a strong cipher (AES-256) and the encryption key is properly rotated.
 
 ---
 
