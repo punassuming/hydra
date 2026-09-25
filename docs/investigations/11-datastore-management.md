@@ -36,7 +36,37 @@
 
 ## 2. Redis Connection Management
 
-**Status:** Investigating...
+### Connection Pool & Failover Configuration
+- **File**: `/home/user/Hydra/scheduler/redis_client.py` (lines 26-72)
+- **Sentinel Support**: Yes, fully wired with `REDIS_SENTINELS` + `REDIS_SENTINEL_MASTER` env vars
+  - Parses comma-separated sentinel nodes (line 9-23)
+  - Supports optional Sentinel auth (`REDIS_SENTINEL_USERNAME`/`REDIS_SENTINEL_PASSWORD`)
+  - Master-only failover via `sentinel.master_for()` (line 61)
+- **Connection Pooling**: Uses `redis.from_url()` which enables default connection pooling (5-50 connections per pool)
+- **Timeouts**: 
+  - `REDIS_SOCKET_TIMEOUT` (default 2s) — applies to both Sentinel and master connections
+  - Used in both scheduler and worker (`worker/redis_client.py:50`)
+- **Retry/Backoff**: 
+  - No explicit retry loop in client construction; relies on redis-py's internal retry-on-connect-error (minimal backoff)
+  - Worker kill listener has exponential backoff on connection errors (worker/worker.py:169)
+  - Scheduler loops have broad exception handlers but no explicit retry/exponential backoff
+
+### Health Checks
+- `/health` endpoint (scheduler/api/health.py): Tests both Redis (via `get_redis().zcard()`) and Mongo (via `db.command("ping")`)
+- `/health/orchestration` endpoint: Checks orchestrator heartbeat freshness in Redis
+- **Gap**: No granular distinction between Redis and Mongo connectivity in `/health` response — both must succeed or the endpoint fails with 500
+
+### Findings
+- **Solid**: Sentinel support is present and well-configured; supports master failover with auth
+- **Gap**: No explicit retry-with-backoff on initial connection failure in `get_redis()` — if Redis is temporarily down during scheduler startup, the singleton client will fail once and leave `_redis_client` as None (but not re-attempted on next call)
+- **Observability gap**: `/health` doesn't distinguish "Redis is down" vs "Mongo is down" — would require parsing exception types
+- **Resilience gap**: If a Sentinel-based connection master-fails, redis-py handles it automatically. But if Sentinel itself becomes unreachable, there's no fallback to direct URL
+
+### Recommendation
+- Document Sentinel as a production best practice, but require `REDIS_SENTINELS` explicitly set (no silent fallback to non-HA mode)
+- Add health endpoint that reports Redis and Mongo status separately (for better operator awareness)
+- Consider exponential backoff on initial connection failure in `get_redis()` for graceful startup in degraded scenarios
+- Add a note in deployment docs: "If all Sentinels fail, Redis must remain up (Sentinels only discover failover; they don't reboot Redis)."
 
 ## 3. MongoDB Schema & Indexing
 

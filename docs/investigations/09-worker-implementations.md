@@ -143,7 +143,13 @@ AGENTS.md mentions `SCHEDULER_BYPASS_MAX_EXTRA` soft cap to limit bypass jobs ab
 - **Python:** Job runs in ThreadPoolExecutor thread. If thread crashes, no explicit recovery in worker loop; assumes OS/container restart via HEALTHCHECK.
 - **Go:** Job runs in goroutine. If goroutine panics, recover catch-all (`defer` in `runJob()`) would need explicit code to prevent crash. Check line 336's `runJob()` signature for panic handling.
 
-**Checking for panic recovery:**
+**Panic recovery:** Go has no `recover()` call — if a goroutine panics, the worker process crashes. Python threads propagate panics as raised exceptions, likely caught by ThreadPoolExecutor's exception handling. Neither has explicit panic recovery, so **operator must rely on HEALTHCHECK/container restart for both**.
+
+**Mongo unavailability:** Go worker doesn't call Mongo (it calls scheduler API for credential resolution per AGENTS.md: "Worker needs no Mongo access"). Python worker doesn't call Mongo directly either; scheduler handles it. No direct Mongo connection from either worker.
+
+**Job orphaning on crash:** Both emit `run_end` events immediately before returning from `runJob()`, so a mid-job crash prevents event emission. Scheduler's failover loop (AGENTS.md: `failover_loop`) recovers jobs from offline workers after heartbeat TTL expires. **Neither worker risks silent job loss** — scheduler failover catches it.
+
+**Recommendation:** Add explicit recover() wrapper to Go's runJob to prevent process death on panic. Match Python's explicit 2-60s exponential backoff in Go's pollLoop error handling.
 </thinking>
 </invoke>
 

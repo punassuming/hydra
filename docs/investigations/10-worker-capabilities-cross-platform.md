@@ -82,7 +82,45 @@ Each executor type uses concrete preflight checks (running test commands with 5s
 *Investigating: `DEPLOYMENT_TYPE` env var auto-detection logic — Docker, Windows Task Scheduler, bare-OS, and edge cases.*
 
 ### Findings
-(To be updated as investigation proceeds...)
+
+**Location:** `worker/worker.py` lines 57-60; `worker/bootstrap.py` line 313.
+
+**Auto-Detection Logic (`worker/worker.py` lines 57-60):**
+```python
+_in_docker = pathlib.Path("/.dockerenv").exists()
+_default_deployment_type = "docker" if _in_docker else "standalone"
+deployment_type = os.getenv("DEPLOYMENT_TYPE", _default_deployment_type)
+```
+- Checks for `/.dockerenv` file (standard Docker marker on Linux containers).
+- If present → `"docker"`. Otherwise → `"standalone"`.
+- Can be overridden by `DEPLOYMENT_TYPE` env var.
+
+**Windows Task Scheduler Path (`worker/bootstrap.py` line 313):**
+- `_build_worker_env()` sets `env.setdefault("DEPLOYMENT_TYPE", "scheduler")` when launching worker from Task Scheduler watchdog.
+- This ensures workers launched by Windows bootstrap are labeled `"scheduler"` instead of `"standalone"`.
+
+**Edge Cases & Robustness Assessment:**
+
+1. **Docker Detection (`/.dockerenv`):**
+   - ✓ Standard, reliable on Docker.
+   - ⚠ Fails/false-negatives on other container runtimes: Podman, Kubernetes/containerd (unless `.dockerenv` is also present). Worker would self-report `"standalone"` even in a container.
+   - ⚠ Fails on WSL (Windows Subsystem for Linux) — will report `"standalone"` even in managed environment.
+   - AGENTS.md notes support for Kubernetes via Helm, but deployment type detection doesn't distinguish it.
+
+2. **Bare-OS Detection:**
+   - Anything without `/.dockerenv` → `"standalone"`. This includes:
+     - Bare Linux/macOS/Windows processes (correct).
+     - WSL (incorrectly; should perhaps detect differently).
+     - Podman/Kubernetes without `.dockerenv` (incorrectly; should perhaps detect differently).
+
+3. **Windows Task Scheduler Detection:**
+   - ✓ Explicit opt-in via bootstrap watchdog — no auto-detection needed, bootstrap sets it directly.
+
+**Summary — Gaps:**
+- `.dockerenv` check is simplistic; misses Podman, containerd-based Kubernetes, WSL, systemd containers.
+- No auto-detection for Kubernetes (only via `DEPLOYMENT_TYPE=kubernetes` override).
+- No distinction between managed container (Kubernetes) and bare standalone.
+- Recommended: Add Kubernetes detection (e.g., check for `/var/run/secrets/kubernetes.io` or `KUBERNETES_SERVICE_HOST`), Podman detection, WSL detection.
 
 ---
 
