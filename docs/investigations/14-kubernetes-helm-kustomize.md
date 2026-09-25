@@ -197,15 +197,72 @@ Verified via `.github/workflows/python-ci.yml` lines 59-186 (helm job):
 **Verdict for Hydra**: Helm is the right tool. If adopting Kustomize, use it only for Hydra-consuming applications (the user's own job definitions, custom deployments on top of Hydra), NOT for Hydra itself.
 
 ### Section 2.4: Concrete Recommendation
-*To be filled*
+
+**Decision**: Do NOT adopt Kustomize for Hydra's deployment story.
+
+**Rationale**:
+1. Helm already provides all necessary customization mechanisms (values arrays, conditionals, per-component secrets, extraEnv, overlays via chart README examples).
+2. Kustomize overlays would create a second, competing customization path for the same Helm chart — a documented anti-pattern.
+3. No new customization problems are left unsolved: multi-domain, multi-worker-pool, control-plane separation, demo mode, environment-specific configs are all handled cleanly via `values.yaml` and `-f overrides.yaml`.
+4. The home-lab design philosophy (single-instance Redis/MongoDB, optional components via `enabled` flags) is well-suited to Helm's values-based approach.
+
+**Alternative recommendation (if a deployment team needs per-cluster patches)**:
+If users need to post-process Helm output with cluster-specific patches (e.g., storage class, node affinity, external-secrets), document a **post-render pattern**: 
+```bash
+helm template hydra deploy/helm/hydra -f custom-values.yaml | kustomize build - > final-manifests.yaml
+kubectl apply -f final-manifests.yaml
+```
+This uses Kustomize as a **post-render** tool for cluster-specific patches, not as a competing customization mechanism. Requires explicit documentation and is only recommended for advanced users with specific needs.
+
+**Status**: ✅ DECISION: Stick with Helm. Do not introduce Kustomize for Hydra's own deployment story.
 
 ---
 
 ## Summary — Top 5 Priorities
-*To be filled*
+
+Ranked by (deployment risk/maintainability impact) × effort:
+
+### 1. **Add values.schema.json for early config validation** (High impact × Low effort)
+   - **Gap**: No schema validation; config errors caught at runtime only.
+   - **Risk**: Helm lint doesn't catch semantic errors (e.g., `maxConcurrency: 0`, invalid domain names, storage class missing).
+   - **Effort**: Low — Helm 3.11+ built-in support; schema file ~150 lines covering worker pools, domain names, resource ranges.
+   - **ROI**: High — catches common misconfigurations before deployment. Critical for production use.
+   - **File**: Add `deploy/helm/hydra/values.schema.json` with constraints on `workers[].maxConcurrency > 0`, domain naming rules, resource ranges.
+
+### 2. **Add optional PodDisruptionBudget (PDB) resources** (Medium-high impact × Low effort)
+   - **Gap**: No PDB for scheduler, orchestrator, Redis, MongoDB; node drain/eviction can force downtime.
+   - **Risk**: Cluster maintenance or spot instance eviction terminates single-pod components ungracefully.
+   - **Effort**: Low — add PDB templates for single-instance components (minAvailable: 1).
+   - **ROI**: Medium — home-lab acceptable but production deployments need this.
+   - **File**: Add `templates/pdb.yaml` with optional `pdb.enabled` flag (default false for home-lab, true for production-oriented overlays).
+
+### 3. **Document post-render Kustomize pattern for cluster-specific patches** (Medium impact × Low effort)
+   - **Gap**: No guidance for users needing cluster-specific modifications (storage class, node affinity, external-secrets).
+   - **Risk**: Teams may incorrectly introduce competing Kustomize overlays alongside Helm, creating maintenance confusion.
+   - **Effort**: Low — add 10-15 line example in README showing `helm template | kustomize build -` pattern with disclaimer.
+   - **ROI**: Medium — clarifies boundaries for advanced users; prevents anti-pattern adoption.
+   - **File**: Add section to `deploy/helm/hydra/README.md` titled "Advanced: Post-Render with Kustomize for Cluster-Specific Patches."
+
+### 4. **Kustomize Adoption Decision** (No impact × Zero effort) ✅
+   - **Verdict**: Do NOT adopt Kustomize for Hydra's own deployment. Helm already solves all use cases; Kustomize would add competing customization paths.
+   - **Alternative**: Document post-render pattern (Priority 3) for advanced users with cluster-specific needs.
+   - **Action**: None — proceed with Helm as-is.
+
+### 5. **Add NetworkPolicy template (optional)** (Low-medium impact × Medium effort)
+   - **Gap**: No NetworkPolicy; ingress/egress unrestricted.
+   - **Risk**: Home-lab acceptable; production deployments should restrict component communication.
+   - **Effort**: Medium — design and test NetworkPolicy for scheduler → Redis/MongoDB, workers → Redis/MongoDB/scheduler, UI → scheduler.
+   - **ROI**: Low for home-lab; Medium for production overlays.
+   - **File**: Add `templates/networkpolicy.yaml` (optional, `networkPolicy.enabled: false` by default).
 
 ---
 
 ## Findings Log
 
-Starting investigation...
+**Investigation completed 2026-09-25**
+
+### WebSearch Sources Used:
+- Kustomize status and kubectl integration: kubernetes.io, GitHub kubernetes-sigs/kustomize
+- Helm vs Kustomize 2026 best practices: Akuity, OneUpTime, multiple DevOps blogs (2026-02 articles)
+- Strategic merge patches and overlay patterns: Medium, GitHub issues, Terraform docs
+- All findings cross-checked against current Hydra codebase at deploy/helm/hydra/

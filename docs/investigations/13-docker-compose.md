@@ -435,11 +435,239 @@ Let me just note this as a potential fragility in the dev overlay design.
 
 ## 8. Operational Tooling
 
-*Pending investigation...*
+**Overview:**
+Located in `/home/user/Hydra/deploy/compose/scripts/`, these four scripts are designed to be run on a production deployment for backup, restore, and verification tasks.
+
+**1. backup-volumes.sh (`/home/user/Hydra/deploy/compose/scripts/backup-volumes.sh` lines 1–62)**
+
+**Purpose:** Create encrypted backup of Mongo/Redis volumes
+
+**Key operations:**
+- Stops the running Compose stack (line 36) WITHOUT `-v` flag to preserve volumes
+- Runs containers with `user 0:0` (root) to read volume data (lines 41–44)
+- Tars each volume (`mongo.tar`, `redis.tar`) and GPG-encrypts it with AES256 (lines 45–47)
+- Generates SHA256SUMS (lines 51–53) for integrity verification
+- Creates MANIFEST with metadata (created_utc, source_commit, format version, volume names)
+- Restarts the stack on exit via trap cleanup (line 20)
+
+**Environment:**
+- Reads from `deploy/compose/.env` for: `HYDRA_DEPLOY_REPO_ROOT`, `HYDRA_DEPLOY_SECRETS_DIR`, `HYDRA_DEPLOY_BACKUP_DIR`
+- Requires `hydra-backup.env` at `HYDRA_DEPLOY_SECRETS_DIR/hydra-backup.env` with mode 600 (permissions checked line 26)
+- Requires `HYDRA_BACKUP_PASSPHRASE` env var from secrets
+
+**Issues & observations:**
+- ✓ Assumes volumes named `hydra_mongo-data` and `hydra_redis-data` (hardcoded line 40) — correct for base docker-compose.yml
+- ✓ Verifies destination directory is empty (line 33) to avoid overwriting partial backups
+- ✓ Cleanup trap ensures stack is restarted even if backup fails (lines 17–22)
+- ✓ Uses `mktemp -d` for secure scratch directory
+- ⚠️ No checksums for individual tar.gz files before encryption (sha256sum created after encryption); if GPG process fails mid-stream, corruption isn't detected until decrypt time
+- ⚠️ No verification that backup passphrase is readable/valid before stopping the stack (line 30 source the secrets, so if passphrase is invalid, the stack is already stopped)
+
+**2. restore-isolated.sh (`/home/user/Hydra/deploy/compose/scripts/restore-isolated.sh` lines 1–82)**
+
+**Purpose:** Restore encrypted volume backup into temporary, isolated Docker containers to verify integrity WITHOUT touching production data
+
+**Key operations:**
+- Takes backup directory as argument (line 11)
+- Reads two secrets files: `hydra-backup.env` (passphrase) and `hydra-datastore.env` (Mongo/Redis auth credentials)
+- Verifies SHA256SUMS (line 47)
+- Decrypts volumes using GPG (lines 49–51)
+- Creates temporary volumes with suffix `restore-<timestamp>-<pid>` (lines 17–21)
+- Creates isolated internal network `hydra-<suffix>-net` (line 19, line 60)
+- Starts temporary Mongo + Redis containers on isolated network (lines 61–64)
+- Verifies Mongo is accessible with app credentials (lines 66–74) — retries up to 30s for startup
+- Verifies Mongo fails without credentials (line 75–76)
+- Verifies Redis accepts password (line 77–78)
+- Verifies Redis fails without password (line 79–80)
+- Cleanup trap removes all temporary containers/volumes/network (lines 23–28)
+
+**Environment:**
+- Reads `hydra-backup.env` and `hydra-datastore.env` from `HYDRA_DEPLOY_SECRETS_DIR`
+- Requires: `HYDRA_BACKUP_PASSPHRASE`, `MONGO_INITDB_ROOT_USERNAME/PASSWORD`, `MONGO_APP_USERNAME/PASSWORD`, `SCHEDULER_REDIS_PASSWORD`
+- All secrets must have mode 600 (checked line 32–34)
+
+**Safety characteristics:**
+- ✓ Creates only temporary resources (auto-cleanup on exit or error)
+- ✓ Network is `--internal` (isolated, no internet/host access)
+- ✓ Containers run only on isolated network — no risk of connecting to production network
+- ✓ Explicit auth verification (Mongo/Redis fail closed when tested without credentials)
+- ✓ Trap cleanup ensures temp resources are removed even if verification fails
+- ⚠️ Mongo retry loop (lines 66–72) sleeps 1s × 30 retries = up to 30 seconds before timeout; if backup is large, decompression might take longer and script could fail spuriously
+- ⚠️ Uses `pipefail` but some commands use `|| true` which could mask errors; e.g., line 75 `docker exec ... || true` masks failures
+
+**3. verify-live.sh (`/home/user/Hydra/deploy/compose/scripts/verify-live.sh` lines 1–34)**
+
+**Purpose:** Verify a running production deployment is healthy and correctly hardened
+
+**Key operations:**
+- Checks git working tree is clean (line 19): `git status --porcelain` == "" (no uncommitted changes)
+- Resolves expected image tags via `docker compose config --format json` (line 20) — handles `${HYDRA_IMAGE_TAG:-local}` template expansion
+- For each service (scheduler, ui, worker):
+  - Verifies actual running image matches expected (lines 21–24)
+  - Verifies health status is 'healthy' (line 25)
+- Verifies API /health endpoint returns status=ok (line 28)
+- Verifies scheduler requires auth: /jobs/ returns 401 (line 29)
+- Verifies UI is reachable: GET / returns 200 (line 30)
+- Verifies Redis/Mongo have NO published host ports (lines 31–33)
+
+**Environment:**
+- Reads from `deploy/compose/.env` for: `HYDRA_DEPLOY_REPO_ROOT`, `HYDRA_DEPLOY_HOST_IP`, `HYDRA_DEPLOY_API_PORT`, `HYDRA_DEPLOY_UI_PORT`
+- Defaults to localhost:8000/5173 if not set
+
+**Issues & observations:**
+- ✓ Uses `docker compose config` to resolve image tags correctly (accounts for .env substitution)
+- ✓ Checks git clean state before verification (detects uncommitted source changes)
+- ✓ Verifies auth is enforced (401 on /jobs/ without token)
+- ✓ Checks datastore isolation (no published ports)
+- ⚠️ No timeout on curl commands; if scheduler is hung, `curl http://api_url/health` could hang indefinitely
+- ⚠️ Assumes default service naming `hydra-{service}-1` (line 22 onward) — would break if deployed with custom project name via `-p` flag
+- ⚠️ No check for worker connectivity to Redis/Mongo (only checks image/health/auth, not worker's ability to reach datastores)
+
+**4. verify-worker-boundary.sh (`/home/user/Hydra/deploy/compose/scripts/verify-worker-boundary.sh` lines 1–35)**
+
+**Purpose:** Verify worker container hardening and network isolation
+
+**Key operations:**
+- Resolves expected worker user via `docker compose config` JSON (lines 16–17) — same pattern as verify-live.sh
+- Verifies container runs as expected non-root user (line 18)
+- Verifies read-only rootfs (line 19): `ReadonlyRootfs == true`
+- Verifies not privileged (line 20): `Privileged == false`
+- Verifies NO host bind-mounts (line 21): `len .Mounts == 0`
+- Verifies NO extra capabilities (line 22): `CapAdd == null`
+- Verifies security opts are correct (line 23): `SecurityOpt == ["no-new-privileges:true"]`
+- Runs Python socket test inside container (lines 24–34):
+  - Tries to connect to 1.1.1.1:443 (external, should fail)
+  - Tries to connect to redis:6379 and mongo:27017 (internal network, should succeed)
+  - Fails script if external access works or internal access fails
+
+**Environment:**
+- Reads from `deploy/compose/.env` for `HYDRA_DEPLOY_REPO_ROOT`
+- Assumes worker container is named `hydra-worker-1`
+
+**Issues & observations:**
+- ✓ Comprehensive hardening verification
+- ✓ Tests actual network isolation (not just configuration)
+- ✓ Uses `docker exec` to run verification inside container (more accurate than inspecting config)
+- ✓ Socket test confirms both negative (external blocked) and positive (internal allowed) cases
+- ⚠️ Assumes `hydra-worker-1` name (line 12); would break with custom project name or if worker service has different name (e.g., `worker-python` in multi-pool setup)
+- ⚠️ No timeout on socket connections (lines 27, 33); if Redis is hung, test hangs
+
+**Summary of operational tooling:**
+
+| Script | Purpose | Strengths | Weaknesses |
+|--------|---------|-----------|-----------|
+| backup-volumes.sh | Encrypt Mongo/Redis volumes | GPG-encrypted, integrity check (SHA256), automated cleanup | Assumes hardcoded volume names, pre-stops stack (downtime) |
+| restore-isolated.sh | Verify backup integrity | Isolated network, auth verification, explicit fail-closed checks | Long retry loop (30s), some error masking, complex secrets management |
+| verify-live.sh | Health check production | Clean git state, image consistency, auth enforcement, datastore isolation | No timeouts, assumes default container names, no worker connectivity test |
+| verify-worker-boundary.sh | Verify worker hardening | Comprehensive checks, actual network test, configuration verification | Assumes hardcoded container name, no timeouts on sockets |
+
+**Shared concerns:**
+1. **Container naming assumptions:** Multiple scripts assume Compose service names map to `hydra-{service}-1` (default when no `-p` project name is set); if deployed with `docker compose -p custom-name`, scripts break
+2. **No timeouts:** curl/socket operations lack explicit timeouts; hung services can freeze script execution
+3. **Secrets management:** Requires carefully configured `deploy/compose/.env` with absolute paths; not portable across different deployment machines
+4. **Documentation gap:** README.md for `deploy/compose/` should document prerequisites (secrets files, permissions, Compose service naming)
 
 ## 9. Modern Compose Best Practices
 
-*Pending investigation...*
+**Features used correctly:**
+
+1. **healthcheck with service_healthy depends_on** ✓
+   - Base file lines 113–117: `depends_on: redis: condition: service_healthy` — waits for Redis health before starting scheduler
+   - All Dockerfiles include HEALTHCHECK directives (scheduler lines 19–20, workers lines 28–29, etc.)
+   - This is Docker Compose v3.0+ (2018+), standard practice
+
+2. **no-new-privileges security_opt** ✓
+   - Applied to all services (redis, mongo, scheduler, ui, workers)
+   - Prevents privilege escalation via setuid/setgid binaries; good practice
+
+3. **tmpfs with security flags** ✓
+   - Workers use `tmpfs: - /tmp:rw,noexec,nosuid,size=256m`
+   - Best practice for temp directories in containerized executors
+
+4. **read_only rootfs** ✓
+   - Workers use `read_only: true` — limits blast radius if worker process is compromised
+   - Good practice for services that don't need to write to disk
+
+**Features not yet used (potential improvements):**
+
+1. **profiles** (Docker Compose v1.29+, 2021)
+   - Could group services: `profiles: ["workers"]`, `profiles: ["monitoring"]`, etc.
+   - Allows `docker compose --profile workers up` to selectively start service groups
+   - **Current workaround:** Multiple compose files (docker-compose.worker.yml, docker-compose.workers.yml) instead of profiles
+   - **Benefit:** Cleaner than 7+ compose files; single file with profiles could replace most of them
+   - **Example refactor:** 
+     ```yaml
+     services:
+       redis: { profiles: ["datastores"] }
+       mongo: { profiles: ["datastores"] }
+       worker: { profiles: ["workers"] }
+       scheduler: # always on by default
+     ```
+
+2. **develop.watch** (Docker Compose v2.22+, 2023)
+   - Replaces manual source volume mounts for live-reload
+   - `develop: { watch: [ { path: ./scheduler, action: sync } ] }`
+   - **Current workaround:** docker-compose.dev.yml with explicit volume mounts + uvicorn `--reload`
+   - **Benefit:** Reduces boilerplate; Compose handles live-reload without relying on app-level reload (uvicorn)
+   - **Compatibility:** Requires Docker Desktop 4.20+ or newer Docker Compose CLI
+   - **Example refactor:**
+     ```yaml
+     services:
+       scheduler:
+         develop:
+           watch:
+             - path: ./scheduler
+               action: sync
+             - path: ./pyproject.toml
+               action: sync-and-restart
+     ```
+
+3. **x- extension fields for DRY** (partially used)
+   - **Currently used:** docker-compose.workers.yml uses YAML anchors `&worker-python-base` and `*worker-python-base` (lines 18–43)
+   - **Missing:** Custom `x-` fields for common configuration (e.g., `x-worker-defaults`, `x-security-opts`)
+   - **Example refactor:**
+     ```yaml
+     x-security-defaults: &security-defaults
+       security_opt: ["no-new-privileges:true"]
+       read_only: true
+       
+     services:
+       worker:
+         <<: *security-defaults
+     ```
+   - **Current state:** Already fairly DRY with anchors in workers file; scheduler/UI could benefit similarly
+
+4. **Compose Spec v3.8+ overrides syntax**
+   - Base file uses `extends:` or multi-file composition (Docker Compose v1.28+)
+   - **Not applicable here:** Multi-file composition is already the pattern; `extends:` is legacy and not recommended
+
+**Compose Spec version in use:**
+- No explicit `version:` field in any compose file — this means Docker Compose defaults to the latest spec version (currently 3.8+)
+- **Risk:** Implicit version can cause issues if Docker Compose version is downgraded; best practice is explicit version declaration
+- **Current state:** Works fine with modern Docker Compose (v2.x), but could be more explicit
+
+**Recommendation to modernize:**
+
+Rather than refactoring into profiles immediately, consider adding a single `docker-compose.prod.yml` that aggregates the most common patterns:
+```yaml
+# Future: docker-compose.prod.yml
+include:
+  - docker-compose.yml
+  - docker-compose.workers.yml
+```
+Docker Compose v2.20+ supports `include:` (not `extends:`) for composing related files without duplicating configuration. This would allow:
+```bash
+docker compose -f docker-compose.prod.yml up
+# instead of
+docker compose -f docker-compose.yml -f docker-compose.workers.yml up
+```
+
+**Verdict:**
+- Current setup is solid and follows established patterns
+- No critical modernization needed; the multi-file approach is intentional and clear
+- Profiles and develop.watch could reduce file count and boilerplate, but require users to upgrade Docker Compose
+- YAML anchors are well-used in workers.yml for avoiding duplication
+- Explicit `version: "3.8"` or later would improve clarity and portability
 
 ## Summary — Top 5 Priorities
 
