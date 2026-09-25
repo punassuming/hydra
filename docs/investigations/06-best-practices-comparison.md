@@ -111,8 +111,60 @@ In `scheduler/api/jobs.py`, `ui/src/components/`, and `scripts/hydra-apply.py`:
 
 ## 3. Monitoring & Observability Standardization
 
-### Investigation Status
-*Starting...*
+### What Others Do
+
+**Airflow 3.x (2025-2026)**
+- **Grid View**: Per-DAG-run task instance matrix (runs × tasks); each cell shows task status with mini-timeline duration; fast streaming aggregation
+- **Gantt View**: Rebuilt calendar/Gantt charts with filtering; interactive timeline showing task parallelism and duration
+- **Graph View**: DAG structure visualization; clickable nodes showing task details
+- **Task Instance Timeline**: Mini Gantt-style visualization per task, showing queue→start→end duration
+- **Multi-DAG monitoring**: Limited; focus is per-DAG views, not cross-DAG runs/lineage
+
+**Dagster (2025-2026)**
+- **Asset Catalog**: Central asset browser by compute-kind, asset-group, owner, tags; shows freshness/health
+- **Materializations view**: Per-asset history with metadata per materialization (row count, schema, data preview)
+- **Run Timeline**: Tracks which partitions succeeded/failed/missing; complete data coverage picture
+- **Asset Lineage**: Auto-generated upstream/downstream; includes dbt models without manual wiring
+- **Freshness/SLA tracking**: Asset-level freshness policy, visible in UI with alerts
+- **Full-system observability**: Global asset lineage view (all assets, all dependencies)
+
+**Argo Workflows (2025-2026)**
+- **DAG Visualization**: Live node-level visualization; node color indicates state (pending→running→success/fail)
+- **Workflow monitoring**: Per-workflow detail page with logs, events, node status
+- **Cron Workflow UI**: Create/view scheduled workflows; event-driven triggers via Argo Events
+- **Limited cross-workflow views**: No native "all workflows" timeline or cross-workflow dependency view
+- **Embedded widgets**: Can embed workflow status/progress in external dashboards
+
+### How Hydra Does It
+
+In `scheduler/api/jobs.py` and `ui/src/components/`:
+- **Grid View** (`GET /jobs/{id}/grid`): Per-job run matrix (runs × runs detail); shows run status, duration, logs
+- **Gantt View** (`GET /jobs/{id}/gantt`): Timeline of job runs; shows queue latency, run duration, retries
+- **Graph View** (`GET /jobs/{id}/graph`): DAG structure for job's `depends_on` dependencies; visual dependency tree
+- **Worker Timeline** (`GET /workers/{id}/timeline`): Per-worker execution spans; shows concurrent jobs on a worker
+- **Overview Pressure** (`GET /overview/pressure`): Per-domain backpressure summary; pending depth, stalled counts, worker capacity
+- **Overview Queue** (`GET /overview/queue`): Pending job queue rows + upcoming scheduled jobs per domain
+- **No asset/data lineage**: Monitoring is job/task-centric, not data/asset-centric like Dagster
+
+### Gap Assessment & Recommendations
+
+**Strengths:**
+- ✅ Grid, Gantt, Graph views are present and well-structured
+- ✅ Worker-level timeline + operations tracking is strong (better than Airflow's per-task focus)
+- ✅ Pressure/queue overview is useful for capacity planning
+
+**Gaps:**
+1. **No cross-domain/global job timeline** – Unlike Airflow's overview, no "all jobs across all domains" Gantt
+2. **No asset/data lineage visualization** – Only job dependency graph; no view of data/artifact flow like Dagster
+3. **No job/run freshness tracking** – Unlike Dagster's asset freshness policy + UI alerts
+4. **Limited multi-run correlation** – Hard to compare similar runs (e.g., "why did this run take 2x longer?")
+5. **No materialization/output catalog** – Job outputs are implicit; no centralized "what data was produced" view
+
+**Recommendations:**
+1. **Add cross-domain/global run timeline (MEDIUM)** → `scheduler/api/history.py`: New endpoint `GET /overview/run_timeline?domains=prod,staging&time_range=24h` returning flattened runs from all domains, formatted for global Gantt rendering. Benefit: Spot bottlenecks across organization; see impact of one domain's slowness on others.
+2. **Introduce job output/artifact tracking (MEDIUM-HIGH, future)** → New `scheduler/models/job_artifact.py`: Define artifact output schema (e.g., `type: "file" | "dataset" | "metric"`, uri, metadata). Store in `job_artifacts` Mongo collection; expose `GET /jobs/{id}/artifacts/{run_id}`. UI: Artifact catalog sidebar on run detail page. Benefit: Moves toward Dagster's asset-centric model; enables data lineage in future.
+3. **Add "compare runs" view (MEDIUM)** → `ui/src/components/CompareRuns.tsx`: Select 2+ runs of same job; side-by-side logs, duration breakdown, executor config diff. Benefit: Helps debug performance regressions ("why did run X take 2x longer than Y?").
+4. **Extend Graph View to show cross-job lineage (LOW-MEDIUM, future)** → Enhance `GET /jobs/{id}/graph` to include transitive dependencies (jobs that depend on this job's outputs). Build UI tree showing upstream+downstream jobs. Benefit: Full dependency graph visibility; prerequisite for artifact lineage.
 
 ---
 

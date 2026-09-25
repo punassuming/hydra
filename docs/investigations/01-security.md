@@ -72,7 +72,23 @@ Live security audit of the Hydra Jobs distributed job runner, covering authentic
 ---
 
 ## 4. Executor Security
-*To investigate: shell injection risks, PAT hygiene, SQL temp file handling, impersonation/Kerberos privilege escalation*
+**Status:** ✓ Reviewed | **Severity:** Low
+
+**Files Reviewed:** `worker/executor.py`, `worker/utils/git.py`, `worker/utils/os_exec.py`
+
+### GOOD
+- **No shell injection via args** (`executor.py:482, 487, 489, 491`) — Shell commands passed as lists (not concatenated strings). Args unpacked safely.
+- **PAT hygiene excellent** (`git.py:54-77`) — Token injected into clone URL only for network op (line 54); immediately stripped from .git/config after clone (lines 76-77) via `_strip_credentials_from_remote()`.
+- **SQL temp file secure** (`executor.py:109`) — Uses `tempfile.mkstemp()` with mode 0o600; connection_uri embedded in Python code, not shell.
+- **Impersonation safe** (`executor.py:318`) — Uses `sudo -n -u <user> --` with proper `--` separator preventing username from being interpreted as flag.
+- **Kerberos credentials cleaned up** (`executor.py:502-506`) — `kdestroy` in finally block; ccache path handled safely (never concatenated into shell).
+- **Python code execution safe** (`executor.py:405-410`) — Code written to temp file; `python -c` is not used (avoids command injection).
+- **External command safe** (`executor.py:420`) — Binary + args passed as list (no shell=True).
+
+### OBSERVATIONS
+- **Kerberos token on disk** — Keytab path is passed as a path on the worker filesystem. Ensure keytab files are readable only by the worker user (0o600).
+
+**Recommendation:** Verify keytab file permissions (0o600) are enforced at provisioning time. No code-level injection risks detected.
 
 ---
 

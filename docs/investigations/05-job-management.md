@@ -312,8 +312,91 @@
 
 ### 9. Known Gaps: Queue-Based Routing
 
+**Reference:** AGENTS.md "Known Gaps" section + `scheduler/scheduler.py` dispatcher logic
+
+### Key Findings
+
+**What is Queue-Based Routing?**
+- Concept: Jobs are routed to named queues (e.g., "batch-jobs", "real-time", "analytics") and workers consume from specific queues
+- Hydra's current model: direct worker assignment per job based on affinity matching + load-based selection
+  - No intermediate queue abstraction
+  - All workers in a domain consume from `job_queue:<domain>:pending` (single shared queue)
+
+**Current Dispatch Model (lines 230-380 in scheduler.py):**
+1. Scheduler pops job from `job_queue:{domain}:pending` (highest priority first)
+2. Applies affinity filter to find eligible workers
+3. Selects lowest-load worker from eligible candidates
+4. Pushes job envelope directly to worker's queue: `job_queue:{domain}:{worker_id}`
+5. No intermediate queue stage or selection rules beyond affinity + load
+
+**Impact of Missing Queue-Based Routing:**
+1. **Use case gap**: Cannot route specific job types to reserved worker pools
+   - Example: "ensure 5 workers always reserved for real-time jobs, 3 for batch"
+   - Current workaround: use affinity tags (job tag="real-time" → worker tag="real-time")
+   - Limitation: tags are matched as all-of (all job tags must be in worker), not flexible queue quotas
+2. **No queue-level priority**: Cannot prioritize one queue over another
+   - Current: single pending queue; priority is per-job
+   - Gap: cannot say "always drain real-time queue before batch queue"
+3. **No job routing rules**: Cannot implement rules like "jobs with tag=X must go to workers with tag=Y"
+   - Current: affinity matches tag-to-tag; no dynamic routing rules
+4. **Limited SLA isolation**: Cannot guarantee latency SLA for specific job classes
+   - Example: "real-time jobs must start within 10s" requires queue separation
+
+**Workarounds Available:**
+- Affinity tags: jobs and workers can be tagged; affinity requires all job tags in worker tags
+- Worker state: workers can be set to draining to prevent new job dispatch (line 219-224)
+- Priority: per-job priority affects dispatch order from single pending queue
+- Multiple domains: create separate domain for batch vs real-time (overkill for queue separation)
+
+**Severity Assessment:**
+- **Severity**: Low → Medium (many orgs don't need fine-grained queue routing; tags + priority cover common cases)
+- **Effort to implement**: Medium → High (requires schema changes: job→queues, worker→subscribed_queues; scheduler dispatcher refactor)
+
+**Recommendation:**
+- Near-term: improve docs on affinity tags as a workaround
+- Mid-term: add optional `queue_name` field to job; extend worker registration to include subscribed queues
+- Long-term: implement scheduler-side queue routing (selective BLPOP from multiple queues, round-robin or priority-weighted)
+
 ---
 
 ## Summary — Top 5 Priorities
 
-(To be completed)
+### Ranking by (Capability Gap Severity × Implementation Effort)
+
+**1. No Job Definition Versioning & Change History (HIGH severity, LOW effort)**
+- **Gap**: Operators cannot audit/revert job definition changes; no version history
+- **Impact**: Compliance, debugging job behavior changes, rollback capability
+- **Implementation**: Add `versions: List[JobVersion]` collection; track on every update
+- **Estimated effort**: 1-2 days (schema + audit trail endpoint)
+
+**2. Incomplete Retry Strategy (MEDIUM severity, MEDIUM effort)**
+- **Gap**: No exponential backoff, dead-letter queue, or failure classification
+- **Impact**: Transient failures waste retries; permanent failures lack audit trail
+- **Implementation**: Add `retry_backoff_type` (fixed/exponential), `retry_max_wait_seconds`; add DLQ query
+- **Estimated effort**: 2-3 days
+
+**3. No Unified CLI Tool (MEDIUM severity, MEDIUM effort)**
+- **Gap**: Operators lack a single CLI for job/run/worker/domain operations; must use 4+ script files
+- **Impact**: Operational friction; no watch/real-time CLI
+- **Implementation**: Build `hydra-ctl` (Go or Python click) with subcommands for all admin operations
+- **Estimated effort**: 3-5 days
+
+**4. Executor Capability Mismatch Handling (LOW-MEDIUM severity, LOW effort)**
+- **Gap**: Sensor jobs can be dispatched to Go workers; will fail at runtime (not pre-flight validated)
+- **Impact**: Job failures due to unsupported executor type; poor error messages
+- **Implementation**: Reject sensor jobs at API validation if no sensor-capable workers; or require explicit executor_types in affinity
+- **Estimated effort**: 1 day
+
+**5. Dependency DAG Limitations (MEDIUM severity, MEDIUM effort)**
+- **Gap**: No circular-dependency detection, fan-in/fan-out semantics, partial-failure handling
+- **Impact**: Complex dependency chains can deadlock; retry-after-failure doesn't re-wait dependents
+- **Implementation**: Add DAG validation, `depends_on_mode` (all/any/none_failed), cycle detection
+- **Estimated effort**: 2-3 days
+
+---
+
+## Bonus: Observability Improvements (Not in Top 5)
+
+- **Add "why was job not eligible?" endpoint**: Show which affinity constraint failed for starved jobs
+- **Add run performance ranking**: Longest-running jobs, slowest queued, most-retried
+- **Add alert/threshold API**: No need to poll `/overview/pressure` manually

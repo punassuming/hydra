@@ -331,20 +331,62 @@ Well-organized semantic classes for reusable patterns:
 
 ### Top 5 Priorities (by impact × effort)
 
-TBD - Ranked after full investigation
+**1. [CRITICAL] Add ARIA labels to interactive custom elements**
+   - **Impact:** HIGH — Affects ~500+ interactive elements (timeline bars, run dots, metric cells)
+   - **Effort:** MEDIUM — Systematic addition of aria-label, aria-describedby, role attributes
+   - **Why:** Currently only 1 aria-label in entire codebase; screenreader users cannot navigate custom visualizations
+   - **Recommended first:** WorkerDetail.tsx timeline bars (lines 145-171), Observe.tsx run strip dots (lines 39-50)
 
-### Immediate Quick Wins
+**2. [HIGH] Fix status visualization colorblindness — add text/pattern fallbacks**
+   - **Impact:** HIGH — ~15% of users affected by color blindness
+   - **Effort:** MEDIUM — Add text labels or pattern/icon differentiators to status colors
+   - **Why:** WorkerDetail.tsx statusColor() function uses red/green/blue/gray with no patterns; affects timeline bars and potentially other components
+   - **Solution:** Add patterns (diagonal stripes, dots) via CSS or modify bar to show status text in title + pattern OR add icon overlays
 
-TBD
+**3. [HIGH] Consolidate theme system — eliminate parallel color systems**
+   - **Impact:** MEDIUM-HIGH — Reduces maintenance burden, prevents drift between CSS variables / ThemeContext / hardcoded hex
+   - **Effort:** MEDIUM-HIGH — Refactor all hardcoded hex colors (~14 instances) to use consistent system
+   - **Why:** Currently maintaining 3 parallel theme systems: CSS variables, React ThemeContext, hardcoded hex values
+   - **Plan:** Choose ONE system (recommend ThemeContext for consistency with existing architecture) and migrate all components
 
-### Medium-term Improvements
+**4. [MEDIUM] Add alt text and semantic HTML to SVG visualizations**
+   - **Impact:** MEDIUM — Improves screenreader experience for data visualizations
+   - **Effort:** MEDIUM — Add `<title>`, `<desc>` elements to SVG, aria-label to containers
+   - **Why:** Zero alt text found; users with visual impairments cannot access data
 
-TBD
+**5. [MEDIUM] Migrate inline color hardcodes to use theme tokens (LogViewer, AuthPrompt, WorkerDetail)**
+   - **Impact:** MEDIUM — Improves consistency, enables future theme changes
+   - **Effort:** LOW-MEDIUM — ~14 specific hex color instances to replace
+   - **Files to fix:**
+     - LogViewer.tsx:43 (search highlight)
+     - AuthPrompt.tsx:122 (button text color)
+     - Workers.tsx:381, 415 (text/background colors)
+     - WorkerDetail.tsx:12-16, 88, 122, 132, 156, 158, 162 (status colors, lane styling, bar styling)
+     - Admin.tsx (2 instances)
 
-### Long-term Architecture Improvements
+### Immediate Quick Wins (< 2 hours)
 
-TBD
+1. **Add aria-label to WorkerTimeline bars** — one-line fix per bar element
+2. **Add title text to Observe.tsx status dots** — already has tooltips, just need to show status text somewhere
+3. **Update LogViewer search highlight to use theme colors** — 1 line change
+
+### Medium-term Improvements (1-3 days)
+
+1. **Consolidate theme system** — choose CSS variables or ThemeContext and migrate all components
+2. **Add ARIA labels to all custom interactive elements** — systematic audit + updates
+3. **Implement pattern/icon status differentiators** for colorblind accessibility
+4. **Document spacing scale** — add to theme system (8px, 12px, 16px, 24px increments)
+
+### Long-term Architecture Improvements (ongoing)
+
+1. **Establish design system documentation** — formalize typography scale, spacing scale, component density rules
+2. **Add dynamic page titles** — improve browser history UX
+3. **Complete alt text audit** — all visualizations, images, icons
+4. **Implement WCAG 2.1 AA compliance** — systematic accessibility review
+5. **Consider CSS-in-JS or Tailwind** — reduce parallel styling systems (if theme refactor leads there)
 
 ---
 
-**End of Investigation Log**
+**Investigation Complete** — 2026-09-25
+
+**Key Takeaway:** App is visually polished and responsive, but has **significant accessibility gaps** (ARIA/alt text) and **theme system fragmentation** (3 parallel color systems). Neither are blockers for functionality but should be addressed to meet accessibility standards and reduce maintainability burden.

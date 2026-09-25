@@ -342,7 +342,162 @@ Priority fixes:
 *Identifying missing AI-assisted operability features in modern tools*
 
 ### Findings
-[To be populated]
+
+**Hydra's Current AI-Assisted Features:**
+1. Magic Job Generator (NL → job JSON)
+2. AI Log Assistant (analyze_run with 5 modes)
+3. Duration Prediction (predict_duration, historical percentiles)
+4. Run Diff Copilot (diagnose_regression, compare vs last success)
+5. Investigate canned checks (4 LLM-free checks)
+
+**Feature Gaps vs Modern Tools (Airflow, Dagster, Prefect):**
+
+| Feature | Hydra | Airflow | Dagster | Prefect | Difficulty | Value |
+|---------|-------|---------|---------|---------|------------|-------|
+| **Natural language run history query** | ❌ | ✅ | ✅ | ✅ | High | High |
+| **Auto-fix retry suggestion** | ❌ | ✅ | Partial | ✅ | Medium | High |
+| **DAG/dependency health check** | ❌ | ✅ | ✅ | ✅ | High | High |
+| **Run duration trend detection** | ❌ | ✅ | ✅ | ✅ | Medium | Medium |
+| **Anomaly detection (resource usage)** | ❌ | ✅ | ✅ | Partial | Medium | Medium |
+| **Job recommendation engine** | ❌ | Partial | Partial | ❌ | High | Low |
+| **Log summarization at ingest** | ❌ | ✅ | ✅ | ✅ | High | Medium |
+| **Cascading failure analysis** | ❌ | ✅ | ✅ | ✅ | Medium | High |
+
+**Detailed Gap Analysis:**
+
+### 1. Natural Language Run History Query (User Value: HIGH)
+**Example:** "Show me all jobs that failed more than 3 times in the last week"
+
+**Current State:** No support. Users must navigate UI or use CLI.
+
+**Why It Matters:**
+- Operators spend time writing queries instead of fixing issues
+- Today: "Check dashboard, spot failed job, click into history, look for patterns"
+- With NL query: "Analyze recent failures for the web-service domain"
+
+**Implementation Approach:**
+- Accept NL question via new endpoint `POST /ai/query_history`
+- Rewrite as MongoDB query using LLM (similar to generate_job)
+- Validate rewritten query against schema whitelist (only allow safe aggregations)
+- Execute and return results
+
+**Effort:** Medium (80-120 LOC) | **Value:** High
+
+### 2. Auto-Fix Retry Suggestion (User Value: HIGH)
+**Example:** After analyzing a failure, LLM suggests "retry_count: 3" and "timeout: 600"
+
+**Current State:** Diagnose_regression identifies cause but doesn't suggest config changes.
+
+**Why It Matters:**
+- Operators make manual retry tuning decisions
+- AI-suggested values based on historical failure patterns could reduce MTTR
+- Today: "Diagnosis says timeout issue → manually set timeout to 60" (guessing)
+- With auto-fix: LLM suggests "timeout: 90 based on p95 of all failures"
+
+**Implementation Approach:**
+- Extend diagnose_regression response to include `suggested_config_patch`
+- LLM prompt includes historical timeout/retry configs for similar jobs
+- Return structured patch: `{"retry_count": 3, "timeout": 600}`
+
+**Effort:** Medium (60-100 LOC) | **Value:** High
+
+### 3. DAG/Dependency Health Check (User Value: HIGH)
+**Example:** "Job C depends on B depends on A. If A fails, C will never run."
+
+**Current State:** Jobs have `depends_on` field but no graph analysis.
+
+**Why It Matters:**
+- Hidden cascading failures (B fails → C blocked → D blocked → full pipeline stalled)
+- Today: Operators don't see the dependency graph impact
+- With DAG health: "A failed → blocks B, C, D (4 jobs cascading)"
+
+**Implementation Approach:**
+- New endpoint `GET /investigations/dependency_health`
+- Build DAG from all jobs' `depends_on` fields
+- Check for:
+  - Cycles (A→B→A)
+  - Critical-path jobs (single point of failure)
+  - Blocked chains (if job X fails, count downstream jobs blocked)
+- Return: list of high-risk dependency patterns
+
+**Effort:** High (150-200 LOC) | **Value:** High
+
+### 4. Run Duration Trend Detection (User Value: MEDIUM)
+**Example:** "This job has gotten 30% slower over the past 30 runs"
+
+**Current State:** No trend analysis. Predict_duration shows p90 but no historical slope.
+
+**Why It Matters:**
+- Early detection of performance degradation (before it becomes critical)
+- Helps with capacity planning
+- Can indicate resource contention or memory leaks in job itself
+
+**Implementation Approach:**
+- New endpoint `GET /ai/duration_trend/{job_id}`
+- Fit linear regression on last 20-30 successful runs
+- Return: slope (ms/run), r² (fit quality), prediction for next week
+- Bonus: Flag if slope is significantly positive (>5% per week)
+
+**Effort:** Medium (80-120 LOC, needs scipy for stats) | **Value:** Medium
+
+### 5. Anomaly Detection on Resource Usage (User Value: MEDIUM)
+**Example:** "Memory usage spiked to 2GB (3x normal) in last run"
+
+**Current State:** Worker metrics are collected but not analyzed for anomalies.
+
+**Why It Matters:**
+- Catch memory leaks, runaway processes before they crash workers
+- OOM kills are silent on some platforms; anomaly detection catches them earlier
+
+**Implementation Approach:**
+- Extend worker heartbeat to track memory_rss_mb per job
+- New check in investigations: `GET /investigations/resource_anomalies`
+- Use Z-score (value is >2 stddevs from mean) to flag anomalies
+- Return: job_id, run_id, metric (memory), expected, actual, severity
+
+**Effort:** Medium (100-150 LOC) | **Value:** Medium
+
+### 6. Log Summarization at Ingest (User Value: MEDIUM)
+**Example:** Scheduler generates 1-2 sentence summary when run completes
+
+**Current State:** Full logs stored, summarized on-demand via AI Log Assistant.
+
+**Why It Matters:**
+- Speed: UI can show summary immediately without waiting for LLM call
+- UX: Browsing run history with summaries is faster than opening each run
+- Reduces per-user LLM calls (summary generated once, viewed many times)
+
+**Implementation Approach:**
+- In `run_event_loop`, after persisting run doc, call `POST /ai/analyze_run` with "summary" mode
+- Store result in job_runs doc as `summary_text` field
+- UI shows summary in list views and run cards
+
+**Effort:** Medium (60-100 LOC) | **Value:** Medium
+
+**Recommendation Priority:**
+
+1. **Auto-Fix Retry Suggestion** (HIGH value, medium effort, high ROI)
+   - Extends existing diagnose_regression
+   - Immediate MTTR benefit
+   
+2. **NL History Query** (HIGH value, medium effort, differentiator)
+   - Operator delight feature
+   - Unlocks "ask questions instead of navigate"
+   
+3. **DAG Health Check** (HIGH value, high effort, architectural)
+   - Requires careful graph traversal
+   - Huge impact on visibility into cascading failures
+   
+4. **Duration Trend** (MEDIUM value, medium effort, quick win)
+   - Easy win for capacity planning
+   - Leverages existing predict_duration logic
+   
+5. **Resource Anomalies** (MEDIUM value, medium effort)
+   - Needs worker metrics integration
+   - Deferred until metrics pipeline is stable
+   
+6. **Log Summarization at Ingest** (MEDIUM value, medium effort)
+   - Deferred until after auto-fix and NL query (late polish)
 
 ## Summary — Top 5 Priorities
 [To be populated]
