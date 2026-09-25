@@ -83,6 +83,10 @@ type ExecutorSpec struct {
 	// Impersonation / Kerberos
 	ImpersonateUser string            `json:"impersonate_user,omitempty"`
 	Kerberos        map[string]string `json:"kerberos,omitempty"`
+	// Sensor executor fields
+	SensorType          string `json:"sensor_type,omitempty"`
+	Target              string `json:"target,omitempty"`
+	PollIntervalSeconds int    `json:"poll_interval_seconds,omitempty"`
 }
 
 // JobDef is the full job definition nested inside the envelope.
@@ -133,6 +137,16 @@ func Execute(ctx context.Context, env *JobEnvelope, onStdout, onStderr func(stri
 	execType := strings.ToLower(strings.TrimSpace(spec.Type))
 	if execType == "" {
 		execType = "shell"
+	}
+
+	// Sensor executor: delegate entirely to the polling loop, before any of
+	// the source-fetch/impersonation/job-timeout machinery below. A sensor
+	// job manages its own bounded loop via timeout_seconds, not the generic
+	// job-level timeout, mirroring worker/executor.py's early dispatch
+	// (execute_job returns _execute_sensor(...) before touching source
+	// fetch, env prep, or the per-command timeout).
+	if execType == "sensor" {
+		return execSensor(ctx, spec, onStdout)
 	}
 
 	// Build merged environment: OS env + executor env + params.
@@ -709,6 +723,12 @@ func DetectCapabilities() []string {
 	}
 	// HTTP executor uses Go's stdlib — always available.
 	caps = append(caps, "http")
+	// Sensor executor is always advertised, mirroring the Python worker
+	// (its HTTP sensor path always works via stdlib; an SQL-type sensor on
+	// a worker without Python/sqlalchemy fails at runtime the same way the
+	// SQL executor itself would — that asymmetry already exists in Python
+	// today, so this replicates it rather than papering over it here).
+	caps = append(caps, "sensor")
 	return caps
 }
 
