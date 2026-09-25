@@ -134,7 +134,7 @@ Live security audit of the Hydra Jobs distributed job runner, covering authentic
 ---
 
 ## 7. Dependency/Supply-Chain Risk
-**Status:** ✓ Reviewed | **Severity:** Low
+**Status:** ✓ Reviewed, corrected 2026-09-25 | **Severity:** was Low, now **HIGH**
 
 **Files Reviewed:** `pyproject.toml`, `ui/package.json`, `go-worker/go.mod`
 
@@ -143,12 +143,13 @@ Live security audit of the Hydra Jobs distributed job runner, covering authentic
   - FastAPI 0.115.0, Pydantic 2.9.2, SQLAlchemy 2.0.36, Redis 5.0.8 ✓
   - Cryptography >=46.0.5 (strong cipher support) ✓
   - PyYAML 6.0.3 (safe YAML parsing) ✓
-- **google-generativeai==0.3.2 is old** — Version 0.3.2 is not the latest major release (currently in 0.50+). Consider upgrading to latest unless there's a compatibility reason to stay on 0.3.x. Flag for review but not a critical security issue by itself.
+- **`google-generativeai==0.3.2` is not just old — the package itself is fully deprecated.** *(Correction, verified via WebSearch 2026-09-25: the original finding characterized this as "consider upgrading to 0.50+ when convenient." That's wrong. Google has retired the `google-generativeai` SDK entirely in favor of a unified `google-genai` package — see `github.com/google-gemini/deprecated-generative-ai-python`, whose README states "This SDK is now deprecated, use the new unified Google GenAI SDK." The associated Vertex AI generative-ai module removal deadline was **June 24, 2026 — already past as of today**. There is no "0.50+ series" of `google-generativeai` to upgrade to; the fix is a package swap (`google-generativeai` → `google-genai`, new `Client()`-based API, `from google import genai`), not a version bump.)*
+  - **Concrete risk:** `scheduler/api/ai.py`'s `_call_gemini()` (lines 109-122) may already be running against a dead/unsupported SDK. New Gemini models released after the cutover are exclusive to `google-genai` — Hydra's Gemini provider path (Magic Job Generator, AI Log Assistant, Run Diff Copilot when set to Gemini) risks silently falling further behind or breaking outright as Google finishes decommissioning the old SDK's backing services.
 - **UI dependencies modern** (`ui/package.json:14-22`) — React 18.2, Antd 5.19, React Router 7.18 all current.
 - **Go dependencies minimal** (`go.mod:5-9`) — Only 3 direct deps (uuid, godotenv, redis); all recent versions.
 - **No known critical CVEs jumped out** — No obviously vulnerable packages detected (e.g., lodash <4.17.0, moment <2.29.4). Deep CVE audit would require scanning tools.
 
-**Recommendation:** Upgrade google-generativeai to latest stable 0.50+ series; audit for breaking changes. Consider adding `pip-audit` or similar to CI/CD.
+**Recommendation (revised):** Treat this as a near-term migration, not a backlog item — swap `google-generativeai` for `google-genai` in `pyproject.toml` and rewrite `_call_gemini()` (`scheduler/api/ai.py:109-122`) against the new `Client()`-based API before the old SDK's backing infrastructure is fully retired. Verify Gemini-provider AI features still work end-to-end after the swap (`tests/test_ai.py`'s Gemini-path tests, plus a manual check against a real `GEMINI_API_KEY`). Consider adding `pip-audit` or similar to CI/CD to catch future deprecations like this automatically.
 
 ---
 
@@ -191,21 +192,21 @@ Live security audit of the Hydra Jobs distributed job runner, covering authentic
 
 Ranked by **(impact × likelihood)**:
 
-1. **Admin token provides root-equivalent cross-domain access** (`scheduler/utils/auth.py:83-86`)
+1. **`google-generativeai` SDK is fully deprecated, past its removal deadline** (`pyproject.toml:13`, `scheduler/api/ai.py:109-122`) — *re-ranked to #1, 2026-09-25*
+   - **Severity: HIGH** | **Impact: HIGH** (Gemini-backed AI features may already be degraded or about to break) × **Likelihood: HIGH** (deadline already passed)
+   - This was originally filed as a routine "upgrade when convenient" dependency note. Verified via WebSearch: `google-generativeai` is retired in favor of `google-genai`, and the Vertex AI generative-ai module's removal deadline (June 24, 2026) has already passed as of this investigation's date. This isn't a version bump — it's a package swap + API rewrite. Recommend: migrate `_call_gemini()` to the `google-genai` `Client()` API before the old SDK's backing services fully disappear.
+
+2. **Admin token provides root-equivalent cross-domain access** (`scheduler/utils/auth.py:83-86`)
    - **Severity: HIGH** | **Impact: CRITICAL** (full system access) × **Likelihood: MEDIUM** (requires ADMIN_TOKEN exposure)
    - Admin token bypasses ALL domain scoping and can observe/operate on any domain via `?domain=` override. While intentional for operations, a leaked admin token is a total compromise. Recommend: Document as root-equivalent; consider implementing ephemeral admin tokens or audit logging on admin operations.
 
-2. **Prompt injection risk in AI custom analysis** (`scheduler/api/ai.py:226-231`)
+3. **Prompt injection risk in AI custom analysis** (`scheduler/api/ai.py:226-231`)
    - **Severity: MEDIUM** | **Impact: MEDIUM** (can mislead LLM output) × **Likelihood: MEDIUM** (user-controlled question)
    - User question and log text are directly interpolated into LLM prompts without escaping. An attacker can inject instructions to mislead analysis. Mitigation: Output is text-only (not executed), but recommend adding input length limits and explicit "ignore embedded instructions" guidance in system prompts.
 
-3. **Token exposed in query string** (`scheduler/utils/auth.py:25`)
+4. **Token exposed in query string** (`scheduler/utils/auth.py:25`)
    - **Severity: MEDIUM** | **Impact: MEDIUM** (token in logs/proxies) × **Likelihood: MEDIUM** (if user passes ?token=...)
    - Tokens can be extracted from query params (`?token=...`), risking exposure in logs, proxies, and browser history. Recommendation: Deprecate query-string token extraction; log warnings if used.
-
-4. **google-generativeai dependency version old (0.3.2)** (`pyproject.toml:13`)
-   - **Severity: LOW** | **Impact: MEDIUM** (potential CVEs) × **Likelihood: LOW** (no known CVE found)
-   - Version 0.3.2 is notably old (latest is 0.50+). May have unpatched vulnerabilities. Recommend: Upgrade to latest stable with testing for breaking changes.
 
 5. **HTTPS not enforced at FastAPI level** (`scheduler/main.py`)
    - **Severity: LOW-MEDIUM** | **Impact: MEDIUM** (unencrypted traffic) × **Likelihood: MEDIUM** (depends on deployment)

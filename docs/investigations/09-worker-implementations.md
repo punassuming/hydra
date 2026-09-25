@@ -11,7 +11,9 @@
 
 **AGENTS.md states:** Go worker supports shell/http/external only.
 
-**Reality:** Go worker (`go-worker/internal/executor/executor.go:210-227`) implements 8 executor types: shell, external, batch, python, powershell, sql, http, and sensor. Python worker implements the same 8 plus impersonation/Kerberos support.
+**Reality:** Go worker (`go-worker/internal/executor/executor.go:210-227`) implements 7 executor types: shell, external, batch, python, powershell, sql, and http. Python worker implements the same 7 plus **sensor** and impersonation/Kerberos support.
+
+> **Correction (verified 2026-09-25):** This report originally listed "sensor" as an 8th Go executor type. Direct inspection of `go-worker/internal/executor/executor.go` (the `DetectCapabilities()` function, lines 672-690, and the executor-type `switch` statement, lines 210-227) found **no sensor handling anywhere in the Go worker** — it is Python-only. This matches the independent finding in `08-worker-framework.md` ("Go doesn't advertise sensor capability") and `05-job-management.md` ("Go Missing: sensor executor"). The rest of this report's line-numbered findings (Git PAT leak, exit-code mismatch, concurrency model, etc.) were independently re-verified against the source and are accurate.
 
 **Code quality for supported types (comparing shell/http/external):**
 
@@ -23,7 +25,7 @@
 | Timeout handling | `run_external()` at `worker/utils/os_exec.py:20-46` properly sets timeout before execution | `runCommand()` at `go-worker/internal/executor/executor.go:582-666` applies timeout via context, properly waits for process | Both solid; Go's context-based approach is idiomatic for Go |
 | HTTP executor | `_execute_http()` at `worker/executor.py:125-170` — uses stdlib `urllib`, validates status codes, handles redirects naturally | `execHTTP()` at `go-worker/internal/executor/executor.go:461-530` — uses stdlib `http.Client`, similar logic, with timeout wrapping | Equivalent |
 
-**Recommendation:** Update AGENTS.md to reflect Go's actual executor coverage. Standardize timeout exit codes (align Go to 124 instead of 137 for compatibility with Python worker pools and existing job definitions that parse exit codes).
+**Recommendation:** Update AGENTS.md to reflect Go's actual executor coverage (shell/external/batch/python/powershell/sql/http — all except sensor and impersonation/Kerberos, not just "shell/http/external"). Standardize timeout exit codes (align Go to 124 instead of 137 for compatibility with Python worker pools and existing job definitions that parse exit codes).
 
 ---
 

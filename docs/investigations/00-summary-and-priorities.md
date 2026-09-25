@@ -10,6 +10,18 @@ support, Redis/MongoDB management practices) — full detail in `01-security.md`
 This document collates all findings into one prioritized backlog. Findings that surfaced
 independently in multiple investigations (a strong signal) are called out explicitly.
 
+**Post-hoc verification pass (2026-09-25):** before finalizing, every investigation was spot-checked
+against the actual source and, for external claims, against live web search. Two reports required
+correction (see the `> Correction` notes inside `06-best-practices-comparison.md` and
+`09-worker-implementations.md`): a fabricated version citation for Argo Workflows and a wrong AIP
+number for Airflow's DAG versioning (substance unaffected either way), and a factual error claiming
+the Go worker implements a `sensor` executor (it does not — confirmed by direct code inspection,
+consistent with two *other* independent investigations that got this right). One finding was
+significantly **escalated**, not just corrected: the "outdated `google-generativeai` dependency"
+item in the security report was upgraded from a low-priority version bump to a high-priority
+migration once WebSearch confirmed the SDK is fully deprecated past its removal deadline — see
+Tier 0, item 0 below.
+
 ---
 
 ## How to read this
@@ -28,6 +40,7 @@ Four tiers, roughly ordered by **(risk or value) ÷ (effort)**:
 
 | # | Finding | Source(s) | Effort |
 |---|---|---|---|
+| 0 | **`google-generativeai` SDK is fully deprecated, past its removal deadline (June 24, 2026)** — not a version bump, a package swap (`google-generativeai` → `google-genai`) + API rewrite of `_call_gemini()`. Gemini-backed AI features risk being already degraded or about to break. *Escalated during verification — originally filed as a routine "upgrade when convenient" note.* | `01-security.md` #1 (corrected) | Medium (SDK swap + rewrite `_call_gemini`, re-test) |
 | 1 | **Go worker leaks Git PATs to disk** — `.git/config` is never scrubbed after clone (Python worker does this; Go doesn't). Any process with cache-directory access can extract tokens. | `09-worker-implementations.md` #1 | Low (~1 hr) |
 | 2 | **No timeout on LLM calls** — `scheduler/api/ai.py:114,129`. A hung Gemini/OpenAI call blocks the request indefinitely. | `02-ai-integration.md` #1, `01-security.md` (adjacent) | Trivial (~5 min) |
 | 3 | **Zero MongoDB indexes exist** — `job_runs`/`job_definitions`/`credentials` queries do full collection scans. Independently flagged by **two separate investigations** as the top operational risk. | `05-job-management.md` #1, `11-datastore-management.md` #1 | Low (2-4 hrs) |
@@ -83,7 +96,7 @@ theoretical one.
 - Datastore observability: split `/health` into per-datastore status, add Prometheus metrics (`11-datastore-management.md` #4).
 - Backup lifecycle management — retention/rotation policy, automated restore-test Routine (`11-datastore-management.md` #5).
 - Auto-fix retry suggestions, natural-language run-history query (`02-ai-integration.md` #4-5) — genuinely valuable, but big-bet features, not quick wins.
-- Update AGENTS.md — it understates the Go worker's actual executor coverage (documents shell/http/external only; Go worker in fact implements all 8 types, just without impersonation/Kerberos and, until fixed above, sensor). Doc-only, trivial, but worth doing alongside item #4.
+- Update AGENTS.md — it understates the Go worker's actual executor coverage (documents shell/http/external only; Go worker in fact also implements batch/python/powershell/sql — 7 types total, still genuinely lacking sensor and impersonation/Kerberos, unlike Python's full 8+2). Doc-only, trivial, but worth doing alongside item #4.
 - Terminology glossary (Job/Run/Executor ↔ DAG/Task Instance/Operator) to ease onboarding for engineers coming from Airflow/Dagster (`06-best-practices-comparison.md` #8).
 - Deployment-type auto-detection gaps (Podman/Kubernetes/WSL misclassified as "standalone") — cosmetic only, no functional impact (`10-worker-capabilities-cross-platform.md` #4).
 

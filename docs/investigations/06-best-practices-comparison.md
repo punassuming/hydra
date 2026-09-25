@@ -8,6 +8,12 @@
 
 **Summary**: Compared Hydra's job orchestration capabilities against Apache Airflow 3.x, Dagster (2025-2026), and Argo Workflows. Identified 8 key areas for standardization. **Top 3 priorities**: (1) Multi-step DAG support within jobs (unblocks templates, aligns with industry), (2) Job versioning (quick win: audit trail + reproducibility), (3) GitOps reconciliation loop (true declarative deployment).
 
+> **Correction (verified via WebSearch, 2026-09-25):** Two version/citation details below were checked against current sources and were wrong as originally written:
+> - **Argo Workflows** is cited throughout as "v2.7+, 2025-2026" — the actual current release as of September 2026 is **v4.1.x** (v4.1.4, released Sept 18 2026). Treat every "Argo Workflows (v2.7+, 2025-2026)" heading below as describing Argo Workflows' general feature set (DAG/Steps templates, WorkflowTemplates, Argo Events, ArgoCD GitOps reconciliation), not a version-accurate snapshot — the substance of those comparisons still holds, the version number does not.
+> - **Airflow's DAG versioning** is cited as "AIP-36" — the feature that actually shipped in Airflow 3.0 (GA April 2025) is tracked under **AIP-66** (DAG Bundles and Parsing) and **AIP-65** (Improve DAG History); AIP-36 was an earlier, related proposal. The substantive comparison (Airflow 3.0 tracks DAG structure/code/logs per version, runs complete on the version they started on) is accurate.
+>
+> Everything else in this report — the Hydra-side code findings (file paths, line numbers, current behavior) and the resulting recommendations — was not affected by this check and stands as written.
+
 ---
 
 ---
