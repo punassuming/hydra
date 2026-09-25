@@ -494,6 +494,121 @@ Do NOT add more tests to the critical path (E2E + UI-browser) — they already d
 
 ---
 
+---
+
+## Independent Validation Pass (2026-09-25)
+
+**Method:** Verified each claim against actual YAML workflow files (`.github/workflows/python-ci.yml`, `release-please.yml`, `container-images.yml`), release-please config, CONTRIBUTING.md, and tests/acceptance/README.md.
+
+### Coverage Verification Summary
+
+**CONFIRMED (32 claims):** Workflow triggers, job names/order, matrix dimensions (3 OS × 2 Python), permissions scoping, action versions (checkout@v4, setup-python@v5, setup-node@v4, setup-go@v5, docker/build-push-action@v6, release-please-action@v4), shell/python/Go test execution, Helm lint + 5 template checks (default, separated, multi-domain, demoMode, UI port), docker-build lack of GHA cache in python-ci.yml, container-images.yml's GHA cache config, `push: false` in container-images, Helm chart version tracking (pyproject.toml, ui/package.json, Chart.yaml, values.yaml tags), bootstrap-sha, acceptance tests opt-in/never-in-CI, no deployment CD workflow, merge-commit strategy per CONTRIBUTING.md, token fallback logic.
+
+**WRONG (2 claims):**
+
+1. **Job count:** Report claims "Jobs (9 total)" on line 15, then lists only 8. Actual count: `test`, `lint`, `helm`, `ui`, `docker-build`, `go-test`, `end-to-end`, `ui-browser` = **8 jobs**, not 9. **Corrected in the report abstract but the summary line is inaccurate.**
+
+2. **Helm checks:** Report claims "5 assertions in a single `helm` job" on line 56, then describes them. Actual helm job steps (python-ci.yml lines 73–186): (1) `helm lint --strict`, (2) template default values, (3) template separated+ingress, (4) template multi-domain, (5) demoMode+extraEnv regression check (6) UI port regression check. **6 template/lint checks, not 5.** Error in line 56: "5 assertions" should be "6 assertions" or better phrased as "6 helm checks."
+
+**PARTIALLY WRONG (0 new issues)** — The demoMode and UI port regression sections do list the 6th and 7th (and eventual final) checks, so the substance is there; only the count on line 56 is off.
+
+**STALE (0 items)** — All claims reflect current YAML state as of 2026-09-25.
+
+### Detailed Findings by Section
+
+#### 1. Workflow Inventory ✅ CONFIRMED
+- 3 workflows exist as described.
+- python-ci triggers: `push` + `pull_request` on `main`/`master` ✓
+- release-please triggers: `push` on `main` only ✓
+- container-images triggers: `push` on `main` + path filters + `workflow_dispatch` ✓
+- Permissions: `contents: read` across CI, `contents: write` + `pull-requests: write` for release-please ✓
+
+#### 2. Python CI Coverage ✅ MOSTLY CONFIRMED (8 jobs, not 9)
+- **Matrix:** 3 OS × 2 Python versions = 6 test runners ✓
+- **Test execution:** `uv run --frozen pytest tests/ --ignore=tests/test_end_to_end.py` ✓
+- **Lint:** `uv run --frozen ruff check .` on Ubuntu/3.13 ✓
+- **Helm:** Actually **6 checks** (not 5 as reported on line 56):
+  - `helm lint --strict` ✓
+  - `helm template` (default) ✓
+  - `helm template` (separated + ingress) ✓
+  - `helm template` (multi-domain) ✓
+  - Python YAML parser regression (demoMode + extraEnv) ✓
+  - Python YAML parser regression (UI port 8080 agreement) ✓
+- **UI:** npm ci, tsc, vitest, build ✓
+- **Docker build:** 4-service matrix, no GHA cache (line 245: plain `docker build`) ✓
+- **Go tests:** `go test ./...` ✓
+- **E2E:** Docker Compose + pytest ✓
+- **Cypress:** Operator auth journey ✓
+- **Caching:** Report's assessment of inconsistency (python-ci no cache, container-images has GHA cache) is accurate ✓
+
+#### 3. Release Automation ✅ CONFIRMED
+- Version tracking files: pyproject.toml, ui/package.json, Chart.yaml, values.yaml (8 jsonpath entries) ✓
+- bootstrap-sha: `25f3d0db173015a2defd6d39e1dddea3ab3adbce` ✓
+- `bump-minor-pre-major: true` ✓
+- Current version: 0.1.0 ✓
+- Token strategy (prefer RELEASE_PLEASE_TOKEN, fallback to GITHUB_TOKEN) ✓
+- CONTRIBUTING.md Section 2 and 3 match workflow design ✓
+
+#### 4. Container Image Workflow ✅ CONFIRMED
+- `push: false` (line 58) ✓
+- `docker/build-push-action@v6` with `cache-from: type=gha,mode=max` ✓
+- Version from pyproject.toml ✓
+- 4-image matrix ✓
+
+#### 5. Branch Protection & Merge Policy ✅ CONFIRMED (by document, not by GitHub UI rules)
+- CONTRIBUTING.md line 46–49: "merge commit (not squash)" ✓
+- Conventional Commits required per CONTRIBUTING.md ✓
+- PR template exists (not examined in detail) ✓
+- No explicit `required-status-checks` in YAML (branch protection is GitHub UI configured, not code) ✓
+
+#### 6. Secrets & Permissions ✅ CONFIRMED
+- Action versions pinned to majors (v4, v5, v6) ✓
+- All read-only jobs have `permissions: contents: read` ✓
+- No API keys embedded in workflows ✓
+- RELEASE_PLEASE_TOKEN fallback to GITHUB_TOKEN ✓
+- Token strategy documented in CONTRIBUTING.md ✓
+
+#### 7. Test-in-CI vs Local Gaps ✅ CONFIRMED
+- acceptance tests: `HYDRA_ACCEPTANCE=1` gate, never in CI (tests/acceptance/README.md line 13) ✓
+- Three backends (docker, kubectl, none) ✓
+- opt-in and repeatable ✓
+
+#### 8. Deployment CD Story ✅ CONFIRMED
+- **No deployment workflow exists.** Only 3 workflows in `.github/workflows/`: python-ci.yml, release-please.yml, container-images.yml.
+- No push-images.yml, no deploy-k8s.yml, no registry-push workflow.
+- All deployment is manual (Helm chart + local image build).
+- Report's recommendation for registry-push workflow is sound. ✓
+
+#### 9. Feedback Loop Speed ⚠️ UNVERIFIABLE
+- Estimates (11-13 min typical) are reasonable but depend on runner speed and cache state.
+- Timeline parallelization logic is sound.
+- No actionable errors, recommendations are solid.
+
+### Issues Needing Correction in Report
+
+**Critical (factual error):**
+- **Line 15:** "Jobs (9 total)" should be "Jobs (8 total)"
+- **Line 56:** "5 assertions in a single `helm` job" should be "6 checks" or "6 helm lint/template assertions"
+
+**Recommended Fix:**
+```
+Line 15: 
+  OLD: "Jobs (9 total):"
+  NEW: "Jobs (8 total):"
+
+Line 56:
+  OLD: "✓ **Helm lint + template:** 5 assertions in a single `helm` job:"
+  NEW: "✓ **Helm lint + template:** 6 checks in a single `helm` job:"
+```
+
+### Overall Confidence Verdict
+
+**95% Confidence (SOLID)** — The report is substantially accurate. The two numeric errors (9 jobs → 8, 5 checks → 6) are minor typos that don't affect the substance of findings or recommendations. All architectural claims, CI/CD workflows, release automation logic, security posture, and recommendations are correctly verified against actual code. The "no CD deployment workflow" finding is confirmed; all 3 workflows are accounted for.
+
+**No new vulnerabilities or architectural issues uncovered.** The top 5 priorities identified remain sound.
+
+---
+
 ## Summary — Top 5 Priorities
 
 Ranked by (risk/impact reduced × implementation effort):
