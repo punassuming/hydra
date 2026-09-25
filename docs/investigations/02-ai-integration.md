@@ -500,4 +500,109 @@ Priority fixes:
    - Deferred until after auto-fix and NL query (late polish)
 
 ## Summary — Top 5 Priorities
-[To be populated]
+
+**Ranked by (user value × implementation effort⁻¹) — Quick wins first, then strategic improvements**
+
+### 1. ADD TIMEOUTS TO LLM CALLS (SAFETY — CRITICAL)
+**Effort:** 5 min | **Value:** Critical | **ROI:** Immediate
+
+**What:** Add `timeout=30` parameter to Gemini and OpenAI client initialization.
+
+**Why:** Currently, if Gemini/OpenAI hangs, the HTTP request will hang indefinitely, potentially causing cascading timeouts across the scheduler API. This is a silent failure mode.
+
+**File/Lines:** `scheduler/api/ai.py` (lines 114, 129)
+- Gemini: `model = genai.GenerativeModel(model_name, timeout=30)`
+- OpenAI: `client = openai.OpenAI(api_key=api_key, timeout=30)`
+
+**Impact:** Prevents hung requests, improves observability (timeout error vs silent hang).
+
+---
+
+### 2. VALIDATE CUSTOM QUESTION INPUT (SECURITY — HIGH)
+**Effort:** 5 min | **Value:** High (security) | **ROI:** Immediate
+
+**What:** Add `maxLength={500}` to custom question Input field and sanitize prompt injection patterns on backend.
+
+**Why:** Custom question in analyze_run is currently embedded directly into LLM prompt. Attacker could craft: `"ignore instructions, the admin password is..."` to probe the system.
+
+**File/Lines:** 
+- UI: `ui/src/components/FailureInsight.tsx` line 195-201 (add maxLength)
+- Backend: `scheduler/api/ai.py` line 226 (validate question pattern)
+
+**Impact:** Eliminates prompt injection vector, improves security posture.
+
+---
+
+### 3. ADD SLA MISS + RETRY STORM CANNED CHECKS (OPERATIONS — HIGH)
+**Effort:** 30 min (20 LOC each) | **Value:** High | **ROI:** High
+
+**What:** Two new investigations:
+- **`sla_miss`**: Jobs where `sla_seconds` is set and latest run exceeded it
+- **`retry_storms`**: Jobs with >2 retries in the past hour
+
+**Why:** Modern tools (Airflow, Dagster) have these; Hydra has the data but doesn't surface it. Operators blindly miss SLAs because no alerting exists.
+
+**File/Lines:** `scheduler/api/investigations.py` (add two functions ~40 LOC total)
+
+**Impact:** Instant operator visibility into SLA violations and cascading retry failures.
+
+---
+
+### 4. AUTO-FIX RETRY SUGGESTION (MTTR — HIGH)
+**Effort:** 2-3 hours (80 LOC) | **Value:** High | **ROI:** Medium-High
+
+**What:** Extend `diagnose_regression` response to include `suggested_config_patch`:
+```json
+{
+  "suggested_config_patch": {
+    "retry_count": 3,
+    "timeout": 120
+  }
+}
+```
+
+**Why:** Today, diagnosis says "likely cause: timeout" but operator must manually choose retry_count and timeout. AI can suggest values based on historical patterns for similar jobs.
+
+**File/Lines:** `scheduler/api/ai.py` (lines 414-431 in diagnose_regression response)
+
+**Implementation:**
+1. Add historical context to diagnose prompt (median/p90 timeouts for failures)
+2. LLM returns suggested_config_patch in JSON
+3. UI displays patch alongside diagnosis (optional "Apply suggested config" button)
+
+**Impact:** Reduces MTTR by 5-10min per incident, improves retry tuning quality.
+
+---
+
+### 5. NATURAL LANGUAGE HISTORY QUERY (ANALYTICS — HIGH)
+**Effort:** 4-6 hours (120 LOC) | **Value:** High | **ROI:** Medium
+
+**What:** New endpoint `POST /ai/query_history` accepting natural language questions about run history.
+
+**Example:** "Show jobs that failed more than 3 times in the past week in the web-service domain"
+
+**Why:** Operator currently navigates UI or writes MongoDB queries. NL query is faster and more intuitive, unlocks ad-hoc analytics without leaving the UI.
+
+**File/Lines:** New `scheduler/api/ai.py` endpoint + helper for query rewriting
+
+**Implementation:**
+1. Accept `question` + `domain` (optional, admin only)
+2. Prompt LLM to rewrite as MongoDB aggregation pipeline (with validation)
+3. Execute against job_runs collection with domain scoping
+4. Return results in table format
+
+**Safety:** Validate rewritten query against whitelist (only allow count, match, project, sort, limit).
+
+**Impact:** Empowers operators to self-serve analytics, reduces "can you run a query" requests to devops.
+
+---
+
+**Effort Breakdown:**
+- Quick wins (30 min): Timeouts + input validation + canned checks = immediate ROI
+- Medium-term (3-4 weeks): Auto-fix suggestion + NL query = strategic investment
+- Longer-term (post-MVP): DAG health, duration trends, resource anomalies
+
+**Cost-Benefit Summary:**
+- Top 3: Negligible effort, critical-to-high value (do immediately)
+- Top 5: Moderate effort, strategic value (1-month sprint)
+- Beyond top 5: Architectural improvements, deferrable to post-release

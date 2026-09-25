@@ -93,12 +93,43 @@ Live security audit of the Hydra Jobs distributed job runner, covering authentic
 ---
 
 ## 5. Network/Transport Security
-*To investigate: CORS config, HTTPS enforcement, SSE auth, Docker Compose isolation*
+**Status:** ✓ Reviewed | **Severity:** Low
+
+**Files Reviewed:** `scheduler/main.py`, `docker-compose.yml`, `docker-compose.worker.yml`, `worker/Dockerfile`
+
+### GOOD
+- **CORS properly configured** (`main.py:73-83`) — Default "*" origin allowed, but allow_credentials=False prevents credential leaks. Specific origins can be set via CORS_ALLOW_ORIGINS env var.
+- **Datastore network isolation** (`docker-compose.yml:159-167`) — Redis/Mongo on internal-only "backend" network; no host port exposure. Scheduler joins both backend (for datastore) and frontend (for outside).
+- **Worker runs as non-root** (`docker-compose.worker.yml:20`) — Runs as UID 10001:10001 by default; configurable via HYDRA_WORKER_UID/GID.
+- **Worker read-only rootfs** (`docker-compose.worker.yml:21`) — Root filesystem is read-only except for /tmp (rw,noexec,nosuid).
+- **tmpfs protections** (`docker-compose.worker.yml:23`) — /tmp mount is noexec (prevents executable upload + run) and nosuid (prevents setuid bits).
+- **Security_opt hardening** (`docker-compose.yml:35, 82, 126; worker.yml:24`) — all services use no-new-privileges.
+
+### OBSERVATIONS
+- **HTTPS not enforced at app level** — FastAPI has no HTTPS redirect. Assumed handled by reverse proxy in production. Acceptable for local dev.
+- **SSE auth inherited from middleware** — `/events/stream` endpoint uses same enforce_api_key middleware (lines 71 + auth check at events.py:24).
+
+**Recommendation:** In production, front Scheduler with a reverse proxy that enforces HTTPS and terminates TLS. Current Docker setup is secure for local dev.
 
 ---
 
 ## 6. Secrets in Deployment Artifacts
-*To investigate: hardcoded secrets, default passwords, insecure defaults in .env.example, values.yaml, Dockerfiles*
+**Status:** ✓ Reviewed | **Severity:** Low
+
+**Files Reviewed:** `.env.example`, `deploy/helm/hydra/values.yaml`, `scheduler/Dockerfile`, `worker/Dockerfile`, `go-worker/Dockerfile`
+
+### GOOD
+- **.env.example clean** — No hardcoded secrets or default passwords. All auth values are empty; user must fill them in.
+- **ADMIN_TOKEN required** (`.env.example:15`) — Marked [REQUIRED] with no default; must be explicitly set.
+- **Credential encryption key guidance** (`.env.example:22-29`) — Comments warn that encryption key should be independent of ADMIN_TOKEN. Provides generation command.
+- **Redis/Mongo auth opt-in** (`.env.example:31-43`) — Both databases allow zero-config (no auth) for local dev, explicitly require setting to enable auth.
+- **Helm values follow best practice** (`values.yaml:110-111`) — AI provider keys recommended to come from Kubernetes secrets (valueFrom.secretKeyRef), not hardcoded.
+- **No hardcoded secrets in Dockerfiles** — All three Dockerfiles (scheduler, worker, go-worker) contain only config and no embedded secrets.
+
+### OBSERVATIONS
+- **Security defaults are sane** — Auth is off by default locally (zero-config), but enabled in production via env vars. No accidental exposure.
+
+**Recommendation:** Verify CREDENTIAL_ENCRYPTION_KEY is always set to an independent value in production (not derived from ADMIN_TOKEN).
 
 ---
 
