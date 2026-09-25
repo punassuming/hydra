@@ -387,6 +387,7 @@ class TestHydraModeIntegration(unittest.TestCase):
             main_module._orchestrator = None
             with patch("scheduler.main.ensure_admin_token"), \
                  patch("scheduler.main.ensure_domains_seeded"), \
+                 patch("scheduler.main.ensure_indexes"), \
                  patch("scheduler.main.create_standard_orchestrator") as mock_factory:
                 main_module.on_startup()
                 mock_factory.assert_not_called()
@@ -406,6 +407,7 @@ class TestHydraModeIntegration(unittest.TestCase):
             main_module._orchestrator = None
             with patch("scheduler.main.ensure_admin_token"), \
                  patch("scheduler.main.ensure_domains_seeded"), \
+                 patch("scheduler.main.ensure_indexes"), \
                  patch("scheduler.main.create_standard_orchestrator", return_value=mock_mgr):
                 main_module.on_startup()
                 mock_mgr.start.assert_called_once()
