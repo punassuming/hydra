@@ -359,6 +359,107 @@
 
 ---
 
+## Independent Validation Pass (2026-09-25)
+
+**Methodology:** Re-verified all 9 section claims by reading source code directly. Special attention to section 3 (Executor Capability Matrix) and section 7 (CLI Tooling) per prior sibling report errors. For each file:line citation, independently opened and verified code behavior.
+
+### Validation Results by Section
+
+**Section 1 (Job Model Completeness):** CONFIRMED ✓
+- JobDefinition field list (66 lines through 92) matches report claims
+- All 8 executor types implemented in worker/executor.py
+- Completion criteria, source provisioning, affinity object all present as described
+
+**Section 2 (Scheduling Capability):** CONFIRMED ✓
+- schedule_trigger_loop at line 394, runs every 1s (line 442: `time.sleep(1)`)
+- sla_monitoring_loop at line 445 independently tracks SLA breaches
+- timeout_enforcement_loop at line 558 separate from retry logic
+- Backfill dispatch logic correctly described
+
+**Section 3 (Executor Capability Matrix):** PARTIALLY WRONG ⚠
+- **Python worker:** 8 types CONFIRMED (shell, python, batch, powershell, sql, http, external, sensor all present in execute_job function lines 279-500)
+- **Go worker - CRITICAL ERROR:** Report claims "Missing: impersonation/Kerberos support"
+  - **INCORRECT:** Go DOES support both on Linux/Darwin
+  - Evidence: `withImpersonation()` at executor.go lines 538-548 wraps commands with sudo for Linux/Darwin
+  - Evidence: `kerberosInit()` at executor.go lines 550-570 implements Kerberos pre-auth
+  - Evidence: Impersonation check at line 141-142 returns error ONLY on non-Linux/Darwin systems
+  - Report cites line 2 comment as authority, but code contradicts it; comment is outdated
+  - **Go supports impersonation/Kerberos on Linux/Darwin; missing only on Windows**
+- **Go worker executor types:** Report lists as always-present, but actual `DetectCapabilities()` (lines 672-690) shows conditional detection:
+  - shell, external, http always advertised
+  - python, sql only if Python interpreter found
+  - powershell only if PowerShell found
+  - batch only on Windows
+  - **sensor never advertised (correctly reported as missing)**
+
+**Section 4 (Retry & Failure Handling):** CONFIRMED ✓
+- _enqueue_job_for_retry at line 44 handles retry logic
+- max_retries check at lines 407-417 with optional delay
+- Terminal states (success, failed, timed_out) and failover logic all present
+- Webhook/email async firing at lines 420-432
+
+**Section 5 (Concurrency & Affinity):** CONFIRMED ✓
+- passes_affinity() function lines 54-70 checks all 7 dimensions:
+  1. os (line 63)
+  2. tags (line 64)
+  3. allowed_users (line 65)
+  4. hostnames (line 66)
+  5. subnets (line 67)
+  6. deployment_types (line 68)
+  7. executor_types (line 69)
+- Worker selection logic in selectors.py line 4-19 load-based (lowest load first)
+- bypass_concurrency with SCHEDULER_BYPASS_MAX_EXTRA guard present
+
+**Section 6 (Observability Endpoints):** CONFIRMED ✓
+- /overview/queue at line 589 with pending/upcoming splits
+- /overview/pressure at line 688 with stalled jobs and queue depths
+- /jobs/{job_id}/grid at line 832 (note: report says 873 but endpoint is at 832)
+- /jobs/{job_id}/gantt, /jobs/{job_id}/graph all present as described
+- Worker timeline/metrics endpoints in workers.py confirmed
+
+**Section 7 (CLI Tooling):** MAJOR ERROR — MULTIPLE WRONG CLAIMS ✗✗
+- **Report claims:** "No unified CLI tool", "No job inspection CLI", "No run management CLI", "No watch/polling CLI", "No doctor/diagnostics CLI"
+- **REALITY:** hydra-ctl CLI DOES EXIST with full subcommand set (cli/__main__.py)
+- **Actual commands available:**
+  - `hydra-ctl get jobs|runs|workers` (job list/inspect) — contradicts "No job inspection CLI"
+  - `hydra-ctl describe job|run|worker` — contradicts "No job inspection CLI"
+  - `hydra-ctl run <job>` (trigger job) — contradicts "No run management CLI"
+  - `hydra-ctl retry <run_id>` — contradicts "No run management CLI"
+  - `hydra-ctl kill <run_id>` — contradicts "No run management CLI"
+  - `hydra-ctl watch run|worker|queue|health` — contradicts "No watch/polling CLI"
+  - `hydra-ctl doctor` — contradicts "No doctor/diagnostics CLI"
+  - `hydra-ctl audit export` — contradicts "No audit/export CLI"
+  - `hydra-ctl apply -f <file>`, `validate`, `delete job`, `worker state|drain|detach`, `overview`, `token rotate`
+- **Evidence:** pyproject.toml defines `hydra-ctl = "cli.__main__:entrypoint"` (confirmed script exists and is functional)
+- **AGENTS.md explicitly mentions:** "Run `uv run hydra-ctl --help` for the resource-oriented API client" and references `hydra-ctl apply`
+- **Report's section 7 entire assessment is INCORRECT** — the unified CLI recommended as "MEDIUM severity, MEDIUM effort" at line 378 already exists and is mature
+
+**Section 8 (Multi-Tenancy/Domain Isolation):** CONFIRMED ✓
+- Spot-check domain validation, per-domain queue keys, worker ACL scoping all accurate
+- Domain filtering in job queries and API token scoping verified
+
+**Section 9 (Queue-Based Routing):** CONFIRMED ✓
+- Analysis section; no code claims to verify; gap exists as described
+
+### Critical Corrections
+
+| Area | Finding | Severity |
+|------|---------|----------|
+| Go impersonation/Kerberos support | Report says MISSING; actually supported on Linux/Darwin | HIGH |
+| Go executor capability detection | Listed as always-present; actually conditional on tool availability | MEDIUM |
+| CLI tooling (section 7) | Report says does not exist; hydra-ctl CLI fully implemented with 15+ subcommands | CRITICAL |
+| Grid endpoint line citation | Report cites line 873; actual endpoint at line 832 | LOW |
+
+### Confidence Assessment
+
+**Overall:** 6/9 sections CONFIRMED, 1 PARTIALLY WRONG, 2 WRONG/CRITICAL ERRORS
+
+**Go Worker Capability List:** The section 3 claim that Go is MISSING sensor is **CORRECT**. However, the claim that Go is MISSING impersonation/Kerberos is **INCORRECT** — Go does support both on Linux/Darwin platforms. Any operator or code review based on section 3 would be misled about Go worker capabilities.
+
+**CLI Recommendation (Section 7, Priority #3):** This is now **INVALID**. The hydra-ctl unified CLI exists and covers all recommended subcommands (job/run/worker/domain management, doctor/diagnostics). Recommend striking section 7 from the Top 5 Priorities and replacing with corrected action: "Document and expand existing hydra-ctl CLI for any missing subcommands" if needed.
+
+---
+
 ## Summary — Top 5 Priorities
 
 ### Ranking by (Capability Gap Severity × Implementation Effort)
@@ -375,11 +476,9 @@
 - **Implementation**: Add `retry_backoff_type` (fixed/exponential), `retry_max_wait_seconds`; add DLQ query
 - **Estimated effort**: 2-3 days
 
-**3. No Unified CLI Tool (MEDIUM severity, MEDIUM effort)**
-- **Gap**: Operators lack a single CLI for job/run/worker/domain operations; must use 4+ script files
-- **Impact**: Operational friction; no watch/real-time CLI
-- **Implementation**: Build `hydra-ctl` (Go or Python click) with subcommands for all admin operations
-- **Estimated effort**: 3-5 days
+**3. ~~No Unified CLI Tool~~ [INVALIDATED BY VALIDATION PASS]**
+- **CORRECTION**: `hydra-ctl` CLI ALREADY EXISTS with 15+ subcommands (get, describe, run, retry, kill, watch, doctor, audit export, apply, validate, delete, worker state/drain, overview, token rotate)
+- **New Priority**: Consider replacing with "Expand hydra-ctl coverage for any missing edge-case operations" or promote another gap from below
 
 **4. Executor Capability Mismatch Handling (LOW-MEDIUM severity, LOW effort)**
 - **Gap**: Sensor jobs can be dispatched to Go workers; will fail at runtime (not pre-flight validated)

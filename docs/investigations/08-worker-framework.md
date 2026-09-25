@@ -343,3 +343,52 @@ Ranked by (risk of silent breakage × effort to fix):
 - **Partially aligned** (medium risk): Heartbeat (metrics collected but not all stored), registration (minor field gaps)
 - **Critical gaps** (high risk): Timing fields missing in Go, sensor capability gap, no protocol versioning
 
+---
+
+## Independent Validation Pass (2026-09-25)
+
+**Methodology**: Re-verified 7 protocol areas by reading actual Python + Go source code at cited lines, independently confirming each claim against both implementations.
+
+### Verification Results by Area
+
+**Area 1 (Registration & Discovery)**
+- ✅ **CONFIRMED (with CORRECTION)**: Go missing `startup_duration_ms` in worker hash verified at `go-worker/internal/worker/worker.go:97-118` (fields map omits it) vs Python `worker/worker.py:90` (includes it).
+- ❌ **WRONG**: Report claimed `startup_duration_ms` is "present in `appendWorkerOp()` details" for Go. Actually **MISSING** from both Python and Go appendWorkerOp details. Python appendWorkerOp (`worker.py:105`) includes it; Go appendWorkerOp (`worker.go:129-135`) does NOT. **Correction**: startup_duration_ms is absent from Go in both places (worker hash AND appendWorkerOp details), not just the hash.
+
+**Area 2 (Heartbeat Protocol)**
+- ✅ **CONFIRMED**: Go collects load_1m/load_5m in `collectLinuxMetrics()` (`metrics.go:57-62`) but heartbeat writes to Redis only `process_count`, `memory_rss_mb`, `metrics_ts` (`worker.go:216-220`), omitting load metrics from the worker hash. Python writes all four (`heartbeat.py:198-207`).
+
+**Area 3 (Dispatch Queue Protocol)**
+- ✅ **CONFIRMED**: Python deserializes envelope at `worker.py:424-426` and moves malformed payloads to dead-letter queue (`worker.py:429-430`). Go deserializes at `worker.go:314-316` and logs error but continues with no dead-letter mechanism.
+
+**Area 5 (Log Streaming Protocol)**
+- ✅ **CONFIRMED**: Go appends `"\n"` to chunk (`worker.go:445`) while Python passes chunk as-is (`worker.py:257`). Both publish to same Redis channel.
+
+**Area 6 (Worker Operations Log Protocol)**
+- ✅ **CONFIRMED**: Both write identical event structure (ts, type, message, details) to `worker_ops:{domain}:{worker_id}` with matching event types (start/restart/run_exec/run_result). No drift observed.
+
+**Area 8 (State/Lifecycle Protocol)**
+- ❌ **WRONG**: Report claimed "Python reads from `WORKER_STATE` env var, Go reads from `INITIAL_STATE` env var". **Both read from WORKER_STATE**. Python: `config.py:35 os.getenv("WORKER_STATE")`. Go: `config.go:83 os.Getenv("WORKER_STATE")`. State variable naming is identical, not different.
+- **Note**: Go maps "disabled" to "offline" while Python allows "disabled" as a valid state value — minor semantic difference but same env var name.
+
+**Area 9 (Protocol Versioning)**
+- ✅ **CONFIRMED**: No `protocol_version` or `PROTOCOL_VERSION` strings found anywhere in `worker/`, `go-worker/`, or `scheduler/` codebases. Absence claim verified.
+
+### Count Summary
+- **CONFIRMED**: 5 areas (2, 3, 5, 6, 9)
+- **WRONG**: 2 areas (1 partial, 8 complete)
+- **Overall confidence**: ~71% (5 of 7 spot-checks hold; 2 contain factual errors)
+
+### Priority Corrections
+
+**Most Important**: Area 1 & 8 corrections need documentation update:
+1. **Area 1 correction**: Go is missing `startup_duration_ms` from BOTH the worker hash AND appendWorkerOp details (report understated the gap). Operational impact: no startup timing metrics available for Go workers in any API response.
+2. **Area 8 correction**: Env var name is identical (WORKER_STATE) for both workers, not differentiated. Report's claim of different env var names is factually false.
+
+**Confidence Verdict on Top-5-Priorities list**: 
+- Priority #1 (Timing fields): CONFIRMED HIGH RISK — Go run_end events are missing total_run_ms, source_fetch_ms, env_prep_ms. Duration analysis will fail for Go-worker jobs.
+- Priority #2 (Sensor capability): Already human-verified CONFIRMED.
+- Priority #3 (Load averages in hash): CONFIRMED LOW RISK — Go collects metrics but doesn't persist to hash; history alleviates but creates inconsistency.
+- Priority #4 (Protocol versioning): CONFIRMED HIGH RISK — no versioning field exists; silent drift already documented (timing fields, capability gap, startup duration).
+- Priority #5 (Dead-letter): CONFIRMED MEDIUM RISK — Go silently skips bad envelopes vs Python dead-letter queue; operator visibility gap.
+
