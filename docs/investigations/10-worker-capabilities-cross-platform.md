@@ -129,7 +129,57 @@ deployment_type = os.getenv("DEPLOYMENT_TYPE", _default_deployment_type)
 *Investigating: `worker/bootstrap.py` and `worker/windows_tasks.py` — install/remove/validate idempotency and error handling.*
 
 ### Findings
-(To be updated as investigation proceeds...)
+
+**Location:** `worker/bootstrap.py` lines 277-295 (PID lock), 449-559 (actions); `worker/windows_tasks.py` lines 163-250+ (Task Scheduler wrapper).
+
+**PID Lock Mechanism (`bootstrap.py` lines 277-295):**
+- `acquire_bootstrap_lock()` reads lock file, checks if recorded PID is alive, and acquires lock.
+- **Staleness Handling:** If PID in lock file is not alive (`_is_pid_alive()` returns False), lock is considered stale and replaced (line 291).
+- `_is_pid_alive()` (lines 250-274): Uses `ctypes.OpenProcess()` on Windows and `os.kill(pid, 0)` on Unix — both standard techniques, robust.
+- **Assessment:** ✓ Staleness handling is solid. Protected process detection (ERROR_ACCESS_DENIED) correctly returns True (line 266).
+
+**Idempotency:**
+
+1. **install (lines 472-516):**
+   - ✓ Uses `/F` flag with schtasks (line 89 in windows_tasks.py) or PowerShell `-Force` for idempotency.
+   - ✓ Validates config before install (lines 484-489).
+   - Replaces existing task if already present.
+   
+2. **remove (lines 519-535):**
+   - ✓ Uses `/F` flag (line 116) — succeeds silently if task doesn't exist.
+   - ✓ No pre-check needed; always returns 0.
+
+3. **run (lines 538-559):**
+   - ✓ Validates config before starting watchdog (lines 544-549).
+   - Watchdog acquires lock at start; if another instance holds it, returns 1 (exit).
+
+4. **validate (lines 449-469):**
+   - ✓ Purely informational, always safe.
+
+**Error Handling:**
+
+- ✓ Config validation is checked in install/run/validate before proceeding.
+- ✓ Process launch failures are logged and return None (lines 349-353).
+- ✓ Log file open failures gracefully degrade to inherited stdio (lines 328-334).
+- ✓ Signal handlers (SIGTERM/SIGINT) cleanly shut down watchdog (lines 370-373).
+- ✓ Watchdog cleanup on exit calls `_remove_lock()` (line 427).
+
+**Windows Task Scheduler Wrapper (`windows_tasks.py`):**
+- ✓ `run_schtasks()` raises `CalledProcessError` on non-zero return (lines 147-153).
+- ✓ Timeouts are enforced (default 30s, line 124).
+- ✓ Platform check (`_require_windows()`) prevents non-Windows calls (lines 25-33).
+- ✓ `/F` (force overwrite) makes installs idempotent (line 89).
+
+**NSSM Alternative (Windows Service):**
+- Not in codebase (`docs/windows-worker-bootstrap.md` referenced in AGENTS.md but not found to verify).
+- Documented as alternative in AGENTS.md line 102 but implementation not provided — likely operational docs only.
+
+**Summary — Strengths:**
+- ✓ PID lock staleness detection is robust.
+- ✓ All actions are idempotent.
+- ✓ Error handling is thorough (config validation, process launch errors, signal handling).
+- ✓ Platform guarding prevents misuse on non-Windows.
+- ⚠ NSSM alternative not implemented in code (docs-only, not a robustness issue).
 
 ---
 
@@ -138,7 +188,60 @@ deployment_type = os.getenv("DEPLOYMENT_TYPE", _default_deployment_type)
 *Investigating: impersonation and Kerberos — platform checks and error clarity on non-Linux workers.*
 
 ### Findings
-(To be updated as investigation proceeds...)
+
+**Location:** `worker/executor.py` lines 296-304 (impersonation/Kerberos guard), 316-342 (Kerberos init and impersonation).
+
+**Platform Check (Explicit & Clear):**
+- Lines 296-304 in `execute_job()`:
+```python
+current_os = platform.system().lower()
+supports_impersonation = current_os in ("linux", "darwin")
+
+if (impersonate_user or kerberos) and not supports_impersonation:
+    return (
+        1, "", 
+        f"impersonation/kerberos executor settings are supported only on Linux/macOS workers (current: {platform.system()})",
+    )
+```
+- ✓ **Explicit guard:** Both `impersonate_user` and `kerberos` trigger the check together.
+- ✓ **Clear error message:** Returns immediately with descriptive error mentioning supported platforms and actual OS.
+- ✓ **Fail-closed:** Rejects unknown/unexpected OS (e.g., would reject Windows, WSL, etc.).
+
+**Kerberos Implementation (Lines 337-342):**
+```python
+if kerberos and kerberos.get("principal") and kerberos.get("keytab"):
+    kinit_cmd = _with_impersonation(["kinit", "-kt", str(kerberos.get("keytab")), str(kerberos.get("principal"))])
+    rc_k, out_k, err_k = _run_cmd(kinit_cmd)
+    if rc_k != 0:
+        return rc_k, out_k, f"Kerberos init failed: {err_k or out_k}"
+```
+- ✓ Runs `kinit` command via impersonation wrapper (which also checks Linux/macOS).
+- ✓ Errors if `kinit` fails (non-zero return).
+- Kerberos ccache cleanup documented in AGENTS.md line 59: `kdestroy` in `finally` block immediately after job finishes (not visible in current executor.py excerpt but noted in AGENTS.md).
+
+**Impersonation (Sudo Wrapper, Lines 316-319):**
+```python
+def _with_impersonation(cmd: list[str]) -> list[str]:
+    if impersonate_user:
+        return ["sudo", "-n", "-u", impersonate_user, "--"] + cmd
+    return cmd
+```
+- ✓ Uses `sudo -n` (non-interactive) to switch user.
+- ✓ Only called if `impersonate_user` is set AND platform check passed (line 299).
+- ⚠ No explicit pre-check for `sudo` binary existence (but `shell` capability detection covers shell/sudo availability).
+
+**Capability Advertising:**
+- From Area 1: No separate `impersonate` executor type; features are gated by config check at runtime.
+- Scheduler should not dispatch impersonation jobs to non-Linux workers (job affinity check, not in this file).
+- If scheduler mistakenly dispatches, worker rejects with clear error.
+
+**Summary:**
+- ✓ Platform guard is explicit and clear (Linux/Darwin only).
+- ✓ Error message is operator-friendly.
+- ✓ Both impersonation and Kerberos use same guard (consistent).
+- ✓ Fail-closed: rejects unknowns.
+- ✓ Kerberos cleanup (kdestroy) runs in finally block (per AGENTS.md).
+- ⚠ No pre-check for sudo binary, but shell capability detection is a proxy.
 
 ---
 

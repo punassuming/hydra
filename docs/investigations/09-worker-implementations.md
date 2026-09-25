@@ -157,22 +157,134 @@ AGENTS.md mentions `SCHEDULER_BYPASS_MAX_EXTRA` soft cap to limit bypass jobs ab
 
 ## 7. Code Maintainability & Extensibility
 
-*Investigating now...*
+### Finding: Go's structure is slightly cleaner; Python's module sprawl is deeper
+
+**Line counts:**
+- Python worker: 3,180 LOC across 9 main files + `utils/` subpackage (8+ utility modules).
+- Go worker: 3,341 LOC across 6 internal packages (config, redisclient, source, worker, executor, workspace, all with tests co-located).
+
+**Module organization:**
+- Python: Vertical split by concern (executor.py, worker.py, bootstrap.py, windows_tasks.py) + horizontal `utils/` for helpers (git.py, os_exec.py, python_env.py, workspace_cache.py, heartbeat.py, completion.py, rsync.py, copy.py). Executor logic is monolithic in executor.py (all 8 types in one 500+ LOC file).
+- Go: Clear internal package structure with single responsibility (config parses args/env, redisclient wraps Redis, source handles git/copy/rsync, executor implements all 8 executor types, worker manages polling/registration, workspace caches sources). Tests live alongside code in same package (executor_test.go next to executor.go).
+
+**Adding a new executor type (example: FTP uploader):**
+- Python: Add function to executor.py (e.g., `_execute_ftp()`), add case in execute_job() switch, add capability test to _detect_capabilities(). Estimated: 50-100 LOC + 30-50 LOC tests.
+- Go: Add function to executor.go (e.g., `execFTP()`), add case in Execute() switch, add capability detection to DetectCapabilities(). Estimated: 60-120 LOC + 40-60 LOC tests. Slightly more boilerplate due to Go's stricter error handling, but clearer separation.
+
+**Testing discoverability:**
+- Python: All tests in `tests/test_worker.py`, large monolithic file (1,209 LOC). Finding a specific executor test requires grep or scrolling.
+- Go: Executor tests in `internal/executor/executor_test.go` (367 LOC); worker tests in `internal/worker/worker_test.go` (382 LOC). Better co-location.
+
+**Interface usage (code reuse):**
+- Python: Functions take executor dict, job dict, callbacks. Minimal abstraction; highly functional.
+- Go: JobEnvelope, JobDef, ExecutorSpec, ExecResult structs provide clear contracts. Easier to mock/test individual components.
+
+**Recommendation:** Go's package-based organization is slightly more maintainable for large additions. Python's utils sprawl makes it harder to track where credential handling lives (git.py vs python_env.py). Both are extensible; neither is a major barrier to adding features.
 
 ---
 
 ## 8. Build & Deployment (Docker Images)
 
-*Investigating now...*
+### Finding: Go delivers significantly smaller, faster-building images
+
+**Python Dockerfile** (`worker/Dockerfile`, 32 lines):
+- Base: `python:3.13-slim` (already ~150-200 MB).
+- Install: git, uv, project dependencies via `uv sync` (downloads, compiles, installs).
+- Result: Estimated 600-800 MB final image (Python runtime + dependencies + source).
+- Build time: Depends on network + pyproject.toml churn; typically 2-3 minutes for cold build.
+- Execution: Interpreted Python; startup time ~1-2s.
+
+**Go Dockerfile** (`go-worker/Dockerfile`, 35 lines):
+- Multi-stage build: Stage 1 is `golang:1.24-alpine` (small), compiles static binary with `CGO_ENABLED=0`.
+- Base: `alpine:3.20` (~5 MB) + minimal runtime deps (git, python3 for SQL executor bridge, openssh, rsync).
+- Result: Estimated 150-250 MB final image (alpine + tools + static binary).
+- Build time: go build is fast (~30s for clean rebuild), fewer network dependencies.
+- Execution: Static binary startup ~10-50ms, orders of magnitude faster than Python.
+
+**Leverage of Go's advantages:**
+- Multi-stage build: Used correctly; doesn't ship golang toolchain in final image.
+- Static binary: Yes, `CGO_ENABLED=0 GOOS=linux` produces static Linux binary.
+- Minimal base: Alpine is used, but still pulls python3 for SQL executor (can't be avoided without re-implementing SQL in Go).
+- No squashing: Each layer adds ~5-10 MB (git, python3, openssh, rsync).
+
+**Image size impact on deployment:**
+- Python: Slower container startup, larger registry/storage footprint, longer pull times in multi-worker deployments.
+- Go: 60-70% smaller, faster pulls, lower bandwidth, faster Kubernetes rollouts.
+
+**Recommendation:** Current Go Dockerfile is well-optimized. Python could use distroless + minimal deps, but would still be 200-300 MB due to runtime. Go's footprint advantage is real and operationally significant for scale.
 
 ---
 
 ## 9. Decision Guide: When to Choose Which
 
-*Synthesized after investigation...*
+### **Python worker** (`worker/`)
+**Choose if:**
+- Bare-metal Windows deployment (Task Scheduler, Windows Service via NSSM) — Go has no Windows bootstrap.
+- Mixed I/O-heavy and short-lived jobs (threads + GIL is adequate; no goroutine overhead).
+- Existing Python-heavy ops culture; tool ecosystem (pytest, uv, etc.) familiar.
+- Full Windows support + auto-restart supervision is requirement.
+
+**Avoid if:**
+- Heavy CPU-bound workloads (GIL serializes threads; Go's goroutines scale better).
+- Container-only deployment with strict size/startup SLAs (Python image is 3-4x larger, startup slower).
+- Low-resource environments (embedded, edge) where image size matters.
+
+### **Go worker** (`go-worker/`)
+**Choose if:**
+- Linux/container-only deployment (Kubernetes, Docker Swarm, systemd).
+- High volume of concurrent short jobs (goroutines scale better; startup <50ms vs 1-2s for Python).
+- Aggressive image size/bandwidth constraints (150-250 MB vs 600-800 MB).
+- CPU-bound job workloads benefit from true parallelism (no GIL).
+
+**Avoid if:**
+- Bare-metal Windows is required (no bootstrap support).
+- Relying on Python-only skills (SQL executor uses Python bridge; executor set partially untested).
+- PAT/credential hygiene is critical near-term (currently leaks tokens to disk — **fix required before production use**).
+
+### **Mixed deployments**
+- Both can run against the same scheduler/domain simultaneously (AGENTS.md: "pools of each").
+- Python workers suitable for Windows nodes; Go workers for Linux/Kubernetes nodes.
+- Use affinity tags to route job types to appropriate worker pools.
 
 ---
 
 ## Summary — Top 5 Priorities
 
-*Ranking by value × effort after investigation...*
+Ranked by **value (risk/correctness/user impact) × effort (implementation/testing)**:
+
+### 1. **[CRITICAL] Go worker: Strip Git PAT from .git/config after clone** ⚠️ SECURITY
+- **Why:** Go's workspace cache currently leaks personal access tokens to disk. Any process with file access can extract cached PATs.
+- **Effort:** Low (add 5-10 LOC in `go-worker/internal/source/source.go` post-clone + pass clean_url parameter).
+- **Testing:** Add test to verify remote URL is rewritten and token is not in .git/config.
+- **Files:** `go-worker/internal/source/source.go:26-58` (FetchGit, fullClone, sparseClone).
+
+### 2. **[HIGH] Align timeout exit codes: Go → 124 instead of 137**
+- **Why:** Python uses 124 (GNU standard); Go uses 137 (SIGKILL). Inconsistent across mixed worker pools. Jobs parsing exit codes break.
+- **Effort:** Medium (change `exitCodeTimeout = 137` → `124` in executor.go, verify tests still pass, document compatibility break).
+- **Testing:** Update executor_test.go to assert rc == 124 (currently just checks != 0).
+- **Files:** `go-worker/internal/executor/executor.go:578-579` (exitCodeTimeout), tests.
+
+### 3. **[HIGH] Go worker: Add panic recovery to runJob()**
+- **Why:** Unhandled goroutine panic crashes worker process. Python threads propagate exceptions; Go needs explicit recover().
+- **Effort:** Low (wrap runJob body in `defer func() { if r := recover(); r != nil { /* log + emit failed event */ } }()`).
+- **Testing:** Add test with `panic()` in executor; verify worker survives and run_end event is emitted.
+- **Files:** `go-worker/internal/worker/worker.go:336`.
+
+### 4. **[MEDIUM] Go worker: Add explicit exponential backoff on BLPOP errors**
+- **Why:** Currently fixed 1s sleep on any error; Python has 2-60s backoff for transient Redis glitches.
+- **Effort:** Low (copy Python's backoff strategy to pollLoop error handler).
+- **Testing:** Add test simulating Redis disconnect; verify backoff progression.
+- **Files:** `go-worker/internal/worker/worker.go:301-307`.
+
+### 5. **[MEDIUM] Update AGENTS.md: Go executor type coverage**
+- **Why:** Documentation claims Go supports shell/http/external only, but Go actually supports 8 types (shell, external, batch, python, powershell, sql, http). Misleads operators on capability parity.
+- **Effort:** Trivial (update lines describing Go executor types in AGENTS.md).
+- **Testing:** None (documentation only).
+- **Files:** `AGENTS.md` "Key Components" section, "Project Structure" worker descriptions.
+
+---
+
+### Bonus: Lower-priority recommendations
+- Python tests for Go SQL/PowerShell/Batch/Python executors (currently untested in Go; implicit coverage from Python tests). Effort: Medium (add ~300 LOC to executor_test.go).
+- Document windows_tasks.py + NSSM setup in README/wiki for Windows users (currently mentioned in AGENTS.md but no detailed how-to).
+- Consider distroless Python image if Python worker image size becomes operational pressure.
