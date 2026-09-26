@@ -9,6 +9,8 @@ import {
   StopOutlined,
   SearchOutlined,
   ReloadOutlined,
+  ClockCircleOutlined,
+  RedoOutlined,
 } from "@ant-design/icons";
 import { fetchInvestigationCatalog, runInvestigation, InvestigationResultRow } from "../api/investigations";
 
@@ -22,6 +24,8 @@ const ICONS: Record<string, JSX.Element> = {
   long_running_outliers: <HourglassOutlined />,
   flaky_jobs: <BranchesOutlined />,
   never_succeeded: <StopOutlined />,
+  sla_miss: <ClockCircleOutlined />,
+  retry_storm: <RedoOutlined />,
 };
 
 /** Canned, LLM-free investigations — click a card, get a straight answer

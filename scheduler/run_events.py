@@ -298,6 +298,11 @@ def _handle_run_end(payload: Dict[str, Any]):
         "attempt": payload.get("attempt", 1),
         "completion_reason": payload.get("completion_reason"),
         "duration": duration,
+        # Both worker flavors send this in run_end (how many scheduler-level
+        # retries preceded this attempt), but it was previously dropped here
+        # instead of being persisted — the retry_storm investigation needs it
+        # on the run doc itself, not just as ephemeral Redis dispatch metadata.
+        "retry_attempt": payload.get("retry_attempt", 0),
     }
 
     worker_id = payload.get("worker_id")
