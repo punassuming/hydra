@@ -155,6 +155,8 @@ def create_standard_orchestrator() -> OrchestratorManager:
       singleton on persistent failure, so a topology change (e.g. a
       replica-set failover) doesn't leave the process stuck on a stale
       connection pool
+    * **run_retention** — purge job_runs older than HYDRA_RUN_RETENTION_DAYS;
+      disabled (no-op) unless that env var is set to a positive value
     """
     from .run_events import run_event_loop
     from .scheduler import (
@@ -162,6 +164,7 @@ def create_standard_orchestrator() -> OrchestratorManager:
         failover_loop,
         mongo_health_check_loop,
         redis_acl_reconciliation_loop,
+        run_retention_loop,
         schedule_trigger_loop,
         scheduling_loop,
         sla_monitoring_loop,
@@ -178,4 +181,5 @@ def create_standard_orchestrator() -> OrchestratorManager:
     mgr.register("backfill", backfill_dispatch_loop)
     mgr.register("redis_acl_reconcile", redis_acl_reconciliation_loop)
     mgr.register("mongo_health_check", mongo_health_check_loop)
+    mgr.register("run_retention", run_retention_loop)
     return mgr

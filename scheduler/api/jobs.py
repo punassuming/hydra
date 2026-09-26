@@ -305,7 +305,11 @@ def update_job(job_id: str, updates: JobUpdate, request: Request):
 def delete_job(job_id: str, request: Request):
     """Delete a job definition and remove any pending queue entries for it.
 
-    Historical runs are preserved; only the definition and pending work are removed.
+    Historical runs are preserved here — only the definition and pending work
+    are removed by this endpoint — but they are not preserved forever: the
+    run_retention_loop background loop (scheduler/scheduler.py) ages out
+    job_runs documents older than HYDRA_RUN_RETENTION_DAYS regardless of
+    whether their job definition still exists.
     """
     db = get_db()
     existing = db.job_definitions.find_one({"_id": job_id})
