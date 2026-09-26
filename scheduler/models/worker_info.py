@@ -37,3 +37,4 @@ class WorkerInfo(BaseModel):
     connectivity_status: str = "offline"
     dispatch_status: str = "offline"
     heartbeat_age_seconds: Optional[float] = None
+    worker_protocol_version: Optional[str] = None

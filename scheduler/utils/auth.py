@@ -7,9 +7,12 @@ from fastapi.responses import JSONResponse
 
 from ..mongo_client import get_db
 from ..redis_client import get_redis
+from .logging import setup_logging
 
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN")
 ADMIN_DOMAIN = os.getenv("ADMIN_DOMAIN", "admin")
+
+logger = setup_logging(__name__)
 
 
 def _is_allowed_path(path: str) -> bool:
@@ -81,6 +84,8 @@ async def enforce_api_key(request: Request, call_next):
 
     # Admin token short-circuit (respect ?domain override for observation)
     if admin_token and hmac.compare_digest(token or "", admin_token):
+        if req_domain:
+            logger.info("admin token used to access domain=%s path=%s", req_domain, request.url.path)
         request.state.domain = req_domain or ADMIN_DOMAIN
         request.state.is_admin = True
         return await call_next(request)

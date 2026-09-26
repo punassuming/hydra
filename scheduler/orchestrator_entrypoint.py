@@ -23,7 +23,7 @@ import signal
 import sys
 
 from .orchestrator import create_standard_orchestrator
-from .startup import ensure_admin_token, ensure_domains_seeded, warn_credential_encryption_key
+from .startup import ensure_admin_token, ensure_domains_seeded, ensure_indexes, warn_credential_encryption_key
 from .utils.logging import setup_logging
 
 log = setup_logging("scheduler.orchestrator_entrypoint")
@@ -35,6 +35,7 @@ def main() -> None:
     # Perform the same initialization steps as the API startup.
     ensure_admin_token()
     warn_credential_encryption_key()
+    ensure_indexes()
     ensure_domains_seeded()
 
     mgr = create_standard_orchestrator()

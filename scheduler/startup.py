@@ -55,6 +55,55 @@ def warn_credential_encryption_key() -> None:
         )
 
 
+def ensure_indexes() -> None:
+    """Create MongoDB indexes for the query patterns the API/orchestrator loops rely on.
+
+    ``create_index`` is idempotent (Mongo no-ops if an identical index
+    already exists), so this is safe to call on every startup rather than
+    just once. Covers the hottest per-second loop queries
+    (schedule_trigger_loop, sla_monitoring_loop) as well as the common
+    API-level lookups (history pagination, per-job run stats, credential
+    resolution).
+    """
+    db = get_db()
+
+    db.job_runs.create_index([("domain", 1), ("start_ts", -1), ("_id", -1)])
+    db.job_runs.create_index([("job_id", 1), ("status", 1), ("start_ts", -1)])
+    db.job_runs.create_index([("domain", 1), ("worker_id", 1), ("start_ts", 1)])
+    db.job_runs.create_index([("status", 1)])
+
+    db.job_definitions.create_index(
+        [("domain", 1), ("schedule.enabled", 1), ("schedule.next_run_at", 1)]
+    )
+    db.job_definitions.create_index([("domain", 1), ("created_at", -1)])
+    db.job_definitions.create_index([("domain", 1), ("depends_on", 1)])
+
+    db.job_versions.create_index([("job_id", 1), ("version", -1)])
+    db.job_versions.create_index([("domain", 1), ("changed_at", -1)])
+
+    # These enforce the domain-scoped uniqueness convention at the DB layer;
+    # scheduler/api/jobs.py's _insert_job_definition/_replace_job_definition
+    # translate the resulting DuplicateKeyError into a clean 409. Any
+    # deployment upgrading from before that check existed could in principle
+    # already have a duplicate-data conflict, though — don't let that crash
+    # startup. Log and move on; the non-unique performance indexes above
+    # still get created either way.
+    for collection, keys in (
+        (db.job_definitions, [("domain", 1), ("name", 1)]),
+        (db.credentials, [("domain", 1), ("name", 1)]),
+        (db.domains, [("domain", 1)]),
+    ):
+        try:
+            collection.create_index(keys, unique=True)
+        except Exception as exc:
+            log.warning(
+                "Could not create unique index %s on %s (likely pre-existing duplicate data): %s",
+                keys,
+                collection.name,
+                exc,
+            )
+
+
 def ensure_domains_seeded() -> None:
     """Cache existing domain token hashes into Redis; seed a default domain if none exist.
 

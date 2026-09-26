@@ -1,8 +1,9 @@
 services:
-  # Standalone Go worker — lighter footprint than the Python worker, good for
-  # scaling many cheap replicas. Missing the Python worker's SQL executor and
-  # Kerberos/impersonation support. Points at an existing scheduler/Redis
-  # stack (bundled or remote). Run with:
+  # Standalone Go worker — lighter footprint than the Python worker, with
+  # full executor-type parity (including SQL, which bridges through a
+  # bundled Python interpreter, and Linux/macOS Kerberos/impersonation).
+  # No Windows bootstrap/watchdog equivalent (Python-only). Points at an
+  # existing scheduler/Redis stack (bundled or remote). Run with:
   #   docker compose -f docker-compose.worker.go.yml up -d --build --scale go-worker=N
   go-worker:
     build:

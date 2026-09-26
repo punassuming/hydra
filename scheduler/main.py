@@ -16,7 +16,7 @@ from .api.jobs import router as jobs_router
 from .api.logs import router as logs_router
 from .api.workers import router as workers_router
 from .orchestrator import OrchestratorManager, create_standard_orchestrator
-from .startup import ensure_admin_token, ensure_domains_seeded, warn_credential_encryption_key
+from .startup import ensure_admin_token, ensure_domains_seeded, ensure_indexes, warn_credential_encryption_key
 from .utils.auth import enforce_api_key
 from .utils.logging import setup_logging
 
@@ -42,6 +42,7 @@ def on_startup():
     global _orchestrator
     ensure_admin_token()
     warn_credential_encryption_key()
+    ensure_indexes()
     ensure_domains_seeded()
     if HYDRA_MODE == "api":
         log.info(

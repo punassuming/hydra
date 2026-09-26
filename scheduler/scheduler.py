@@ -2,7 +2,7 @@ import json
 import os
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List
 
 from pymongo import ReturnDocument
@@ -553,6 +553,79 @@ def redis_acl_reconciliation_loop(stop_event: threading.Event):
         except Exception as exc:
             log.exception("Error in Redis ACL reconciliation loop: %s", exc)
         stop_event.wait(REDIS_ACL_RECONCILE_INTERVAL_SECONDS)
+
+
+MONGO_HEALTH_CHECK_INTERVAL_SECONDS = int(os.getenv("SCHEDULER_MONGO_HEALTH_CHECK_INTERVAL", "30"))
+
+
+def _check_mongo_health(db) -> None:
+    """Ping Mongo. Raises on failure; callers decide what to do about it."""
+    db.command("ping")
+
+
+def _reset_mongo_client() -> None:
+    """Drop the cached Mongo client singleton so the next get_mongo_client()
+    call rebuilds a fresh connection. pymongo already reconnects transparently
+    on transient errors, so this matters mainly after a topology change
+    (e.g. a replica-set failover) the driver's own pooling didn't pick up.
+    """
+    from . import mongo_client as mongo_client_module
+
+    mongo_client_module._mongo_client = None
+
+
+def mongo_health_check_loop(stop_event: threading.Event):
+    """Periodically pings MongoDB and, on persistent failure, resets the
+    client singleton so the next call gets a fresh connection instead of
+    being stuck against a connection pool built for a topology that's gone.
+    """
+    log.info("MongoDB self-healing loop started (interval=%ss)", MONGO_HEALTH_CHECK_INTERVAL_SECONDS)
+    while not stop_event.is_set():
+        try:
+            _check_mongo_health(get_db())
+        except Exception as exc:
+            log.exception("MongoDB health check failed, resetting client: %s", exc)
+            _reset_mongo_client()
+        stop_event.wait(MONGO_HEALTH_CHECK_INTERVAL_SECONDS)
+
+
+# 0 (the default) disables purging entirely, so upgrading an existing
+# deployment never starts silently deleting run history until an operator
+# opts in by setting this explicitly.
+RUN_RETENTION_DAYS = int(os.getenv("HYDRA_RUN_RETENTION_DAYS", "0"))
+RUN_RETENTION_CHECK_INTERVAL_SECONDS = int(os.getenv("SCHEDULER_RUN_RETENTION_CHECK_INTERVAL", "3600"))
+
+
+def _purge_old_runs(db, retention_days: int) -> int:
+    """Delete job_runs older than retention_days. Returns the deleted count.
+    A non-positive retention_days is treated as "disabled" (no-op, 0)."""
+    if retention_days <= 0:
+        return 0
+    cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
+    result = db.job_runs.delete_many({"start_ts": {"$lt": cutoff}})
+    return result.deleted_count
+
+
+def run_retention_loop(stop_event: threading.Event):
+    """Periodically purges job_runs older than HYDRA_RUN_RETENTION_DAYS.
+
+    Disabled by default (RUN_RETENTION_DAYS == 0) so upgrading an existing
+    deployment doesn't start losing history without an explicit opt-in.
+    """
+    db = get_db()
+    if RUN_RETENTION_DAYS > 0:
+        log.info(
+            "Run retention loop started (retention=%sd, interval=%ss)",
+            RUN_RETENTION_DAYS, RUN_RETENTION_CHECK_INTERVAL_SECONDS,
+        )
+    while not stop_event.is_set():
+        try:
+            deleted = _purge_old_runs(db, RUN_RETENTION_DAYS)
+            if deleted:
+                log.info("Run retention: purged %s job_runs older than %sd", deleted, RUN_RETENTION_DAYS)
+        except Exception as exc:
+            log.exception("Error in run retention loop: %s", exc)
+        stop_event.wait(RUN_RETENTION_CHECK_INTERVAL_SECONDS)
 
 
 def timeout_enforcement_loop(stop_event: threading.Event):

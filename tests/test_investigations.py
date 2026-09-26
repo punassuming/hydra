@@ -48,6 +48,8 @@ def _matches(doc, query):
                 return False
             if "$gte" in cond and (value is None or value < cond["$gte"]):
                 return False
+            if "$gt" in cond and (value is None or value <= cond["$gt"]):
+                return False
         elif value != cond:
             return False
     return True
@@ -86,7 +88,9 @@ def test_list_investigations_returns_catalog():
     response = client.get("/investigations/", headers=_auth_headers())
     assert response.status_code == 200
     keys = {item["key"] for item in response.json()}
-    assert keys == {"failed_recent", "long_running_outliers", "flaky_jobs", "never_succeeded"}
+    assert keys == {
+        "failed_recent", "long_running_outliers", "flaky_jobs", "never_succeeded", "sla_miss", "retry_storm",
+    }
 
 
 def test_unknown_investigation_404():
@@ -177,4 +181,66 @@ def test_never_succeeded_requires_minimum_run_count():
     data = response.json()
     assert len(data["results"]) == 1
     assert data["results"][0]["job_id"] == "job-broken"
+    assert data["results"][0]["metric_value"] == 3
+
+
+def test_sla_miss_flags_running_and_completed_runs_over_budget():
+    jobs = [
+        {"_id": "job-slow", "name": "slow", "domain": "prod", "sla_max_duration_seconds": 60},
+        {"_id": "job-no-sla", "name": "no-sla", "domain": "prod", "sla_max_duration_seconds": None},
+    ]
+    runs = [
+        # Completed run that blew past the 60s SLA.
+        {
+            "_id": "r1", "job_id": "job-slow", "status": "success", "duration": 120.0,
+            "start_ts": _now() - timedelta(hours=1),
+        },
+        # Currently-running run already past the SLA.
+        {
+            "_id": "r2", "job_id": "job-slow", "status": "running",
+            "start_ts": _now() - timedelta(seconds=90),
+        },
+        # Job with no SLA configured should never be flagged, even if slow.
+        {
+            "_id": "r3", "job_id": "job-no-sla", "status": "success", "duration": 999.0,
+            "start_ts": _now() - timedelta(hours=1),
+        },
+    ]
+    db = _FakeDB(jobs, runs)
+    with patch("scheduler.api.investigations.get_db", return_value=db):
+        response = client.get("/investigations/sla_miss", headers=_auth_headers())
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["results"]) == 1
+    assert data["results"][0]["job_id"] == "job-slow"
+    assert data["results"][0]["metric_value"] == 60.0  # 120s duration - 60s SLA
+
+
+def test_retry_storm_requires_minimum_retried_run_count():
+    jobs = [
+        {"_id": "job-storm", "name": "storm", "domain": "prod"},
+        {"_id": "job-quiet", "name": "quiet", "domain": "prod"},
+    ]
+    runs = [
+        {
+            "_id": f"s{i}", "job_id": "job-storm", "status": "failed", "retry_attempt": i + 1,
+            "start_ts": _now() - timedelta(hours=i),
+        }
+        for i in range(3)
+    ]
+    # Only 2 retried runs — below RETRY_STORM_MIN_COUNT (3), should not qualify.
+    runs += [
+        {
+            "_id": f"q{i}", "job_id": "job-quiet", "status": "failed", "retry_attempt": i + 1,
+            "start_ts": _now() - timedelta(hours=i),
+        }
+        for i in range(2)
+    ]
+    db = _FakeDB(jobs, runs)
+    with patch("scheduler.api.investigations.get_db", return_value=db):
+        response = client.get("/investigations/retry_storm", headers=_auth_headers())
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["results"]) == 1
+    assert data["results"][0]["job_id"] == "job-storm"
     assert data["results"][0]["metric_value"] == 3

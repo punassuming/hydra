@@ -24,7 +24,9 @@ Types that matter for versioning/changelog:
 | `feat:` | Minor bump (0.1.0 → 0.2.0) | Features |
 | `fix!:` / `feat!:` / a `BREAKING CHANGE:` footer | Major bump once past 1.0.0 (pre-1.0, see note below) | called out at the top of the entry |
 | `perf:` | Patch bump | Performance |
-| `docs:`, `chore:`, `refactor:`, `test:`, `build:`, `ci:` | No version bump | Miscellaneous (kept out of the changelog by default) |
+| `docs:` | No version bump | Documentation |
+| `deps:` | No version bump | Dependencies |
+| `chore:`, `refactor:`, `test:`, `build:`, `ci:` | No version bump | Miscellaneous (kept out of the changelog by default) |
 
 Examples:
 
@@ -42,6 +44,16 @@ This repo currently sits pre-1.0 (`0.x.y`); release-please is configured
 with `bump-minor-pre-major: true`, so `feat:` bumps the minor version
 (`0.1.0 → 0.2.0`) rather than the major version, consistent with SemVer's
 guidance for initial development.
+
+A `Commitlint` CI check (`.github/workflows/commitlint.yml`, config in
+`commitlint.config.cjs` at the repo root) enforces this format on every PR,
+checking the *entire* commit range — this repo merges PRs with a real merge
+commit rather than squashing, so every individual commit reaching `main` is
+scanned by release-please on its own, and a bad commit buried in an
+otherwise-fine PR would otherwise slip through invisibly. The allowed
+`type-enum` is kept in sync with `release-please-config.json`'s
+`changelog-sections` list (including the non-standard `deps:` type) so
+commitlint never accepts a type release-please can't parse, or vice versa.
 
 **Merge strategy matters here**: this repo merges PRs with a merge commit
 (not squash), so it's each individual commit that reaches `main` that gets

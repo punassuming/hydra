@@ -191,6 +191,63 @@ def test_admin_token_uses_constant_time_comparison():
         os.environ.pop("ADMIN_TOKEN", None)
 
 
+def test_admin_token_domain_override_is_logged(caplog):
+    """Using the admin token with an explicit ?domain=/x-domain override should be audit-logged."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from scheduler.utils.auth import enforce_api_key
+
+    os.environ["ADMIN_TOKEN"] = "secret-admin"
+    try:
+        request = MagicMock()
+        request.method.upper.return_value = "GET"
+        request.headers = {"x-api-key": "secret-admin"}
+        request.query_params = {"domain": "other-domain"}
+        request.url.path = "/jobs/"
+        request.state = MagicMock()
+
+        call_next = AsyncMock(return_value=MagicMock())
+
+        import asyncio
+        import logging
+
+        with caplog.at_level(logging.INFO, logger="scheduler.utils.auth"):
+            asyncio.run(enforce_api_key(request, call_next))
+
+        assert request.state.domain == "other-domain"
+        assert any("other-domain" in record.message for record in caplog.records)
+    finally:
+        os.environ.pop("ADMIN_TOKEN", None)
+
+
+def test_admin_token_without_override_is_not_logged(caplog):
+    """Routine admin-token use (no domain override) should not be audit-logged."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from scheduler.utils.auth import enforce_api_key
+
+    os.environ["ADMIN_TOKEN"] = "secret-admin"
+    try:
+        request = MagicMock()
+        request.method.upper.return_value = "GET"
+        request.headers = {"x-api-key": "secret-admin"}
+        request.query_params = {}
+        request.url.path = "/jobs/"
+        request.state = MagicMock()
+
+        call_next = AsyncMock(return_value=MagicMock())
+
+        import asyncio
+        import logging
+
+        with caplog.at_level(logging.INFO, logger="scheduler.utils.auth"):
+            asyncio.run(enforce_api_key(request, call_next))
+
+        assert len(caplog.records) == 0
+    finally:
+        os.environ.pop("ADMIN_TOKEN", None)
+
+
 def test_no_admin_token_env_rejects_unauthenticated():
     """When ADMIN_TOKEN is not set, unauthenticated requests must be rejected."""
     from unittest.mock import AsyncMock, MagicMock, patch

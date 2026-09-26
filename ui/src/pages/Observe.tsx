@@ -32,23 +32,31 @@ function StatusTab() {
   const renderRunStrip = (runs: JobRun[] | undefined) => {
     const recent = (runs ?? []).slice(0, 10);
     if (!recent.length) return <Typography.Text type="secondary">No runs yet</Typography.Text>;
-    const color = (status?: string) =>
-      status === "success" ? colors.success : status === "running" ? colors.info : colors.warning;
+    const color = (status?: string) => {
+      if (status === "success") return colors.success;
+      if (status === "running") return colors.info;
+      if (status === "failed" || status === "timed_out" || status === "error") return colors.error;
+      return colors.warning;
+    };
     return (
       <Space size={6}>
-        {recent.map((run, idx) => (
-          <div
-            key={run._id ?? idx}
-            title={`${run.status} · ${run.start_ts ? new Date(run.start_ts).toLocaleString() : "n/a"}`}
-            style={{
-              width: 12,
-              height: 12,
-              borderRadius: 3,
-              background: color(run.status),
-              opacity: idx === 0 ? 1 : 0.7,
-            }}
-          />
-        ))}
+        {recent.map((run, idx) => {
+          const label = `${run.status} · ${run.start_ts ? new Date(run.start_ts).toLocaleString() : "n/a"}`;
+          return (
+            <div
+              key={run._id ?? idx}
+              title={label}
+              aria-label={label}
+              style={{
+                width: 12,
+                height: 12,
+                borderRadius: 3,
+                background: color(run.status),
+                opacity: idx === 0 ? 1 : 0.7,
+              }}
+            />
+          );
+        })}
       </Space>
     );
   };

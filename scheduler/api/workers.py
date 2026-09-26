@@ -251,6 +251,7 @@ def list_workers(request: Request):
                     connectivity_status=connectivity_status,
                     dispatch_status=dispatch_status,
                     heartbeat_age_seconds=hb_age,
+                    worker_protocol_version=data.get("worker_protocol_version"),
                 )
             )
     return workers

@@ -1,3 +1,4 @@
+import copy
 import json
 import os
 import time
@@ -6,6 +7,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Body, HTTPException, Request
 from pydantic import BaseModel
+from pymongo.errors import DuplicateKeyError
 
 from ..event_bus import event_bus
 from ..models.job_definition import (
@@ -33,9 +35,15 @@ def _apply_retry_count(payload: dict) -> dict:
 MASKED_SECRET = "********"
 
 
-def _sanitize_job_response(job: JobDefinition) -> dict:
-    """Strip sensitive fields (e.g. connection_uri) from job responses."""
-    data = job.model_dump(by_alias=True)
+def _sanitize_job_dict(data: dict) -> dict:
+    """Strip sensitive fields (e.g. connection_uri) from a raw job dict.
+
+    Returns a new dict rather than mutating the input — used both for live
+    job responses (via _sanitize_job_response) and for job_versions
+    before/after snapshots, which must not leak secrets any more than the
+    live endpoints do.
+    """
+    data = copy.deepcopy(data)
     executor = data.get("executor") or {}
     if executor.get("type") == "sql" and "connection_uri" in executor:
         executor["connection_uri"] = MASKED_SECRET if executor["connection_uri"] else None
@@ -43,6 +51,65 @@ def _sanitize_job_response(job: JobDefinition) -> dict:
     if kerberos.get("keytab"):
         kerberos["keytab"] = MASKED_SECRET
     return data
+
+
+def _sanitize_job_response(job: JobDefinition) -> dict:
+    """Strip sensitive fields (e.g. connection_uri) from job responses."""
+    return _sanitize_job_dict(job.model_dump(by_alias=True))
+
+
+def _record_job_version(db, job_id: str, before: dict, after: JobDefinition, *, domain: str, is_admin: bool) -> None:
+    """Insert an audit snapshot of a job update into job_versions.
+
+    Diffing (if a version-history UI wants one) should compare at the
+    top-level key only: update_job's merge is shallow (`{**existing,
+    **update_doc}`), so a partial `schedule.cron` update actually replaces
+    the entire `schedule` sub-object, not just the one field. A deep-diff
+    would mislabel unrelated nested fields as "changed".
+    """
+    version = db.job_versions.count_documents({"job_id": job_id}) + 1
+    db.job_versions.insert_one(
+        {
+            "_id": f"{job_id}:{version}",
+            "job_id": job_id,
+            "domain": domain,
+            "version": version,
+            "changed_at": datetime.now(timezone.utc),
+            "changed_by_domain": domain,
+            "changed_by_is_admin": is_admin,
+            "before": _sanitize_job_dict(before),
+            "after": _sanitize_job_dict(after.to_mongo()),
+        }
+    )
+
+
+def _insert_job_definition(db, job_def: JobDefinition) -> None:
+    """Insert a new job definition, translating a duplicate (domain, name)
+    conflict into a clean 409 instead of an unhandled DuplicateKeyError.
+
+    The unique index on job_definitions (scheduler/startup.py) enforces the
+    domain-scoped job-name-uniqueness convention at the DB layer, but only
+    the template-import endpoint (admin.py) used to check for the conflict
+    itself — submit_job/run_adhoc_job/update_job all relied on nothing
+    catching it, which would surface as a raw 500 instead of a 409.
+    """
+    try:
+        db.job_definitions.insert_one(job_def.to_mongo())
+    except DuplicateKeyError:
+        raise HTTPException(
+            status_code=409, detail=f"job with name {job_def.name!r} already exists in this domain"
+        )
+
+
+def _replace_job_definition(db, job_id: str, job_def: JobDefinition) -> None:
+    """Replace an existing job definition, translating a rename into a
+    conflicting (domain, name) into a clean 409 — see _insert_job_definition."""
+    try:
+        db.job_definitions.replace_one({"_id": job_id}, job_def.to_mongo())
+    except DuplicateKeyError:
+        raise HTTPException(
+            status_code=409, detail=f"job with name {job_def.name!r} already exists in this domain"
+        )
 
 
 def _fetch_job_runs(job_id: str, domain_filter: str | None = None) -> List[Dict[str, Any]]:
@@ -226,7 +293,7 @@ def submit_job(job: JobCreate, request: Request):
     if not validation.valid:
         raise HTTPException(status_code=422, detail=validation.errors)
     job_def = _attach_schedule(job_def, force=True)
-    db.job_definitions.insert_one(job_def.to_mongo())
+    _insert_job_definition(db, job_def)
     if job_def.schedule.mode == "immediate":
         _enqueue_job(job_def.id, reason="immediate_submit", priority=job_def.priority, domain=job_def.domain)
     event_bus.publish(
@@ -296,16 +363,72 @@ def update_job(job_id: str, updates: JobUpdate, request: Request):
     if not validation.valid:
         raise HTTPException(status_code=422, detail=validation.errors)
     job_def = _attach_schedule(job_def, force="schedule" in update_doc)
-    db.job_definitions.replace_one({"_id": job_id}, job_def.to_mongo())
+    _replace_job_definition(db, job_id, job_def)
+    _record_job_version(db, job_id, existing, job_def, domain=job_def.domain, is_admin=is_admin)
     event_bus.publish("job_updated", {"job_id": job_id, "domain": job_def.domain})
     return _sanitize_job_response(job_def)
+
+
+@router.get("/jobs/{job_id}/versions")
+def list_job_versions(job_id: str, request: Request):
+    """List audit-trail metadata for every recorded update to this job,
+    newest first. Does not require the job definition to still exist, so
+    history remains visible after a job is deleted."""
+    db = get_db()
+    domain = getattr(request.state, "domain", "prod")
+    is_admin = getattr(request.state, "is_admin", False)
+    query: Dict[str, Any] = {"job_id": job_id}
+    if not is_admin:
+        query["domain"] = domain
+    versions = list(
+        db.job_versions.find(
+            query,
+            {"version": 1, "changed_at": 1, "changed_by_domain": 1, "changed_by_is_admin": 1},
+        ).sort("version", -1)
+    )
+    return [
+        {
+            "version": v["version"],
+            "changed_at": v.get("changed_at"),
+            "changed_by_domain": v.get("changed_by_domain"),
+            "changed_by_is_admin": v.get("changed_by_is_admin", False),
+        }
+        for v in versions
+    ]
+
+
+@router.get("/jobs/{job_id}/versions/{version}")
+def get_job_version(job_id: str, version: int, request: Request):
+    """Fetch one recorded update's before/after snapshot (secrets masked,
+    same as the live job endpoints)."""
+    db = get_db()
+    domain = getattr(request.state, "domain", "prod")
+    is_admin = getattr(request.state, "is_admin", False)
+    query: Dict[str, Any] = {"job_id": job_id, "version": version}
+    if not is_admin:
+        query["domain"] = domain
+    version_doc = db.job_versions.find_one(query)
+    if not version_doc:
+        raise HTTPException(status_code=404, detail="version not found")
+    return {
+        "version": version_doc["version"],
+        "changed_at": version_doc.get("changed_at"),
+        "changed_by_domain": version_doc.get("changed_by_domain"),
+        "changed_by_is_admin": version_doc.get("changed_by_is_admin", False),
+        "before": version_doc.get("before"),
+        "after": version_doc.get("after"),
+    }
 
 
 @router.delete("/jobs/{job_id}")
 def delete_job(job_id: str, request: Request):
     """Delete a job definition and remove any pending queue entries for it.
 
-    Historical runs are preserved; only the definition and pending work are removed.
+    Historical runs are preserved here — only the definition and pending work
+    are removed by this endpoint — but they are not preserved forever: the
+    run_retention_loop background loop (scheduler/scheduler.py) ages out
+    job_runs documents older than HYDRA_RUN_RETENTION_DAYS regardless of
+    whether their job definition still exists.
     """
     db = get_db()
     existing = db.job_definitions.find_one({"_id": job_id})
@@ -491,7 +614,7 @@ def run_adhoc_job(job: JobCreate, request: Request):
     if not validation.valid:
         raise HTTPException(status_code=422, detail=validation.errors)
     job_def = _attach_schedule(job_def, force=True)
-    db.job_definitions.insert_one(job_def.to_mongo())
+    _insert_job_definition(db, job_def)
     _enqueue_job(job_def.id, reason="adhoc_run", priority=job_def.priority, domain=domain)
     return _sanitize_job_response(job_def)
 

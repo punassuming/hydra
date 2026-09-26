@@ -29,12 +29,28 @@ func FetchGit(repoURL, ref, dest, token, sparsePath string) error {
 		cloneURL = injectToken(repoURL, token)
 	}
 	if sparsePath != "" {
-		return sparseClone(cloneURL, ref, dest, sparsePath)
+		return sparseClone(cloneURL, repoURL, ref, dest, sparsePath)
 	}
-	return fullClone(cloneURL, ref, dest)
+	return fullClone(cloneURL, repoURL, ref, dest)
 }
 
-func fullClone(cloneURL, ref, dest string) error {
+// stripCredentials rewrites the origin remote to cleanURL so no credentials
+// injected by injectToken remain in dest/.git/config once the network
+// operation that needed them is done. Mirrors worker/utils/git.py's
+// _strip_credentials_from_remote. Failure is fatal: continuing could cache
+// or execute a checkout whose .git/config still contains a personal access
+// token.
+func stripCredentials(dest, cleanURL string) error {
+	git := gitBin()
+	cmd := exec.Command(git, "remote", "set-url", "origin", cleanURL)
+	cmd.Dir = dest
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git remote set-url failed: %s", string(out))
+	}
+	return nil
+}
+
+func fullClone(cloneURL, cleanURL, ref, dest string) error {
 	git := gitBin()
 	// Try shallow clone first.
 	cmd := exec.Command(git, "clone", "-q", "--depth", "1", cloneURL, dest)
@@ -54,10 +70,15 @@ func fullClone(cloneURL, ref, dest string) error {
 			return fmt.Errorf("git checkout %s failed: %s", ref, string(out))
 		}
 	}
+	if cleanURL != "" && cleanURL != cloneURL {
+		if err := stripCredentials(dest, cleanURL); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
-func sparseClone(cloneURL, ref, dest, sparsePath string) error {
+func sparseClone(cloneURL, cleanURL, ref, dest, sparsePath string) error {
 	git := gitBin()
 	os.MkdirAll(dest, 0755)
 	run := func(args ...string) error {
@@ -93,7 +114,15 @@ func sparseClone(cloneURL, ref, dest, sparsePath string) error {
 	if checkoutRef == "" {
 		checkoutRef = "FETCH_HEAD"
 	}
-	return run(git, "checkout", checkoutRef)
+	if err := run(git, "checkout", checkoutRef); err != nil {
+		return err
+	}
+	if cleanURL != "" && cleanURL != cloneURL {
+		if err := stripCredentials(dest, cleanURL); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func injectToken(rawURL, token string) string {

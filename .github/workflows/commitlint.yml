@@ -1,0 +1,24 @@
+name: Commitlint
+
+on:
+  pull_request:
+    branches: ["main", "master"]
+
+jobs:
+  commitlint:
+    name: Enforce Conventional Commits
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # This repo merges PRs with a real merge commit (not squash), so every
+      # individual commit reaching main is scanned by release-please on its
+      # own — check the whole commit range here too, not just the PR title,
+      # or a bad commit inside an otherwise-fine PR would slip through.
+      - name: Lint commits in this PR
+        uses: wagoid/commitlint-github-action@v6

@@ -83,19 +83,23 @@ type ExecutorSpec struct {
 	// Impersonation / Kerberos
 	ImpersonateUser string            `json:"impersonate_user,omitempty"`
 	Kerberos        map[string]string `json:"kerberos,omitempty"`
+	// Sensor executor fields
+	SensorType          string `json:"sensor_type,omitempty"`
+	Target              string `json:"target,omitempty"`
+	PollIntervalSeconds int    `json:"poll_interval_seconds,omitempty"`
 }
 
 // JobDef is the full job definition nested inside the envelope.
 type JobDef struct {
-	ID                 string       `json:"_id"`
-	User               string       `json:"user,omitempty"`
-	Executor           ExecutorSpec `json:"executor"`
-	Timeout            int          `json:"timeout,omitempty"`
-	Retries            int          `json:"retries,omitempty"`
-	BypassConcurrency  bool         `json:"bypass_concurrency,omitempty"`
-	Schedule           *Schedule    `json:"schedule,omitempty"`
-	Completion         *Completion  `json:"completion,omitempty"`
-	Source             *Source      `json:"source,omitempty"`
+	ID                string       `json:"_id"`
+	User              string       `json:"user,omitempty"`
+	Executor          ExecutorSpec `json:"executor"`
+	Timeout           int          `json:"timeout,omitempty"`
+	Retries           int          `json:"retries,omitempty"`
+	BypassConcurrency bool         `json:"bypass_concurrency,omitempty"`
+	Schedule          *Schedule    `json:"schedule,omitempty"`
+	Completion        *Completion  `json:"completion,omitempty"`
+	Source            *Source      `json:"source,omitempty"`
 }
 
 // JobEnvelope is the top-level payload dispatched by the scheduler.
@@ -114,6 +118,17 @@ type ExecResult struct {
 	ReturnCode int
 	Stdout     string
 	Stderr     string
+	// SourceFetchMs and EnvPrepMs are populated by Execute/execPython when
+	// applicable, mirroring the Python worker's run_end timing fields
+	// (timings["source_fetch_ms"]/["env_prep_ms"] in worker/executor.py).
+	// Zero when the corresponding step didn't run for this job.
+	SourceFetchMs float64
+	EnvPrepMs     float64
+	// TimedOut is set explicitly when the job's context deadline was
+	// exceeded, decoupled from ReturnCode: a command that legitimately
+	// exits 124 on its own must not be misclassified as a timeout, mirroring
+	// worker/worker.py's timed_out_holder.
+	TimedOut bool
 }
 
 // ---------------------------------------------------------------------------
@@ -127,6 +142,16 @@ func Execute(ctx context.Context, env *JobEnvelope, onStdout, onStderr func(stri
 	execType := strings.ToLower(strings.TrimSpace(spec.Type))
 	if execType == "" {
 		execType = "shell"
+	}
+
+	// Sensor executor: delegate entirely to the polling loop, before any of
+	// the source-fetch/impersonation/job-timeout machinery below. A sensor
+	// job manages its own bounded loop via timeout_seconds, not the generic
+	// job-level timeout, mirroring worker/executor.py's early dispatch
+	// (execute_job returns _execute_sensor(...) before touching source
+	// fetch, env prep, or the per-command timeout).
+	if execType == "sensor" {
+		return execSensor(ctx, spec, onStdout)
 	}
 
 	// Build merged environment: OS env + executor env + params.
@@ -160,7 +185,11 @@ func Execute(ctx context.Context, env *JobEnvelope, onStdout, onStderr func(stri
 	}
 
 	// Source fetching (git/copy/rsync).
+	var sourceFetchMs float64
+	hadSource := false
 	if src := env.Job.Source; src != nil && src.URL != "" {
+		hadSource = true
+		fetchStart := time.Now()
 		jobID := env.JobID
 		if jobID == "" {
 			jobID = env.Job.ID
@@ -205,26 +234,32 @@ func Execute(ctx context.Context, env *JobEnvelope, onStdout, onStderr func(stri
 		} else {
 			workdir = basePath
 		}
+		sourceFetchMs = float64(time.Since(fetchStart).Microseconds()) / 1000.0
 	}
 
+	var result *ExecResult
 	switch execType {
 	case "shell":
-		return execShell(ctx, spec, args, mergedEnv, workdir, impersonateUser, onStdout, onStderr)
+		result = execShell(ctx, spec, args, mergedEnv, workdir, impersonateUser, onStdout, onStderr)
 	case "external":
-		return execExternal(ctx, spec, args, mergedEnv, workdir, impersonateUser, onStdout, onStderr)
+		result = execExternal(ctx, spec, args, mergedEnv, workdir, impersonateUser, onStdout, onStderr)
 	case "batch":
-		return execBatch(ctx, spec, args, mergedEnv, workdir, onStdout, onStderr)
+		result = execBatch(ctx, spec, args, mergedEnv, workdir, onStdout, onStderr)
 	case "python":
-		return execPython(ctx, spec, args, mergedEnv, workdir, impersonateUser, onStdout, onStderr)
+		result = execPython(ctx, spec, args, mergedEnv, workdir, impersonateUser, onStdout, onStderr)
 	case "powershell":
-		return execPowershell(ctx, spec, args, mergedEnv, workdir, impersonateUser, onStdout, onStderr)
+		result = execPowershell(ctx, spec, args, mergedEnv, workdir, impersonateUser, onStdout, onStderr)
 	case "sql":
-		return execSQL(ctx, spec, mergedEnv, onStdout, onStderr)
+		result = execSQL(ctx, spec, mergedEnv, onStdout, onStderr)
 	case "http":
-		return execHTTP(ctx, spec, onStdout, onStderr)
+		result = execHTTP(ctx, spec, onStdout, onStderr)
 	default:
-		return &ExecResult{ReturnCode: 1, Stderr: fmt.Sprintf("unsupported executor type: %s", execType)}
+		result = &ExecResult{ReturnCode: 1, Stderr: fmt.Sprintf("unsupported executor type: %s", execType)}
 	}
+	if hadSource {
+		result.SourceFetchMs = sourceFetchMs
+	}
+	return result
 }
 
 // ---------------------------------------------------------------------------
@@ -310,6 +345,7 @@ func execBatch(ctx context.Context, spec *ExecutorSpec, args []string, env map[s
 }
 
 func execPython(ctx context.Context, spec *ExecutorSpec, args []string, env map[string]string, workdir, impersonateUser string, onStdout, onStderr func(string)) *ExecResult {
+	envPrepStart := time.Now()
 	code := spec.Code
 	if code == "" {
 		return &ExecResult{ReturnCode: 1, Stderr: "python executor requires non-empty code"}
@@ -334,7 +370,13 @@ func execPython(ctx context.Context, spec *ExecutorSpec, args []string, env map[
 	if impErr != nil {
 		return &ExecResult{ReturnCode: 1, Stderr: impErr.Error()}
 	}
-	return runCommand(ctx, cmd, env, workdir, onStdout, onStderr)
+	// env_prep_ms covers interpreter resolution + temp-file setup, mirroring
+	// worker/executor.py's timings["env_prep_ms"] (Python's venv/interpreter
+	// prep step) — measured up to but not including the actual run.
+	envPrepMs := float64(time.Since(envPrepStart).Microseconds()) / 1000.0
+	result := runCommand(ctx, cmd, env, workdir, onStdout, onStderr)
+	result.EnvPrepMs = envPrepMs
+	return result
 }
 
 func execPowershell(ctx context.Context, spec *ExecutorSpec, args []string, env map[string]string, workdir, impersonateUser string, onStdout, onStderr func(string)) *ExecResult {
@@ -573,9 +615,13 @@ func kerberosInit(ctx context.Context, kerberos map[string]string, user string, 
 // Core subprocess runner
 // ---------------------------------------------------------------------------
 
-// Conventional exit codes for signals.
 const (
-	exitCodeTimeout  = 137 // SIGKILL
+	// exitCodeTimeout matches the Python worker's convention (the `timeout(1)`
+	// coreutils exit code) rather than a raw SIGKILL exit status, so exit
+	// codes agree across both worker flavors. The actual "was this a timeout"
+	// decision for run_end status is carried separately via ExecResult.TimedOut
+	// — a legitimately-124-returning command must not be misclassified.
+	exitCodeTimeout  = 124
 	exitCodeCanceled = 130 // SIGINT
 )
 
@@ -642,19 +688,29 @@ func runCommand(ctx context.Context, cmdArgs []string, env map[string]string, wo
 	err = c.Wait()
 
 	rc := 0
+	timedOut := false
 	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			rc = exitErr.ExitCode()
-		} else if ctx.Err() == context.DeadlineExceeded {
+		// ctx.Err() is checked first, ahead of unwrapping *exec.ExitError:
+		// exec.CommandContext kills the process on deadline/cancellation via
+		// signal, and a signaled process's ExitError.ExitCode() reports -1
+		// — checking that first would make the timeout/cancel branches below
+		// unreachable dead code (as they were before this comment existed).
+		switch {
+		case ctx.Err() == context.DeadlineExceeded:
 			rc = exitCodeTimeout
+			timedOut = true
 			stderrBuf.WriteString("process killed: timeout exceeded\n")
-		} else if ctx.Err() == context.Canceled {
+		case ctx.Err() == context.Canceled:
 			rc = exitCodeCanceled
 			stderrBuf.WriteString("process killed: canceled\n")
-		} else {
-			rc = 1
-			stderrBuf.WriteString(fmt.Sprintf("exec error: %v\n", err))
+		default:
+			var exitErr *exec.ExitError
+			if errors.As(err, &exitErr) {
+				rc = exitErr.ExitCode()
+			} else {
+				rc = 1
+				stderrBuf.WriteString(fmt.Sprintf("exec error: %v\n", err))
+			}
 		}
 	}
 
@@ -662,6 +718,7 @@ func runCommand(ctx context.Context, cmdArgs []string, env map[string]string, wo
 		ReturnCode: rc,
 		Stdout:     stdoutBuf.String(),
 		Stderr:     stderrBuf.String(),
+		TimedOut:   timedOut,
 	}
 }
 
@@ -675,8 +732,12 @@ func DetectCapabilities() []string {
 
 	if findPython() != "" {
 		caps = append(caps, "python")
-		// SQL executor uses Python as a bridge — only advertise if Python is available.
-		caps = append(caps, "sql")
+		// SQL executor uses Python as a bridge — only advertise "sql" if
+		// sqlalchemy actually imports (fail-closed), mirroring the Python
+		// worker's own _detect_capabilities() check.
+		if sqlalchemyImportable() {
+			caps = append(caps, "sql")
+		}
 	}
 	if findPowershell() != "" {
 		caps = append(caps, "powershell")
@@ -686,7 +747,28 @@ func DetectCapabilities() []string {
 	}
 	// HTTP executor uses Go's stdlib — always available.
 	caps = append(caps, "http")
+	// Sensor executor is always advertised, mirroring the Python worker:
+	// the HTTP sensor path always works via stdlib regardless of "sql"
+	// capability, so a sensor job isn't blocked from dispatch just because
+	// this worker lacks SQL — only a sensor_type="sql" job needs "sql" too
+	// (enforced scheduler-side via affinity, not here).
+	caps = append(caps, "sensor")
 	return caps
+}
+
+// sqlalchemyImportable reports whether the bundled Python interpreter can
+// actually import sqlalchemy, mirroring findPython()/findPowershell()'s
+// preflight-check pattern. Advertising "sql" without this check is a
+// capability lie: execSQL/checkSQLSensor both fail at runtime otherwise.
+func sqlalchemyImportable() bool {
+	python := findPython()
+	if python == "" {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, python, "-c", "import sqlalchemy")
+	return cmd.Run() == nil
 }
 
 // DetectShells returns the list of shell interpreters available on this system.

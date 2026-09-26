@@ -137,13 +137,20 @@ function WorkerTimeline({ data, onInspect }: { data?: WorkerTimelineData; onInsp
                 const end = Math.min(entry.end_ts, windowEnd);
                 const left = ((start - windowStart) / span) * 100;
                 const width = Math.max(((end - start) / span) * 100, 0.6);
+                const tooltipTitle = `${entry.job_name || entry.job_id} | ${entry.status} | ${new Date(entry.start_ts * 1000).toLocaleTimeString()} - ${new Date(entry.end_ts * 1000).toLocaleTimeString()}`;
                 return (
-                  <Tooltip
-                    key={entry.run_id}
-                    title={`${entry.job_name || entry.job_id} | ${entry.status} | ${new Date(entry.start_ts * 1000).toLocaleTimeString()} - ${new Date(entry.end_ts * 1000).toLocaleTimeString()}`}
-                  >
+                  <Tooltip key={entry.run_id} title={tooltipTitle}>
                     <div
                       onClick={() => onInspect?.(entry.run_id)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          onInspect?.(entry.run_id);
+                        }
+                      }}
+                      role={onInspect ? "button" : undefined}
+                      tabIndex={onInspect ? 0 : undefined}
+                      aria-label={tooltipTitle}
                       style={{
                         position: "absolute",
                         left: `${left}%`,
@@ -155,7 +162,7 @@ function WorkerTimeline({ data, onInspect }: { data?: WorkerTimelineData; onInsp
                         background: colorFromName(entry.job_name || entry.job_id),
                         border: `1px solid ${statusColor(entry.status)}`,
                         opacity: entry.bypass_concurrency ? 0.75 : 0.95,
-                        outline: entry.bypass_concurrency ? "2px dashed rgba(15, 23, 42, 0.25)" : "none",
+                        outline: entry.bypass_concurrency ? "2px dashed rgba(15, 23, 42, 0.25)" : undefined,
                         overflow: "hidden",
                         whiteSpace: "nowrap",
                         textOverflow: "ellipsis",
@@ -411,6 +418,7 @@ export function WorkerDetailPage() {
           <Descriptions.Item label="Metrics updated">
             {worker.metrics_updated_at ? new Date(worker.metrics_updated_at * 1000).toLocaleString() : "-"}
           </Descriptions.Item>
+          <Descriptions.Item label="Protocol Version">{worker.worker_protocol_version || "-"}</Descriptions.Item>
         </Descriptions>
       </Card>
 

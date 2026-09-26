@@ -25,6 +25,9 @@ FLAKY_MAX_FAILURE_RATE = 0.8
 NEVER_SUCCEEDED_MIN_RUNS = 3
 LONG_RUNNING_MULTIPLIER = 2.0
 DEFAULT_RECENT_HOURS = 24
+SLA_MISS_LOOKBACK_HOURS = 24
+RETRY_STORM_LOOKBACK_HOURS = 24
+RETRY_STORM_MIN_COUNT = 3
 
 _CATALOG = [
     {
@@ -46,6 +49,22 @@ _CATALOG = [
         "key": "never_succeeded",
         "label": "Never Succeeded",
         "description": f"Jobs with at least {NEVER_SUCCEEDED_MIN_RUNS} runs where none have succeeded.",
+    },
+    {
+        "key": "sla_miss",
+        "label": "SLA Misses",
+        "description": (
+            f"Jobs with a running or recently-completed run exceeding its "
+            f"sla_max_duration_seconds, in the last {SLA_MISS_LOOKBACK_HOURS}h."
+        ),
+    },
+    {
+        "key": "retry_storm",
+        "label": "Retry Storms",
+        "description": (
+            f"Jobs with at least {RETRY_STORM_MIN_COUNT} scheduler-retried runs "
+            f"in the last {RETRY_STORM_LOOKBACK_HOURS}h."
+        ),
     },
 ]
 _CATALOG_BY_KEY = {item["key"]: item for item in _CATALOG}
@@ -184,6 +203,89 @@ def _investigate_never_succeeded(db, jobs: list) -> list:
     return results
 
 
+def _investigate_sla_miss(db, jobs: list) -> list:
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(hours=SLA_MISS_LOOKBACK_HOURS)
+    results = []
+    for job in jobs:
+        job_id = job["_id"]
+        sla_seconds = job.get("sla_max_duration_seconds")
+        try:
+            sla_seconds = int(sla_seconds) if sla_seconds is not None else 0
+        except (TypeError, ValueError):
+            continue
+        if sla_seconds <= 0:
+            continue
+        runs = list(
+            db.job_runs.find(
+                {
+                    "job_id": job_id,
+                    "status": {"$in": ["running", "success", "failed", "timed_out"]},
+                    "start_ts": {"$gte": since},
+                }
+            ).sort("start_ts", -1)
+        )
+        worst_run = None
+        worst_overage = 0.0
+        for run in runs:
+            start_ts = run.get("start_ts")
+            if not start_ts:
+                continue
+            if run.get("status") == "running":
+                duration = (now - start_ts).total_seconds()
+            else:
+                duration = run.get("duration")
+                if not isinstance(duration, (int, float)):
+                    continue
+            overage = duration - sla_seconds
+            if overage > worst_overage:
+                worst_overage = overage
+                worst_run = run
+        if worst_run is None:
+            continue
+        results.append(
+            {
+                "job_id": job_id,
+                "job_name": job.get("name", job_id),
+                "domain": job.get("domain", "prod"),
+                "metric_label": f"seconds over {sla_seconds}s SLA",
+                "metric_value": round(worst_overage, 1),
+                "last_run_id": worst_run.get("_id"),
+                "last_run_at": _iso(worst_run.get("start_ts")),
+            }
+        )
+    results.sort(key=lambda r: r["metric_value"], reverse=True)
+    return results
+
+
+def _investigate_retry_storm(db, jobs: list) -> list:
+    since = datetime.now(timezone.utc) - timedelta(hours=RETRY_STORM_LOOKBACK_HOURS)
+    results = []
+    for job in jobs:
+        job_id = job["_id"]
+        runs = list(
+            db.job_runs.find(
+                {"job_id": job_id, "retry_attempt": {"$gt": 0}, "start_ts": {"$gte": since}}
+            ).sort("start_ts", -1)
+        )
+        if len(runs) < RETRY_STORM_MIN_COUNT:
+            continue
+        latest = runs[0]
+        results.append(
+            {
+                "job_id": job_id,
+                "job_name": job.get("name", job_id),
+                "domain": job.get("domain", "prod"),
+                "metric_label": f"retried runs in last {RETRY_STORM_LOOKBACK_HOURS}h",
+                "metric_value": len(runs),
+                "last_run_id": latest.get("_id"),
+                "last_run_at": _iso(latest.get("start_ts")),
+            }
+        )
+    results.sort(key=lambda r: r["metric_value"], reverse=True)
+    return results
+
+
 @router.get("/")
 def list_investigations():
     return _CATALOG
@@ -195,7 +297,7 @@ def run_investigation(key: str, request: Request):
         raise HTTPException(status_code=404, detail="unknown investigation")
 
     db = get_db()
-    jobs = list(db.job_definitions.find(_scope_query(request), {"name": 1, "domain": 1}))
+    jobs = list(db.job_definitions.find(_scope_query(request), {"name": 1, "domain": 1, "sla_max_duration_seconds": 1}))
 
     if key == "failed_recent":
         try:
@@ -207,7 +309,11 @@ def run_investigation(key: str, request: Request):
         results = _investigate_long_running(db, jobs)
     elif key == "flaky_jobs":
         results = _investigate_flaky(db, jobs)
-    else:
+    elif key == "never_succeeded":
         results = _investigate_never_succeeded(db, jobs)
+    elif key == "sla_miss":
+        results = _investigate_sla_miss(db, jobs)
+    else:
+        results = _investigate_retry_storm(db, jobs)
 
     return {"key": key, "label": _CATALOG_BY_KEY[key]["label"], "results": results}

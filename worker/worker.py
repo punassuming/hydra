@@ -11,6 +11,11 @@ from redis.exceptions import RedisError
 # worker_startup_duration_ms can be accurately recorded at registration.
 _PROCESS_START_TS: float = time.time()
 
+# Identifies the Redis registration/heartbeat/dispatch protocol both worker
+# flavors (Python and Go) speak, so a human can see version skew at a glance
+# on the workers list — not a dispatch-time gate.
+WORKER_PROTOCOL_VERSION = "1.0"
+
 from .config import (
     get_allowed_users,
     get_domain,
@@ -88,6 +93,7 @@ def register_worker(worker_id: str, max_concurrency: int):
         "capabilities": ",".join(capabilities),
         "domain_token_hash": __import__("hashlib").sha256(domain_token.encode()).hexdigest(),
         "startup_duration_ms": startup_duration_ms,
+        "worker_protocol_version": WORKER_PROTOCOL_VERSION,
     }
     r.hset(worker_key, mapping=meta)
     append_worker_op(

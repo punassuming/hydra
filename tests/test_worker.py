@@ -1103,6 +1103,26 @@ def test_detect_capabilities_shell_requires_working_shell(monkeypatch):
     assert "external" not in caps
 
 
+def test_detect_capabilities_batch_requires_cmd_shell(monkeypatch):
+    """batch should not be advertised on Windows if cmd.exe itself fails to run."""
+    import worker.runtime as runtime_mod
+    from worker.runtime import _detect_capabilities
+
+    monkeypatch.setattr(runtime_mod, "_detect_shells", lambda: ["bash"])
+    caps = _detect_capabilities()
+    assert "batch" not in caps
+
+
+def test_detect_capabilities_batch_advertised_when_cmd_works(monkeypatch):
+    """batch should be advertised once cmd.exe is confirmed to run (not just on Windows)."""
+    import worker.runtime as runtime_mod
+    from worker.runtime import _detect_capabilities
+
+    monkeypatch.setattr(runtime_mod, "_detect_shells", lambda: ["cmd", "powershell"])
+    caps = _detect_capabilities()
+    assert "batch" in caps
+
+
 def test_detect_capabilities_sql_requires_python(monkeypatch):
     """sql should not be advertised when Python interpreter is absent."""
     import worker.runtime as runtime_mod

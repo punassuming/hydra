@@ -96,7 +96,8 @@ def _detect_shells() -> list[str]:
 def _detect_capabilities() -> list[str]:
     """Return executor types proven usable on this host."""
     capabilities: list[str] = []
-    if _detect_shells():
+    shells = _detect_shells()
+    if shells:
         capabilities.extend(("shell", "external"))
 
     python_interpreter = _find_python()
@@ -112,7 +113,7 @@ def _detect_capabilities() -> list[str]:
         except (OSError, subprocess.SubprocessError):
             continue
 
-    if platform.system().lower().startswith("win"):
+    if "cmd" in shells:
         capabilities.append("batch")
 
     if python_interpreter:
