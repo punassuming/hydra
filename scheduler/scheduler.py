@@ -555,6 +555,40 @@ def redis_acl_reconciliation_loop(stop_event: threading.Event):
         stop_event.wait(REDIS_ACL_RECONCILE_INTERVAL_SECONDS)
 
 
+MONGO_HEALTH_CHECK_INTERVAL_SECONDS = int(os.getenv("SCHEDULER_MONGO_HEALTH_CHECK_INTERVAL", "30"))
+
+
+def _check_mongo_health(db) -> None:
+    """Ping Mongo. Raises on failure; callers decide what to do about it."""
+    db.command("ping")
+
+
+def _reset_mongo_client() -> None:
+    """Drop the cached Mongo client singleton so the next get_mongo_client()
+    call rebuilds a fresh connection. pymongo already reconnects transparently
+    on transient errors, so this matters mainly after a topology change
+    (e.g. a replica-set failover) the driver's own pooling didn't pick up.
+    """
+    from . import mongo_client as mongo_client_module
+
+    mongo_client_module._mongo_client = None
+
+
+def mongo_health_check_loop(stop_event: threading.Event):
+    """Periodically pings MongoDB and, on persistent failure, resets the
+    client singleton so the next call gets a fresh connection instead of
+    being stuck against a connection pool built for a topology that's gone.
+    """
+    log.info("MongoDB self-healing loop started (interval=%ss)", MONGO_HEALTH_CHECK_INTERVAL_SECONDS)
+    while not stop_event.is_set():
+        try:
+            _check_mongo_health(get_db())
+        except Exception as exc:
+            log.exception("MongoDB health check failed, resetting client: %s", exc)
+            _reset_mongo_client()
+        stop_event.wait(MONGO_HEALTH_CHECK_INTERVAL_SECONDS)
+
+
 def timeout_enforcement_loop(stop_event: threading.Event):
     r = get_redis()
     db = get_db()

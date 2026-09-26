@@ -151,11 +151,16 @@ def create_standard_orchestrator() -> OrchestratorManager:
     * **redis_acl_reconcile** — periodically re-apply persisted worker Redis ACL
       users, so a Redis-only restart self-heals without needing the scheduler
       to also restart
+    * **mongo_health_check** — periodically ping MongoDB and reset the client
+      singleton on persistent failure, so a topology change (e.g. a
+      replica-set failover) doesn't leave the process stuck on a stale
+      connection pool
     """
     from .run_events import run_event_loop
     from .scheduler import (
         backfill_dispatch_loop,
         failover_loop,
+        mongo_health_check_loop,
         redis_acl_reconciliation_loop,
         schedule_trigger_loop,
         scheduling_loop,
@@ -172,4 +177,5 @@ def create_standard_orchestrator() -> OrchestratorManager:
     mgr.register("sla", sla_monitoring_loop)
     mgr.register("backfill", backfill_dispatch_loop)
     mgr.register("redis_acl_reconcile", redis_acl_reconciliation_loop)
+    mgr.register("mongo_health_check", mongo_health_check_loop)
     return mgr
