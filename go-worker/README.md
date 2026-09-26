@@ -34,12 +34,12 @@ streaming, kill support, source fetching, and retry logic.
 | Worker ops logging | ✅ |
 | Rich registration (OS, capabilities, shells, hostname) | ✅ |
 | Domain-scoped Redis ACL | ✅ |
-| SQL executor | ❌ (Python-specific) |
-| Impersonation / Kerberos | ❌ (Linux-specific, Python implementation) |
+| SQL executor | ✅ (bridges through a bundled Python interpreter — no native Go DB drivers) |
+| Impersonation / Kerberos | ✅ (Linux/macOS, via `sudo`/`kinit`) |
 
 ## Prerequisites
 
-- Go 1.24 or later
+- Go 1.26 or later
 - A running Redis instance (default: `redis://localhost:6379/0`)
 - A valid Hydra scheduler with a provisioned domain token
 

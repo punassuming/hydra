@@ -82,7 +82,7 @@ Hydra Jobs is a distributed job runner designed for flexibility and scalability.
 ## Project Structure & Key Modules
 
 - `scheduler/main.py` bootstraps FastAPI + CORS, reads `HYDRA_MODE`, and (in `combined` mode) starts all orchestration loops via `OrchestratorManager`. Startup and shutdown are wired via a FastAPI `lifespan` context manager (`@asynccontextmanager`); the underlying `on_startup()` and `on_shutdown()` functions remain callable directly for tests.
-- `scheduler/startup.py` — shared initialisation helpers (`ensure_admin_token`, `ensure_domains_seeded`) used by both the API and the standalone orchestrator entrypoint.
+- `scheduler/startup.py` — shared initialisation helpers (`ensure_admin_token`, `ensure_domains_seeded`, `ensure_indexes`) used by both the API and the standalone orchestrator entrypoint.
 - `scheduler/orchestrator.py` — `OrchestratorManager` (loop registry, thread management, Redis heartbeat) and `create_standard_orchestrator()` factory.
 - `scheduler/orchestrator_entrypoint.py` — standalone control-plane process; run with `python -m scheduler.orchestrator_entrypoint` when `HYDRA_MODE=api`.
 - `scheduler/api/*` expose jobs, workers, health, events (SSE), logs streaming, history, and admin domain/template management.

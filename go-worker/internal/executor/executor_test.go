@@ -408,7 +408,7 @@ func TestDetectCapabilities_IncludesHTTP(t *testing.T) {
 	}
 }
 
-func TestDetectCapabilities_SQLRequiresPython(t *testing.T) {
+func TestDetectCapabilities_SQLRequiresPythonAndSQLAlchemy(t *testing.T) {
 	caps := DetectCapabilities()
 	hasPython := false
 	hasSQL := false
@@ -420,11 +420,76 @@ func TestDetectCapabilities_SQLRequiresPython(t *testing.T) {
 			hasSQL = true
 		}
 	}
-	// SQL should only be advertised if Python is available
-	if hasPython && !hasSQL {
-		t.Error("if python is available, sql should also be advertised")
-	}
+	// SQL should never be advertised without Python.
 	if !hasPython && hasSQL {
 		t.Error("sql should not be advertised without python")
 	}
+	// SQL should be advertised iff sqlalchemy actually imports — it's not
+	// enough for python to merely be present (that would be a capability lie).
+	if hasSQL != sqlalchemyImportable() {
+		t.Errorf("hasSQL=%v should match sqlalchemyImportable()=%v", hasSQL, sqlalchemyImportable())
+	}
+}
+
+func TestDetectCapabilities_SQLExcludedWhenImportFails(t *testing.T) {
+	// Point HYDRA_PYTHON_PATH at a fake interpreter that answers "--version"
+	// (so findPython() accepts it) but fails "-c import sqlalchemy", to force
+	// the import-preflight to fail deterministically regardless of what's
+	// actually installed on the host running this test.
+	fakePython := writeFakePythonScript(t, false)
+	t.Setenv("HYDRA_PYTHON_PATH", fakePython)
+
+	if sqlalchemyImportable() {
+		t.Error("expected sqlalchemyImportable() to return false when the import fails")
+	}
+	caps := DetectCapabilities()
+	for _, c := range caps {
+		if c == "sql" {
+			t.Error("expected 'sql' to be excluded from capabilities when sqlalchemy import fails")
+		}
+	}
+}
+
+func TestDetectCapabilities_SQLIncludedWhenImportSucceeds(t *testing.T) {
+	fakePython := writeFakePythonScript(t, true)
+	t.Setenv("HYDRA_PYTHON_PATH", fakePython)
+
+	if !sqlalchemyImportable() {
+		t.Error("expected sqlalchemyImportable() to return true when the import succeeds")
+	}
+	caps := DetectCapabilities()
+	found := false
+	for _, c := range caps {
+		if c == "sql" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected 'sql' to be included in capabilities when sqlalchemy import succeeds")
+	}
+}
+
+// writeFakePythonScript writes a shell script standing in for a python3
+// interpreter: it exits 0 for any "--version" probe (so findPython() accepts
+// it), and for an "-c ..." probe it exits 0 if importSucceeds is true, 1
+// otherwise — deterministic stand-in for sqlalchemyImportable()'s subprocess
+// check without needing a real Python/sqlalchemy install in the test env.
+func writeFakePythonScript(t *testing.T, importSucceeds bool) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := dir + "/fake-python3"
+	exitCode := "1"
+	if importSucceeds {
+		exitCode = "0"
+	}
+	script := "#!/bin/sh\n" +
+		"case \"$1\" in\n" +
+		"  --version) exit 0;;\n" +
+		"  -c) exit " + exitCode + ";;\n" +
+		"esac\n" +
+		"exit 0\n"
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("failed to write fake python script: %v", err)
+	}
+	return path
 }

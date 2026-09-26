@@ -712,8 +712,12 @@ func DetectCapabilities() []string {
 
 	if findPython() != "" {
 		caps = append(caps, "python")
-		// SQL executor uses Python as a bridge — only advertise if Python is available.
-		caps = append(caps, "sql")
+		// SQL executor uses Python as a bridge — only advertise "sql" if
+		// sqlalchemy actually imports (fail-closed), mirroring the Python
+		// worker's own _detect_capabilities() check.
+		if sqlalchemyImportable() {
+			caps = append(caps, "sql")
+		}
 	}
 	if findPowershell() != "" {
 		caps = append(caps, "powershell")
@@ -723,13 +727,28 @@ func DetectCapabilities() []string {
 	}
 	// HTTP executor uses Go's stdlib — always available.
 	caps = append(caps, "http")
-	// Sensor executor is always advertised, mirroring the Python worker
-	// (its HTTP sensor path always works via stdlib; an SQL-type sensor on
-	// a worker without Python/sqlalchemy fails at runtime the same way the
-	// SQL executor itself would — that asymmetry already exists in Python
-	// today, so this replicates it rather than papering over it here).
+	// Sensor executor is always advertised, mirroring the Python worker:
+	// the HTTP sensor path always works via stdlib regardless of "sql"
+	// capability, so a sensor job isn't blocked from dispatch just because
+	// this worker lacks SQL — only a sensor_type="sql" job needs "sql" too
+	// (enforced scheduler-side via affinity, not here).
 	caps = append(caps, "sensor")
 	return caps
+}
+
+// sqlalchemyImportable reports whether the bundled Python interpreter can
+// actually import sqlalchemy, mirroring findPython()/findPowershell()'s
+// preflight-check pattern. Advertising "sql" without this check is a
+// capability lie: execSQL/checkSQLSensor both fail at runtime otherwise.
+func sqlalchemyImportable() bool {
+	python := findPython()
+	if python == "" {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, python, "-c", "import sqlalchemy")
+	return cmd.Run() == nil
 }
 
 // DetectShells returns the list of shell interpreters available on this system.

@@ -511,8 +511,8 @@ Workers advertise only executor types that pass a concrete preflight check at st
 | `shell` / `external` | At least one shell binary executes `exit 0` successfully |
 | `python` | `HYDRA_PYTHON_PATH` or `python3`/`python` found and executable |
 | `powershell` | `pwsh` or `powershell` executes `exit 0` successfully |
-| `batch` | Windows OS detected |
-| `sql` | Python present **and** `sqlalchemy` or `pymongo` importable |
+| `batch` | Windows OS **and** `cmd.exe` executes `exit 0` successfully |
+| `sql` | Python present **and** `sqlalchemy` importable |
 | `http` | Always available (stdlib `urllib`) |
 | `sensor` | Always available (HTTP sensor uses stdlib; SQL sensor requires same as `sql`) |
 
