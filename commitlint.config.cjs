@@ -5,9 +5,12 @@
 // pipeline. See AGENTS.md's "Working Agreements" section for the full
 // rationale and CONTRIBUTING.md for examples.
 //
-// CommonJS on purpose: there is no package.json at the repo root declaring
-// "type": "module", so a bare .js file here is loaded as CommonJS by
-// default (ui/'s own package.json only governs files under ui/).
+// .cjs extension is required, not just a style choice: wagoid/commitlint-
+// github-action runs this in a Docker container whose OWN root package.json
+// declares "type": "module" — since there's no package.json anywhere under
+// this repo to tell Node otherwise, a bare "commitlint.config.js" here gets
+// loaded as an ES module (and `module.exports` throws a ReferenceError).
+// ".cjs" forces CommonJS regardless of any package.json "type" field.
 module.exports = {
   extends: ["@commitlint/config-conventional"],
   rules: {

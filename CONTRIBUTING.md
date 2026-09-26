@@ -46,7 +46,7 @@ with `bump-minor-pre-major: true`, so `feat:` bumps the minor version
 guidance for initial development.
 
 A `Commitlint` CI check (`.github/workflows/commitlint.yml`, config in
-`commitlint.config.js` at the repo root) enforces this format on every PR,
+`commitlint.config.cjs` at the repo root) enforces this format on every PR,
 checking the *entire* commit range — this repo merges PRs with a real merge
 commit rather than squashing, so every individual commit reaching `main` is
 scanned by release-please on its own, and a bad commit buried in an
