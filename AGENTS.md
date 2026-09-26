@@ -111,10 +111,14 @@ Hydra Jobs is a distributed job runner designed for flexibility and scalability.
 - `examples/acceptance-demo-jobs.yaml` — apply with `scripts/hydra-apply.py` to seed a domain with example jobs (echo, bash script, `date`, write/read-a-file, a worker-locality pair) for manually poking around after logging in; the same set (minus the locality pair) is also in `scheduler/examples/templates.py`, one click away via the UI's "Start from Template" drawer (`GET /jobs/templates`, `POST /admin/job_templates/{id}/import`). `deploy/helm/hydra` has the Kubernetes Helm chart, including `values.schema.json` (validates types/enums — e.g. rejects a worker pool's `maxConcurrency <= 0` or an unquoted numeric `resources.*.cpu` — while explicitly allowing the chart's several deliberate empty-string sentinels like `storageClassName`/`apiBaseUrl`/`ingress.className`/`allowedUsers`); `docker-compose.yml` + `docker-compose.worker.yml`/`docker-compose.worker.go.yml` (single pool) or `docker-compose.workers.yml` (multiple pools side by side) + `docker-compose.separated.yml`/`docker-compose.dev.yml` define local stacks. `docker-compose.yml`'s Redis/MongoDB/worker containers are split onto an internal-only network (no host ports, no path to the internet) with the worker running as a dedicated non-root, read-only-rootfs user; datastore auth is opt-in via `.env` (`SCHEDULER_REDIS_PASSWORD`, `MONGO_INITDB_ROOT_USERNAME`/`PASSWORD` — both gracefully degrade to no-auth when unset, matching this file's long-standing zero-config default). `deploy/compose/` holds operational tooling beyond what compose itself provides: `scripts/backup-volumes.sh`/`restore-isolated.sh` (encrypted volume backup + isolated-restore verification), `scripts/verify-live.sh`/`verify-worker-boundary.sh` (post-deploy checks) — see `deploy/compose/README.md`.
 - `.github/workflows/container-images.yml` validates builds for the four
   deployable images (`push: false` — build-validation only, no registry
-  push). Tagged with the version release-please tracks (read from
-  `pyproject.toml` at build time); never publish an implicit `latest`
-  release. See the Helm chart's README for building/pushing images for an
-  actual deployment.
+  push) on every push to main. Tagged with the version release-please
+  tracks (read from `pyproject.toml` at build time); never publish an
+  implicit `latest` release.
+- `.github/workflows/push-images.yml` is the one that actually ships a
+  release: triggered on a release-please tag (`v*`), it builds and pushes
+  all four images to `ghcr.io/<owner>/<image>` tagged with that release's
+  version (derived from the tag itself, no `latest` tag). See the Helm
+  chart's README for pointing `image.repository`/`imagePullPolicy` at it.
 - `tests/` — Backend integration and unit tests.
 - `tests/test_ai.py` — AI endpoint tests (generate/analyze/predict/diagnose). `tests/test_investigations.py` — canned-checks tests. `tests/test_mongo_client.py` — asserts the Mongo client is constructed `tz_aware=True` (a real prior bug: BSON datetimes decode naive by default, which crashes arithmetic against `datetime.now(timezone.utc)` elsewhere in the scheduler). `tests/test_redis_acl_reconciliation.py` — the Redis ACL self-heal loop (below).
 - `tests/acceptance/` — home-lab acceptance suite, opt-in (`HYDRA_ACCEPTANCE=1`, never runs in CI): stands up or points at a real deployment and checks domain isolation, the full executor matrix, mixed Python+Go worker-pool routing, and chaos/resilience (worker killed mid-job, Redis/Mongo restarted). Three backends (`docker` fully self-provisioning, `kubectl` verifies an already-Helm-installed deployment, `none` bare API smoke check) — see `tests/acceptance/README.md`. Run via `./scripts/run-acceptance-tests.sh`.

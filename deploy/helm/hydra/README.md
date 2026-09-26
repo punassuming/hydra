@@ -88,6 +88,13 @@ registry. If you *do* push to a registry (GHCR, a private registry, etc.),
 set `imagePullPolicy: Always` and each component's `image.repository`/`tag`
 to your registry path, plus `imagePullSecrets` if it's private.
 
+If you'd rather not build locally at all: `.github/workflows/push-images.yml`
+builds and pushes all four images to `ghcr.io/<owner>/<image>` automatically
+on every release-please tag (`v*`), tagged with that release's version (no
+`latest` — every push is tied to a specific release). Point
+`image.repository` at `ghcr.io/<owner>/hydra-scheduler` (etc.) and set
+`imagePullPolicy: Always` to use it.
+
 ## Installing
 
 ```bash
