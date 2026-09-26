@@ -78,6 +78,9 @@ def ensure_indexes() -> None:
     db.job_definitions.create_index([("domain", 1), ("created_at", -1)])
     db.job_definitions.create_index([("domain", 1), ("depends_on", 1)])
 
+    db.job_versions.create_index([("job_id", 1), ("version", -1)])
+    db.job_versions.create_index([("domain", 1), ("changed_at", -1)])
+
     # Uniqueness indexes are already enforced at the application layer
     # (see the admin.py domain-creation check and the job-name-per-domain
     # convention), but any deployment upgrading from before that check

@@ -19,6 +19,7 @@ class _FakeDB:
     def __init__(self, fail_unique=False):
         self.job_runs = _FakeCollection("job_runs")
         self.job_definitions = _FakeCollection("job_definitions", fail_unique=fail_unique)
+        self.job_versions = _FakeCollection("job_versions")
         self.credentials = _FakeCollection("credentials", fail_unique=fail_unique)
         self.domains = _FakeCollection("domains", fail_unique=fail_unique)
 
@@ -45,6 +46,16 @@ def test_ensure_indexes_creates_expected_job_definitions_indexes():
     assert [("domain", 1), ("created_at", -1)] in created_keys
     assert [("domain", 1), ("depends_on", 1)] in created_keys
     assert ([("domain", 1), ("name", 1)], True) in db.job_definitions.created
+
+
+def test_ensure_indexes_creates_expected_job_versions_indexes():
+    db = _FakeDB()
+    with patch("scheduler.startup.get_db", return_value=db):
+        ensure_indexes()
+
+    created_keys = [keys for keys, _unique in db.job_versions.created]
+    assert [("job_id", 1), ("version", -1)] in created_keys
+    assert [("domain", 1), ("changed_at", -1)] in created_keys
 
 
 def test_ensure_indexes_creates_unique_indexes_on_credentials_and_domains():
