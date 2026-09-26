@@ -71,8 +71,13 @@ func checkHTTPSensor(spec *ExecutorSpec) bool {
 // checkSQLSensor returns true if the SQL sensor condition is met (the query
 // returns at least one row). Mirrors worker/executor.py's _check_sql_sensor
 // — like the SQL executor (execSQL), this bridges through a Python
-// interpreter since Go has no native driver for these dialects.
-func checkSQLSensor(spec *ExecutorSpec) bool {
+// interpreter since Go has no native driver for these dialects. ctx is the
+// sensor's overall run context (job-kill cancellation); the subprocess is
+// additionally bounded by its own deadline (capped below poll_interval, the
+// same way checkHTTPSensor bounds its request timeout) so a hung connection
+// or query can't block the poll loop from ever re-checking cancellation or
+// the overall sensor timeout.
+func checkSQLSensor(ctx context.Context, spec *ExecutorSpec) bool {
 	connURI := strings.TrimSpace(spec.ConnectionURI)
 	if connURI == "" {
 		return false
@@ -127,7 +132,18 @@ func checkSQLSensor(spec *ExecutorSpec) bool {
 	}
 	defer os.Remove(tmp)
 
-	return exec.Command(python, tmp).Run() == nil
+	pollInterval := spec.PollIntervalSeconds
+	if pollInterval <= 0 {
+		pollInterval = 30
+	}
+	queryTimeout := pollInterval
+	if queryTimeout > 25 {
+		queryTimeout = 25
+	}
+	runCtx, cancel := context.WithTimeout(ctx, time.Duration(queryTimeout)*time.Second)
+	defer cancel()
+
+	return exec.CommandContext(runCtx, python, tmp).Run() == nil
 }
 
 // execSensor executes a sensor job: poll until the condition is met or the
@@ -167,7 +183,7 @@ func execSensor(ctx context.Context, spec *ExecutorSpec, onStdout func(string)) 
 		case "http":
 			met = checkHTTPSensor(spec)
 		case "sql":
-			met = checkSQLSensor(spec)
+			met = checkSQLSensor(ctx, spec)
 		default:
 			return &ExecResult{ReturnCode: 1, Stderr: fmt.Sprintf("unknown sensor_type '%s'", sensorType)}
 		}

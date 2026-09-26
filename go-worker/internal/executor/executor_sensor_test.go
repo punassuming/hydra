@@ -4,10 +4,31 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
 )
+
+// writeSleepingPythonScript writes a fake python3 stand-in that answers
+// "--version" immediately (so findPython() accepts it) but otherwise sleeps
+// far longer than any test timeout — used to prove checkSQLSensor's
+// subprocess is actually killed by context cancellation/timeout rather than
+// left to run to completion.
+func writeSleepingPythonScript(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := dir + "/fake-python3-sleep"
+	script := "#!/bin/sh\n" +
+		"case \"$1\" in\n" +
+		"  --version) exit 0;;\n" +
+		"esac\n" +
+		"sleep 100\n"
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("failed to write fake python script: %v", err)
+	}
+	return path
+}
 
 func TestCheckHTTPSensor_ConditionMet(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -36,6 +57,53 @@ func TestCheckHTTPSensor_UnexpectedStatus(t *testing.T) {
 func TestCheckHTTPSensor_EmptyTarget(t *testing.T) {
 	if checkHTTPSensor(&ExecutorSpec{}) {
 		t.Fatal("expected checkHTTPSensor to return false when target is empty")
+	}
+}
+
+func TestCheckSQLSensor_KilledByQueryTimeout(t *testing.T) {
+	fakePython := writeSleepingPythonScript(t)
+	t.Setenv("HYDRA_PYTHON_PATH", fakePython)
+
+	spec := &ExecutorSpec{
+		ConnectionURI:       "postgres://fake/db",
+		Target:              "SELECT 1",
+		PollIntervalSeconds: 1, // caps checkSQLSensor's own query timeout at 1s
+	}
+	done := make(chan bool, 1)
+	go func() { done <- checkSQLSensor(context.Background(), spec) }()
+
+	select {
+	case met := <-done:
+		if met {
+			t.Error("expected checkSQLSensor to return false when the query subprocess is killed by its timeout")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("checkSQLSensor did not return promptly — the hanging subprocess was not killed by its own timeout")
+	}
+}
+
+func TestCheckSQLSensor_KilledByCallerCancellation(t *testing.T) {
+	fakePython := writeSleepingPythonScript(t)
+	t.Setenv("HYDRA_PYTHON_PATH", fakePython)
+
+	spec := &ExecutorSpec{
+		ConnectionURI:       "postgres://fake/db",
+		Target:              "SELECT 1",
+		PollIntervalSeconds: 60, // long enough that the query timeout alone wouldn't explain a quick return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	done := make(chan bool, 1)
+	go func() { done <- checkSQLSensor(ctx, spec) }()
+
+	select {
+	case met := <-done:
+		if met {
+			t.Error("expected checkSQLSensor to return false when the caller context is already cancelled")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("checkSQLSensor did not return promptly after ctx was cancelled — the subprocess was not killed")
 	}
 }
 
