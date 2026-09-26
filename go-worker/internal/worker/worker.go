@@ -537,7 +537,16 @@ func (w *workerState) runJob(ctx context.Context, env *executor.JobEnvelope) {
 
 	status := "success"
 	if !success {
-		status = "failed"
+		// result.TimedOut is decoupled from ReturnCode on purpose: a command
+		// that legitimately exits with the same code a timeout would use
+		// must not be misreported as "timed_out" (and thus become eligible
+		// for scheduler-level retry of potentially non-idempotent work),
+		// mirroring the Python worker's timed_out_holder.
+		if result != nil && result.TimedOut {
+			status = "timed_out"
+		} else {
+			status = "failed"
+		}
 	}
 	if lastReason == "" {
 		lastReason = "criteria not met"
@@ -597,10 +606,13 @@ func (w *workerState) runJob(ctx context.Context, env *executor.JobEnvelope) {
 			"completion_reason": lastReason,
 		})
 
-	if status == "failed" {
-		log.Printf("[worker] job %s failed (rc=%d, reason=%s)", jobID, result.ReturnCode, lastReason)
-	} else {
+	switch status {
+	case "success":
 		log.Printf("[worker] job %s completed successfully", jobID)
+	case "timed_out":
+		log.Printf("[worker] job %s timed out (rc=%d, reason=%s)", jobID, result.ReturnCode, lastReason)
+	default:
+		log.Printf("[worker] job %s failed (rc=%d, reason=%s)", jobID, result.ReturnCode, lastReason)
 	}
 }
 

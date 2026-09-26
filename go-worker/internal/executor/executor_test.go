@@ -61,8 +61,14 @@ func TestExecShell_Timeout(t *testing.T) {
 		},
 	}
 	result := Execute(context.Background(), env, nil, nil)
-	if result.ReturnCode == 0 {
-		t.Fatalf("expected non-zero rc for timeout, got 0")
+	if result.ReturnCode != exitCodeTimeout {
+		t.Fatalf("expected rc=%d (exitCodeTimeout), got %d", exitCodeTimeout, result.ReturnCode)
+	}
+	if result.ReturnCode != 124 {
+		t.Fatalf("expected exitCodeTimeout to be 124 (matching the Python worker's convention), got %d", result.ReturnCode)
+	}
+	if !result.TimedOut {
+		t.Error("expected TimedOut to be true for a job that exceeded its timeout")
 	}
 }
 

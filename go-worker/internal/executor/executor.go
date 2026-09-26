@@ -124,6 +124,11 @@ type ExecResult struct {
 	// Zero when the corresponding step didn't run for this job.
 	SourceFetchMs float64
 	EnvPrepMs     float64
+	// TimedOut is set explicitly when the job's context deadline was
+	// exceeded, decoupled from ReturnCode: a command that legitimately
+	// exits 124 on its own must not be misclassified as a timeout, mirroring
+	// worker/worker.py's timed_out_holder.
+	TimedOut bool
 }
 
 // ---------------------------------------------------------------------------
@@ -610,9 +615,13 @@ func kerberosInit(ctx context.Context, kerberos map[string]string, user string, 
 // Core subprocess runner
 // ---------------------------------------------------------------------------
 
-// Conventional exit codes for signals.
 const (
-	exitCodeTimeout  = 137 // SIGKILL
+	// exitCodeTimeout matches the Python worker's convention (the `timeout(1)`
+	// coreutils exit code) rather than a raw SIGKILL exit status, so exit
+	// codes agree across both worker flavors. The actual "was this a timeout"
+	// decision for run_end status is carried separately via ExecResult.TimedOut
+	// — a legitimately-124-returning command must not be misclassified.
+	exitCodeTimeout  = 124
 	exitCodeCanceled = 130 // SIGINT
 )
 
@@ -679,19 +688,29 @@ func runCommand(ctx context.Context, cmdArgs []string, env map[string]string, wo
 	err = c.Wait()
 
 	rc := 0
+	timedOut := false
 	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			rc = exitErr.ExitCode()
-		} else if ctx.Err() == context.DeadlineExceeded {
+		// ctx.Err() is checked first, ahead of unwrapping *exec.ExitError:
+		// exec.CommandContext kills the process on deadline/cancellation via
+		// signal, and a signaled process's ExitError.ExitCode() reports -1
+		// — checking that first would make the timeout/cancel branches below
+		// unreachable dead code (as they were before this comment existed).
+		switch {
+		case ctx.Err() == context.DeadlineExceeded:
 			rc = exitCodeTimeout
+			timedOut = true
 			stderrBuf.WriteString("process killed: timeout exceeded\n")
-		} else if ctx.Err() == context.Canceled {
+		case ctx.Err() == context.Canceled:
 			rc = exitCodeCanceled
 			stderrBuf.WriteString("process killed: canceled\n")
-		} else {
-			rc = 1
-			stderrBuf.WriteString(fmt.Sprintf("exec error: %v\n", err))
+		default:
+			var exitErr *exec.ExitError
+			if errors.As(err, &exitErr) {
+				rc = exitErr.ExitCode()
+			} else {
+				rc = 1
+				stderrBuf.WriteString(fmt.Sprintf("exec error: %v\n", err))
+			}
 		}
 	}
 
@@ -699,6 +718,7 @@ func runCommand(ctx context.Context, cmdArgs []string, env map[string]string, wo
 		ReturnCode: rc,
 		Stdout:     stdoutBuf.String(),
 		Stderr:     stderrBuf.String(),
+		TimedOut:   timedOut,
 	}
 }
 

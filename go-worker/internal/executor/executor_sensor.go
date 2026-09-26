@@ -159,7 +159,7 @@ func execSensor(ctx context.Context, spec *ExecutorSpec, onStdout func(string)) 
 
 		elapsed := time.Since(start)
 		if elapsed.Seconds() >= float64(timeoutSeconds) {
-			return &ExecResult{ReturnCode: exitCodeTimeout, Stderr: fmt.Sprintf("sensor timed out after %.1fs", elapsed.Seconds())}
+			return &ExecResult{ReturnCode: exitCodeTimeout, TimedOut: true, Stderr: fmt.Sprintf("sensor timed out after %.1fs", elapsed.Seconds())}
 		}
 
 		var met bool
