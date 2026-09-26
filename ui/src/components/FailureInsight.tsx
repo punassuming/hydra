@@ -197,6 +197,7 @@ export function FailureInsight({
               onChange={(e) => setQuestion(e.target.value)}
               prefix={<QuestionCircleOutlined />}
               placeholder="Ask about this run"
+              maxLength={500}
               style={{ width: compact ? 220 : 340 }}
             />
           )}
