@@ -3,11 +3,22 @@ services:
     volumes:
       - ./scheduler:/app/scheduler
     command: ["uvicorn", "scheduler.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    # Compose's `environment:` list form fully replaces the base file's
+    # list on merge (no per-key merge) — so every var the base scheduler
+    # service sets (docker-compose.yml) has to be repeated here too, not
+    # just the two this overlay actually changes, or they silently vanish.
     environment:
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - REDIS_PASSWORD=${SCHEDULER_REDIS_PASSWORD:-}
+      - MONGO_URL=${MONGO_URL:-mongodb://mongo:27017}
+      - MONGO_DB=${MONGO_DB:-hydra_jobs}
+      - SCHEDULER_HEARTBEAT_TTL=${SCHEDULER_HEARTBEAT_TTL:-10}
+      # Dev overlay override: seed the domain named by $DOMAIN (default
+      # "dev") rather than the base file's "prod".
       - SEED_DOMAIN=${DOMAIN:-dev}
       - SEED_DOMAIN_TOKEN=${API_TOKEN:-}
       - SEED_DOMAIN_REDIS_PASSWORD=${REDIS_PASSWORD:-}
-      # Dev overlay defaults demo-mode UI affordances on; override with
+      # Dev overlay override: demo-mode UI affordances default on; set
       # HYDRA_DEMO_MODE=false if you don't want them even in dev.
       - HYDRA_DEMO_MODE=${HYDRA_DEMO_MODE:-true}
 
