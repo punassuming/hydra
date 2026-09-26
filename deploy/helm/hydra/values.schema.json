@@ -1,0 +1,249 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "hydra",
+  "type": "object",
+  "additionalProperties": true,
+  "$defs": {
+    "resourceQuantity": {
+      "type": "string",
+      "description": "Kubernetes resource quantity (e.g. \"500m\", \"1\", \"256Mi\"). Must be a string — an unquoted bare number like `1` parses as a YAML int, not a quantity."
+    },
+    "resources": {
+      "type": "object",
+      "properties": {
+        "requests": {
+          "type": "object",
+          "properties": {
+            "cpu": { "$ref": "#/$defs/resourceQuantity" },
+            "memory": { "$ref": "#/$defs/resourceQuantity" }
+          }
+        },
+        "limits": {
+          "type": "object",
+          "properties": {
+            "cpu": { "$ref": "#/$defs/resourceQuantity" },
+            "memory": { "$ref": "#/$defs/resourceQuantity" }
+          }
+        }
+      }
+    },
+    "placement": {
+      "type": "object",
+      "properties": {
+        "nodeSelector": { "type": "object" },
+        "tolerations": { "type": "array" },
+        "affinity": { "type": "object" }
+      }
+    },
+    "image": {
+      "type": "object",
+      "properties": {
+        "repository": { "type": "string" },
+        "tag": { "type": "string" }
+      }
+    },
+    "autoscaling": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "minReplicas": { "type": "integer", "minimum": 1 },
+        "maxReplicas": { "type": "integer", "minimum": 1 },
+        "targetCPUUtilizationPercentage": { "type": "integer", "minimum": 1, "maximum": 100 }
+      }
+    }
+  },
+  "properties": {
+    "imagePullPolicy": {
+      "type": "string",
+      "enum": ["Always", "IfNotPresent", "Never"]
+    },
+    "imagePullSecrets": {
+      "type": "array"
+    },
+    "demoMode": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" }
+      }
+    },
+    "redis": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "image": { "$ref": "#/$defs/image" },
+        "resources": { "$ref": "#/$defs/resources" },
+        "persistence": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "size": { "type": "string" },
+            "storageClassName": {
+              "type": "string",
+              "description": "Empty string means \"use the cluster's default StorageClass\" — a deliberate sentinel, not a validation error."
+            }
+          }
+        },
+        "nodeSelector": { "type": "object" },
+        "tolerations": { "type": "array" },
+        "affinity": { "type": "object" }
+      }
+    },
+    "mongodb": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "image": { "$ref": "#/$defs/image" },
+        "database": { "type": "string" },
+        "resources": { "$ref": "#/$defs/resources" },
+        "persistence": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "size": { "type": "string" },
+            "storageClassName": { "type": "string" }
+          }
+        },
+        "nodeSelector": { "type": "object" },
+        "tolerations": { "type": "array" },
+        "affinity": { "type": "object" }
+      }
+    },
+    "scheduler": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "mode": {
+          "type": "string",
+          "enum": ["combined", "separated"],
+          "description": "\"combined\": API + background loops in one Deployment. \"separated\": API-only here, loops run in the orchestrator Deployment below."
+        },
+        "replicas": { "type": "integer", "minimum": 0 },
+        "image": { "$ref": "#/$defs/image" },
+        "service": {
+          "type": "object",
+          "properties": {
+            "type": { "type": "string" },
+            "port": { "type": "integer" }
+          }
+        },
+        "heartbeatTtl": { "type": "integer", "minimum": 1 },
+        "resources": { "$ref": "#/$defs/resources" },
+        "extraEnv": {
+          "type": "array",
+          "description": "Extra env vars in Kubernetes EnvVar shape, e.g. via valueFrom.secretKeyRef for sensitive values."
+        },
+        "nodeSelector": { "type": "object" },
+        "tolerations": { "type": "array" },
+        "affinity": { "type": "object" }
+      }
+    },
+    "orchestrator": {
+      "type": "object",
+      "description": "Only used when scheduler.mode is \"separated\".",
+      "properties": {
+        "replicas": { "type": "integer", "minimum": 0 },
+        "resources": { "$ref": "#/$defs/resources" },
+        "nodeSelector": { "type": "object" },
+        "tolerations": { "type": "array" },
+        "affinity": { "type": "object" }
+      }
+    },
+    "ui": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "replicas": { "type": "integer", "minimum": 0 },
+        "image": { "$ref": "#/$defs/image" },
+        "service": {
+          "type": "object",
+          "properties": {
+            "type": { "type": "string" },
+            "port": { "type": "integer" }
+          }
+        },
+        "apiBaseUrl": {
+          "type": "string",
+          "description": "Must be reachable from the BROWSER, not from inside the cluster. Empty string means \"rely on kubectl port-forward\" — a deliberate sentinel, not a validation error."
+        },
+        "resources": { "$ref": "#/$defs/resources" },
+        "nodeSelector": { "type": "object" },
+        "tolerations": { "type": "array" },
+        "affinity": { "type": "object" }
+      }
+    },
+    "workers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "flavor", "domain"],
+        "properties": {
+          "name": { "type": "string" },
+          "flavor": {
+            "type": "string",
+            "enum": ["python", "go"],
+            "description": "\"python\": full feature set incl. SQL executor, Kerberos/impersonation. \"go\": lighter footprint, same executor-type parity."
+          },
+          "replicas": { "type": "integer", "minimum": 0 },
+          "domain": { "type": "string" },
+          "tags": { "type": "string" },
+          "allowedUsers": {
+            "type": "string",
+            "description": "Empty string means \"no restriction\" — a deliberate sentinel, not a validation error."
+          },
+          "maxConcurrency": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Must be greater than 0 — a worker pool with maxConcurrency <= 0 can never run a job."
+          },
+          "workerState": { "type": "string", "enum": ["online", "draining", "offline"] },
+          "requireRedisAcl": { "type": "boolean" },
+          "image": { "$ref": "#/$defs/image" },
+          "resources": { "$ref": "#/$defs/resources" },
+          "autoscaling": { "$ref": "#/$defs/autoscaling" },
+          "nodeSelector": { "type": "object" },
+          "tolerations": { "type": "array" },
+          "affinity": { "type": "object" }
+        }
+      }
+    },
+    "domainSeed": {
+      "type": "object",
+      "properties": {
+        "defaultDomain": { "type": "string" },
+        "extraDomains": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "image": { "$ref": "#/$defs/image" }
+      }
+    },
+    "ingress": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "className": {
+          "type": "string",
+          "description": "Empty string means \"use the cluster's default IngressClass\" — a deliberate sentinel, not a validation error."
+        },
+        "annotations": { "type": "object" },
+        "ui": {
+          "type": "object",
+          "properties": {
+            "host": { "type": "string" },
+            "tls": { "type": "array" }
+          }
+        },
+        "scheduler": {
+          "type": "object",
+          "properties": {
+            "host": { "type": "string" },
+            "tls": { "type": "array" }
+          }
+        }
+      }
+    },
+    "commonLabels": {
+      "type": "object"
+    }
+  }
+}
