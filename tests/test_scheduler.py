@@ -1159,3 +1159,55 @@ def test_normalize_affinity_works_with_passes_affinity():
     normalized = normalize_affinity(job)
     assert passes_affinity(normalized, worker_with_sql)
     assert not passes_affinity(normalized, worker_without_sql)
+
+
+def test_normalize_affinity_sql_sensor_requires_sql_capability():
+    """A sensor_type='sql' job must require both 'sensor' and 'sql', not just 'sensor' —
+    otherwise it can be dispatched to a worker with no SQL runtime deps and fail at poll time."""
+    job = {
+        "executor": {"type": "sensor", "sensor_type": "sql", "target": "SELECT 1"},
+        "affinity": {"os": ["linux"]},
+    }
+    normalized = normalize_affinity(job)
+    assert normalized["affinity"]["executor_types"] == ["sensor", "sql"]
+
+
+def test_normalize_affinity_http_sensor_does_not_require_sql():
+    """An HTTP sensor only needs the generic 'sensor' capability, not 'sql'."""
+    job = {
+        "executor": {"type": "sensor", "sensor_type": "http", "target": "https://example.com"},
+        "affinity": {"os": ["linux"]},
+    }
+    normalized = normalize_affinity(job)
+    assert normalized["affinity"]["executor_types"] == ["sensor"]
+
+
+def test_normalize_affinity_sql_sensor_end_to_end_with_passes_affinity():
+    """End-to-end: a SQL sensor job should only match a worker that advertises both
+    'sensor' and 'sql', rejecting a worker that only advertises 'sensor'."""
+    job = {
+        "user": "alice",
+        "executor": {"type": "sensor", "sensor_type": "sql", "target": "SELECT 1"},
+        "affinity": {"os": ["linux"]},
+    }
+    worker_with_sql = {
+        "os": "linux",
+        "tags": [],
+        "allowed_users": [],
+        "hostname": "",
+        "subnet": "",
+        "deployment_type": "",
+        "capabilities": ["shell", "python", "sql", "http", "sensor"],
+    }
+    worker_sensor_only = {
+        "os": "linux",
+        "tags": [],
+        "allowed_users": [],
+        "hostname": "",
+        "subnet": "",
+        "deployment_type": "",
+        "capabilities": ["shell", "python", "http", "sensor"],
+    }
+    normalized = normalize_affinity(job)
+    assert passes_affinity(normalized, worker_with_sql)
+    assert not passes_affinity(normalized, worker_sensor_only)

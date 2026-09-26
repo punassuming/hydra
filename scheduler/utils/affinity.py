@@ -42,12 +42,21 @@ def normalize_affinity(job: Dict) -> Dict:
     This allows jobs to omit executor_types in their affinity and still get
     correct capability-based worker matching at dispatch time.
     """
-    executor_type = (job.get("executor") or {}).get("type", "")
+    executor = job.get("executor") or {}
+    executor_type = executor.get("type", "")
     if not executor_type:
         return job
     affinity = job.get("affinity") or {}
     if not affinity.get("executor_types"):
-        return {**job, "affinity": {**affinity, "executor_types": [executor_type]}}
+        executor_types = [executor_type]
+        # A SQL-flavored sensor needs a worker with real SQL runtime deps
+        # (sqlalchemy importable), not just any worker that can run sensors
+        # at all (the HTTP sensor path needs nothing beyond stdlib) — require
+        # both capabilities so dispatch doesn't land on a worker that would
+        # fail the poll at runtime.
+        if executor_type == "sensor" and executor.get("sensor_type") == "sql":
+            executor_types.append("sql")
+        return {**job, "affinity": {**affinity, "executor_types": executor_types}}
     return job
 
 
