@@ -26,6 +26,12 @@ import (
 	"github.com/punassuming/hydra/go-worker/internal/executor"
 )
 
+// workerProtocolVersion identifies the Redis registration/heartbeat/dispatch
+// protocol both worker flavors (Python and Go) speak, so a human can see
+// version skew at a glance on the workers list — not a dispatch-time gate.
+// Keep in sync with worker/worker.py's WORKER_PROTOCOL_VERSION.
+const workerProtocolVersion = "1.0"
+
 // Start registers the worker in Redis, starts the heartbeat and kill
 // listener goroutines, and begins the job polling loop.
 // It blocks until ctx is cancelled.
@@ -96,26 +102,27 @@ func register(ctx context.Context, cfg *config.Config, rdb *redis.Client) error 
 	capabilities := executor.DetectCapabilities()
 
 	fields := map[string]interface{}{
-		"worker_id":        cfg.WorkerID,
-		"os":               runtime.GOOS,
-		"domain":           cfg.Domain,
-		"tags":             strings.Join(cfg.Tags, ","),
-		"allowed_users":    strings.Join(cfg.AllowedUsers, ","),
-		"max_concurrency":  cfg.MaxConcurrency,
-		"current_running":  0,
-		"status":           "online",
-		"state":            cfg.InitialState,
-		"cpu_count":        runtime.NumCPU(),
-		"go_version":       runtime.Version(),
-		"cwd":              mustGetwd(),
-		"hostname":         hostname,
-		"ip":               ipAddr,
-		"subnet":           subnet,
-		"deployment_type":  cfg.DeploymentType,
-		"run_user":         runUser,
-		"shells":           strings.Join(shells, ","),
-		"capabilities":     strings.Join(capabilities, ","),
-		"domain_token_hash": tokenHash,
+		"worker_id":               cfg.WorkerID,
+		"os":                      runtime.GOOS,
+		"domain":                  cfg.Domain,
+		"tags":                    strings.Join(cfg.Tags, ","),
+		"allowed_users":           strings.Join(cfg.AllowedUsers, ","),
+		"max_concurrency":         cfg.MaxConcurrency,
+		"current_running":         0,
+		"status":                  "online",
+		"state":                   cfg.InitialState,
+		"cpu_count":               runtime.NumCPU(),
+		"go_version":              runtime.Version(),
+		"cwd":                     mustGetwd(),
+		"hostname":                hostname,
+		"ip":                      ipAddr,
+		"subnet":                  subnet,
+		"deployment_type":         cfg.DeploymentType,
+		"run_user":                runUser,
+		"shells":                  strings.Join(shells, ","),
+		"capabilities":            strings.Join(capabilities, ","),
+		"domain_token_hash":       tokenHash,
+		"worker_protocol_version": workerProtocolVersion,
 	}
 	if err := rdb.HSet(ctx, key, fields).Err(); err != nil {
 		return err
@@ -410,22 +417,22 @@ func (w *workerState) runJob(ctx context.Context, env *executor.JobEnvelope) {
 
 	// Publish run_start event.
 	w.publishRunEvent(ctx, map[string]interface{}{
-		"type":                "run_start",
-		"run_id":              runID,
-		"job_id":              jobID,
-		"user":                env.Job.User,
-		"domain":              w.cfg.Domain,
-		"worker_id":           w.cfg.WorkerID,
-		"start_ts":            startedTS,
-		"scheduled_ts":        orDefault(env.DispatchTS, startedTS),
-		"slot":                slot,
-		"attempt":             1,
-		"retries_remaining":   retriesRemaining,
-		"schedule_tick":       scheduleTick,
-		"schedule_mode":       scheduleMode,
-		"executor_type":       execType,
-		"queue_latency_ms":    queueLatencyMs,
-		"bypass_concurrency":  env.Job.BypassConcurrency,
+		"type":               "run_start",
+		"run_id":             runID,
+		"job_id":             jobID,
+		"user":               env.Job.User,
+		"domain":             w.cfg.Domain,
+		"worker_id":          w.cfg.WorkerID,
+		"start_ts":           startedTS,
+		"scheduled_ts":       orDefault(env.DispatchTS, startedTS),
+		"slot":               slot,
+		"attempt":            1,
+		"retries_remaining":  retriesRemaining,
+		"schedule_tick":      scheduleTick,
+		"schedule_mode":      scheduleMode,
+		"executor_type":      execType,
+		"queue_latency_ms":   queueLatencyMs,
+		"bypass_concurrency": env.Job.BypassConcurrency,
 	})
 
 	appendWorkerOp(ctx, w.rdb, w.cfg.Domain, w.cfg.WorkerID, "run_exec",
@@ -551,32 +558,32 @@ func (w *workerState) runJob(ctx context.Context, env *executor.JobEnvelope) {
 
 	// Publish run_end event.
 	w.publishRunEvent(ctx, map[string]interface{}{
-		"type":                "run_end",
-		"run_id":              runID,
-		"job_id":              jobID,
-		"user":                env.Job.User,
-		"domain":              w.cfg.Domain,
-		"worker_id":           w.cfg.WorkerID,
-		"status":              status,
-		"returncode":          result.ReturnCode,
-		"stdout":              result.Stdout,
-		"stderr":              result.Stderr,
-		"attempt":             attemptsUsed,
-		"completion_reason":   lastReason,
-		"end_ts":              endTS,
-		"slot":                slot,
-		"retries_remaining":   retriesRemaining,
-		"retry_attempt":       retryAttempt,
-		"schedule_tick":       scheduleTick,
-		"schedule_mode":       scheduleMode,
-		"executor_type":       execType,
-		"queue_latency_ms":    queueLatencyMs,
-		"bypass_concurrency":  env.Job.BypassConcurrency,
-		"start_ts":            startedTS,
-		"scheduled_ts":        orDefault(env.DispatchTS, startedTS),
-		"total_run_ms":        round2((endTS - startedTS) * 1000),
-		"source_fetch_ms":     sourceFetchMs,
-		"env_prep_ms":         envPrepMs,
+		"type":               "run_end",
+		"run_id":             runID,
+		"job_id":             jobID,
+		"user":               env.Job.User,
+		"domain":             w.cfg.Domain,
+		"worker_id":          w.cfg.WorkerID,
+		"status":             status,
+		"returncode":         result.ReturnCode,
+		"stdout":             result.Stdout,
+		"stderr":             result.Stderr,
+		"attempt":            attemptsUsed,
+		"completion_reason":  lastReason,
+		"end_ts":             endTS,
+		"slot":               slot,
+		"retries_remaining":  retriesRemaining,
+		"retry_attempt":      retryAttempt,
+		"schedule_tick":      scheduleTick,
+		"schedule_mode":      scheduleMode,
+		"executor_type":      execType,
+		"queue_latency_ms":   queueLatencyMs,
+		"bypass_concurrency": env.Job.BypassConcurrency,
+		"start_ts":           startedTS,
+		"scheduled_ts":       orDefault(env.DispatchTS, startedTS),
+		"total_run_ms":       round2((endTS - startedTS) * 1000),
+		"source_fetch_ms":    sourceFetchMs,
+		"env_prep_ms":        envPrepMs,
 	})
 
 	appendWorkerOp(ctx, w.rdb, w.cfg.Domain, w.cfg.WorkerID, "run_result",

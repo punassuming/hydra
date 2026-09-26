@@ -91,15 +91,15 @@ type ExecutorSpec struct {
 
 // JobDef is the full job definition nested inside the envelope.
 type JobDef struct {
-	ID                 string       `json:"_id"`
-	User               string       `json:"user,omitempty"`
-	Executor           ExecutorSpec `json:"executor"`
-	Timeout            int          `json:"timeout,omitempty"`
-	Retries            int          `json:"retries,omitempty"`
-	BypassConcurrency  bool         `json:"bypass_concurrency,omitempty"`
-	Schedule           *Schedule    `json:"schedule,omitempty"`
-	Completion         *Completion  `json:"completion,omitempty"`
-	Source             *Source      `json:"source,omitempty"`
+	ID                string       `json:"_id"`
+	User              string       `json:"user,omitempty"`
+	Executor          ExecutorSpec `json:"executor"`
+	Timeout           int          `json:"timeout,omitempty"`
+	Retries           int          `json:"retries,omitempty"`
+	BypassConcurrency bool         `json:"bypass_concurrency,omitempty"`
+	Schedule          *Schedule    `json:"schedule,omitempty"`
+	Completion        *Completion  `json:"completion,omitempty"`
+	Source            *Source      `json:"source,omitempty"`
 }
 
 // JobEnvelope is the top-level payload dispatched by the scheduler.

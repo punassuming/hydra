@@ -411,6 +411,7 @@ export function WorkerDetailPage() {
           <Descriptions.Item label="Metrics updated">
             {worker.metrics_updated_at ? new Date(worker.metrics_updated_at * 1000).toLocaleString() : "-"}
           </Descriptions.Item>
+          <Descriptions.Item label="Protocol Version">{worker.worker_protocol_version || "-"}</Descriptions.Item>
         </Descriptions>
       </Card>
 
