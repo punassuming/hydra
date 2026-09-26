@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Body, HTTPException, Request
 from pydantic import BaseModel
+from pymongo.errors import DuplicateKeyError
 
 from ..event_bus import event_bus
 from ..models.job_definition import (
@@ -80,6 +81,35 @@ def _record_job_version(db, job_id: str, before: dict, after: JobDefinition, *, 
             "after": _sanitize_job_dict(after.to_mongo()),
         }
     )
+
+
+def _insert_job_definition(db, job_def: JobDefinition) -> None:
+    """Insert a new job definition, translating a duplicate (domain, name)
+    conflict into a clean 409 instead of an unhandled DuplicateKeyError.
+
+    The unique index on job_definitions (scheduler/startup.py) enforces the
+    domain-scoped job-name-uniqueness convention at the DB layer, but only
+    the template-import endpoint (admin.py) used to check for the conflict
+    itself — submit_job/run_adhoc_job/update_job all relied on nothing
+    catching it, which would surface as a raw 500 instead of a 409.
+    """
+    try:
+        db.job_definitions.insert_one(job_def.to_mongo())
+    except DuplicateKeyError:
+        raise HTTPException(
+            status_code=409, detail=f"job with name {job_def.name!r} already exists in this domain"
+        )
+
+
+def _replace_job_definition(db, job_id: str, job_def: JobDefinition) -> None:
+    """Replace an existing job definition, translating a rename into a
+    conflicting (domain, name) into a clean 409 — see _insert_job_definition."""
+    try:
+        db.job_definitions.replace_one({"_id": job_id}, job_def.to_mongo())
+    except DuplicateKeyError:
+        raise HTTPException(
+            status_code=409, detail=f"job with name {job_def.name!r} already exists in this domain"
+        )
 
 
 def _fetch_job_runs(job_id: str, domain_filter: str | None = None) -> List[Dict[str, Any]]:
@@ -263,7 +293,7 @@ def submit_job(job: JobCreate, request: Request):
     if not validation.valid:
         raise HTTPException(status_code=422, detail=validation.errors)
     job_def = _attach_schedule(job_def, force=True)
-    db.job_definitions.insert_one(job_def.to_mongo())
+    _insert_job_definition(db, job_def)
     if job_def.schedule.mode == "immediate":
         _enqueue_job(job_def.id, reason="immediate_submit", priority=job_def.priority, domain=job_def.domain)
     event_bus.publish(
@@ -333,8 +363,8 @@ def update_job(job_id: str, updates: JobUpdate, request: Request):
     if not validation.valid:
         raise HTTPException(status_code=422, detail=validation.errors)
     job_def = _attach_schedule(job_def, force="schedule" in update_doc)
+    _replace_job_definition(db, job_id, job_def)
     _record_job_version(db, job_id, existing, job_def, domain=job_def.domain, is_admin=is_admin)
-    db.job_definitions.replace_one({"_id": job_id}, job_def.to_mongo())
     event_bus.publish("job_updated", {"job_id": job_id, "domain": job_def.domain})
     return _sanitize_job_response(job_def)
 
@@ -584,7 +614,7 @@ def run_adhoc_job(job: JobCreate, request: Request):
     if not validation.valid:
         raise HTTPException(status_code=422, detail=validation.errors)
     job_def = _attach_schedule(job_def, force=True)
-    db.job_definitions.insert_one(job_def.to_mongo())
+    _insert_job_definition(db, job_def)
     _enqueue_job(job_def.id, reason="adhoc_run", priority=job_def.priority, domain=domain)
     return _sanitize_job_response(job_def)
 

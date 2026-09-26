@@ -81,12 +81,13 @@ def ensure_indexes() -> None:
     db.job_versions.create_index([("job_id", 1), ("version", -1)])
     db.job_versions.create_index([("domain", 1), ("changed_at", -1)])
 
-    # Uniqueness indexes are already enforced at the application layer
-    # (see the admin.py domain-creation check and the job-name-per-domain
-    # convention), but any deployment upgrading from before that check
-    # existed could in principle already have a duplicate-data conflict.
-    # Don't let that crash startup — log and move on; the non-unique
-    # performance indexes above still get created either way.
+    # These enforce the domain-scoped uniqueness convention at the DB layer;
+    # scheduler/api/jobs.py's _insert_job_definition/_replace_job_definition
+    # translate the resulting DuplicateKeyError into a clean 409. Any
+    # deployment upgrading from before that check existed could in principle
+    # already have a duplicate-data conflict, though — don't let that crash
+    # startup. Log and move on; the non-unique performance indexes above
+    # still get created either way.
     for collection, keys in (
         (db.job_definitions, [("domain", 1), ("name", 1)]),
         (db.credentials, [("domain", 1), ("name", 1)]),
