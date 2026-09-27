@@ -9,11 +9,17 @@ set -a
 set +a
 
 repo="${HYDRA_DEPLOY_REPO_ROOT:-/opt/hydra}"
-worker=hydra-worker-1
+compose=(docker compose -f docker-compose.yml -f docker-compose.worker.yml)
+# Resolve the actual container name via `compose ps`, not the default
+# "hydra-worker-1" naming convention — that breaks silently under a custom
+# `-p`/COMPOSE_PROJECT_NAME or the multi-pool naming scheme
+# (docker-compose.workers.yml). `head -n1` picks one representative
+# container if the worker service is scaled to multiple replicas.
+worker=$( (cd "$repo" && "${compose[@]}" ps --format '{{.Name}}' worker) | head -n1)
 # Resolve the expected user via `compose config` (the repo root's own .env,
 # not this directory's) rather than re-deriving the HYDRA_WORKER_UID/GID
 # default here too — same reasoning as verify-live.sh's image-tag check.
-expected_user=$(cd "$repo" && docker compose -f docker-compose.yml -f docker-compose.worker.yml config --format json \
+expected_user=$(cd "$repo" && "${compose[@]}" config --format json \
   | python3 -c "import json,sys; print(json.load(sys.stdin)['services']['worker']['user'])")
 test "$(docker inspect "$worker" --format '{{.Config.User}}')" = "$expected_user"
 test "$(docker inspect "$worker" --format '{{.HostConfig.ReadonlyRootfs}}')" = true
