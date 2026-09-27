@@ -1,0 +1,48 @@
+# Optional PodDisruptionBudgets for the single-pod-by-default stateful/
+# critical components (scheduler, redis, mongodb). Off by default (this is a
+# home-lab-oriented chart) — a PDB with minAvailable equal to the current
+# replica count blocks *voluntary* disruption (node drain/eviction) entirely
+# for a single-replica component, which is exactly the point for a production
+# overlay, but could surprise an operator doing routine node maintenance on a
+# home-lab cluster who isn't expecting `kubectl drain` to stall.
+{{- if and .Values.redis.enabled .Values.redis.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "hydra.redis.fullname" . }}
+  labels:
+    {{- include "hydra.componentLabels" (dict "root" . "component" "redis") | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.redis.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "hydra.componentSelectorLabels" (dict "root" . "component" "redis") | nindent 6 }}
+{{- end }}
+---
+{{- if and .Values.mongodb.enabled .Values.mongodb.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "hydra.mongodb.fullname" . }}
+  labels:
+    {{- include "hydra.componentLabels" (dict "root" . "component" "mongodb") | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.mongodb.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "hydra.componentSelectorLabels" (dict "root" . "component" "mongodb") | nindent 6 }}
+{{- end }}
+---
+{{- if and .Values.scheduler.enabled .Values.scheduler.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "hydra.scheduler.fullname" . }}
+  labels:
+    {{- include "hydra.componentLabels" (dict "root" . "component" "scheduler") | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.scheduler.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "hydra.componentSelectorLabels" (dict "root" . "component" "scheduler") | nindent 6 }}
+{{- end }}
