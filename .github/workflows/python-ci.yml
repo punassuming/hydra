@@ -368,3 +368,65 @@ jobs:
         if: always()
         working-directory: .
         run: docker compose -f docker-compose.yml -f .github/compose.e2e.yml down -v
+
+  acceptance:
+    name: Acceptance suite (release-gated)
+    # tests/acceptance/ is opt-in and deliberately never runs on every PR
+    # (minutes, not seconds; needs a live deployment) -- only run it on the
+    # release-please-created release PR, one last real-deployment check
+    # before a version actually ships.
+    if: startsWith(github.head_ref, 'release-please--')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install test environment
+        run: |
+          python -m pip install uv==0.5.13
+          uv sync --frozen --dev
+
+      - name: Create empty Compose environment file
+        run: touch .env
+
+      # Fixed project name (-p) so the Compose-generated network name
+      # (<project>_backend) is deterministic -- the acceptance suite's
+      # "docker" backend needs that name to attach its own throwaway worker
+      # containers (which it builds/runs itself; see tests/acceptance/README.md).
+      - name: Start scheduler dependencies
+        run: docker compose -p hydra-acceptance -f docker-compose.yml -f .github/compose.e2e.yml up -d --build redis mongo scheduler
+
+      - name: Wait for the scheduler
+        run: |
+          for attempt in {1..30}; do
+            if curl --fail --silent --show-error http://127.0.0.1:8000/health >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Scheduler did not become ready within 60 seconds" >&2
+          exit 1
+
+      - name: Run acceptance suite
+        env:
+          HYDRA_ACCEPTANCE: "1"
+          ACCEPTANCE_API_URL: http://127.0.0.1:8000
+          ACCEPTANCE_ADMIN_TOKEN: ci-admin-token
+          ACCEPTANCE_BACKEND: docker
+          ACCEPTANCE_DOCKER_NETWORK: hydra-acceptance_backend
+        run: uv run --frozen pytest tests/acceptance -v
+
+      - name: Show service logs after failure
+        if: failure()
+        run: docker compose -p hydra-acceptance -f docker-compose.yml -f .github/compose.e2e.yml logs --no-color
+
+      - name: Stop test stack
+        if: always()
+        run: docker compose -p hydra-acceptance -f docker-compose.yml -f .github/compose.e2e.yml down -v
