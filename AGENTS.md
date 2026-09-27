@@ -76,6 +76,7 @@ Hydra Jobs is a distributed job runner designed for flexibility and scalability.
   - Worker detail page includes metrics trend plotting + concurrency-lane timeline/Gantt + operational event timeline.
   - Workers main page includes an aggregated Execution/Business timeline section (all workers) for recent run spans and operational events.
   - Job detail page supports in-place editing of existing jobs and quick activate/deactivate (schedule enabled) actions.
+  - Job creation/edit form's "Advanced Settings" (Placement, Completion Criteria, Notifications, Auth & Impersonation, Source Provisioning, Advanced Retry Settings, Misc) render as `Tabs` rather than a flat scroll, matching `JobDetail.tsx`'s tabbed layout convention.
   - Logs view supports search/highlight, parsed/raw modes, expansion, and copy actions.
   - AI log helper supports multiple analysis modes (failure fix, summary, error extraction, retry tuning, custom question).
   - Theme and key panel states persist via localStorage.

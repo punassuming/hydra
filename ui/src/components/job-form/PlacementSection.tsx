@@ -1,4 +1,4 @@
-import { Col, Collapse, Form, Row, Select, Typography } from "antd";
+import { Col, Form, Row, Select, Typography } from "antd";
 import { JobPayload } from "../../api/jobs";
 import { defaultAffinity, WorkerHints } from "./defaults";
 
@@ -10,15 +10,8 @@ interface Props {
 
 export function PlacementSection({ payload, updateAffinity, workerHints }: Props) {
   return (
-    <Collapse
-      size="small"
-      items={[
-        {
-          key: "placement",
-          label: "Placement / Worker Affinity",
-          children: (
-            <>
-              <Row gutter={16}>
+    <>
+      <Row gutter={16}>
                 <Col xs={24} md={8}>
                   <Form.Item label="Target OS">
                     <Select
@@ -88,13 +81,9 @@ export function PlacementSection({ payload, updateAffinity, workerHints }: Props
                   </Form.Item>
                 </Col>
               </Row>
-              <Typography.Text type="secondary">
-                Executor type matching is automatic based on the selected executor.
-              </Typography.Text>
-            </>
-          ),
-        },
-      ]}
-    />
+      <Typography.Text type="secondary">
+        Executor type matching is automatic based on the selected executor.
+      </Typography.Text>
+    </>
   );
 }

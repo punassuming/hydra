@@ -4,7 +4,6 @@ import {
   Alert,
   Button,
   Col,
-  Collapse,
   Divider,
   Form,
   Input,
@@ -13,6 +12,7 @@ import {
   Select,
   Space,
   Switch,
+  Tabs,
   Typography,
 } from "antd";
 import { JobDefinition, PythonEnvironment, SourceConfig } from "../../types";
@@ -1114,34 +1114,6 @@ export function JobForm({
     </>
   );
 
-  // ── Advanced panel: auto-opens when editing jobs with non-default values ──
-  const advancedActiveKeys = useMemo(() => {
-    if (!showAdvanced) return [];
-    const keys: string[] = [];
-    const p = payload;
-    if (
-      (p.affinity.hostnames?.length ?? 0) > 0 ||
-      (p.affinity.subnets?.length ?? 0) > 0 ||
-      (p.affinity.deployment_types?.length ?? 0) > 0 ||
-      (p.affinity.allowed_users?.length ?? 0) > 0 ||
-      (p.affinity.tags?.length ?? 0) > 0
-    )
-      keys.push("placement");
-    if (
-      p.completion.exit_codes.length !== 1 ||
-      p.completion.exit_codes[0] !== 0 ||
-      p.completion.stdout_contains.length > 0 ||
-      p.completion.stdout_not_contains.length > 0
-    )
-      keys.push("completion");
-    if ((p.on_failure_webhooks?.length ?? 0) > 0 || (p.on_failure_email_to?.length ?? 0) > 0) keys.push("notifications");
-    if ((p.executor as any).impersonate_user || (p.executor as any).kerberos?.principal) keys.push("auth");
-    if (p.source) keys.push("source");
-    if ((p.retries ?? 0) > 0 || (p.max_retries ?? 0) > 0) keys.push("retry-advanced");
-    if (p.priority !== 5 || p.sla_max_duration_seconds != null || p.bypass_concurrency) keys.push("misc");
-    return keys;
-  }, [showAdvanced, payload]);
-
   return (
     <Form layout="vertical" onFinish={handleValidateThenSubmit} size="small">
       <input
@@ -1257,22 +1229,55 @@ export function JobForm({
       </Divider>
 
       {showAdvanced && (
-        <Space direction="vertical" size={8} style={{ width: "100%" }}>
-          <PlacementSection payload={payload} updateAffinity={updateAffinity} workerHints={workerHints} />
-          <CompletionSection completion={payload.completion} updateCompletion={updateCompletion} />
-          <NotificationsSection
-            payload={payload}
-            updatePayload={updatePayload}
-            notifyWebhookEnabled={notifyWebhookEnabled}
-            setNotifyWebhookEnabled={setNotifyWebhookEnabled}
-            notifyEmailEnabled={notifyEmailEnabled}
-            setNotifyEmailEnabled={setNotifyEmailEnabled}
-          />
-          <AuthSection executor={executor} updateExecutor={updateExecutor} />
-          <SourceSection source={payload.source} updateSource={updateSource} />
-          <RetryAdvancedSection payload={payload} updatePayload={updatePayload} />
-          <MiscSection payload={payload} updatePayload={updatePayload} />
-        </Space>
+        <Tabs
+          size="small"
+          items={[
+            {
+              key: "placement",
+              label: "Placement",
+              children: <PlacementSection payload={payload} updateAffinity={updateAffinity} workerHints={workerHints} />,
+            },
+            {
+              key: "completion",
+              label: "Completion Criteria",
+              children: <CompletionSection completion={payload.completion} updateCompletion={updateCompletion} />,
+            },
+            {
+              key: "notifications",
+              label: "Notifications",
+              children: (
+                <NotificationsSection
+                  payload={payload}
+                  updatePayload={updatePayload}
+                  notifyWebhookEnabled={notifyWebhookEnabled}
+                  setNotifyWebhookEnabled={setNotifyWebhookEnabled}
+                  notifyEmailEnabled={notifyEmailEnabled}
+                  setNotifyEmailEnabled={setNotifyEmailEnabled}
+                />
+              ),
+            },
+            {
+              key: "auth",
+              label: "Auth & Impersonation",
+              children: <AuthSection executor={executor} updateExecutor={updateExecutor} />,
+            },
+            {
+              key: "source",
+              label: "Source Provisioning",
+              children: <SourceSection source={payload.source} updateSource={updateSource} />,
+            },
+            {
+              key: "retry-advanced",
+              label: "Advanced Retry Settings",
+              children: <RetryAdvancedSection payload={payload} updatePayload={updatePayload} />,
+            },
+            {
+              key: "misc",
+              label: "Misc",
+              children: <MiscSection payload={payload} updatePayload={updatePayload} />,
+            },
+          ]}
+        />
       )}
 
       {/* ── Action buttons ── */}
