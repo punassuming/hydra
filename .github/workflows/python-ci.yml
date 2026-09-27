@@ -240,9 +240,18 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
 
       - name: Build ${{ matrix.service }} image
-        run: docker build -f ${{ matrix.dockerfile }} -t hydra-${{ matrix.service }}:ci ${{ matrix.context }}
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: false
+          load: true
+          tags: hydra-${{ matrix.service }}:ci
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
 
   go-test:
     name: Go worker tests
