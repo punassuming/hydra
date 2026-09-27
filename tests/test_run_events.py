@@ -15,6 +15,8 @@ import pytest
 
 from scheduler.models.job_run import TERMINAL_STATES
 from scheduler.run_events import (
+    RETRY_BACKOFF_CAP_SECONDS,
+    _compute_retry_backoff_delay,
     _handle_event,
     _handle_run_end,
     _handle_run_start,
@@ -60,6 +62,27 @@ def _make_db(existing_doc=None):
     db.job_runs.insert_one.return_value = SimpleNamespace(inserted_id="r1")
     db.job_definitions.find_one.return_value = None
     return db
+
+
+# ---------------------------------------------------------------------------
+# Retry backoff
+# ---------------------------------------------------------------------------
+
+class TestComputeRetryBackoffDelay:
+    def test_zero_base_delay_stays_zero_regardless_of_attempt(self):
+        assert _compute_retry_backoff_delay(0, retry_attempt=1) == 0
+        assert _compute_retry_backoff_delay(0, retry_attempt=5) == 0
+
+    def test_first_retry_keeps_unmodified_base_delay(self):
+        assert _compute_retry_backoff_delay(10, retry_attempt=1) == 10
+
+    def test_delay_doubles_per_subsequent_attempt(self):
+        assert _compute_retry_backoff_delay(10, retry_attempt=2) == 20
+        assert _compute_retry_backoff_delay(10, retry_attempt=3) == 40
+        assert _compute_retry_backoff_delay(10, retry_attempt=4) == 80
+
+    def test_delay_is_capped(self):
+        assert _compute_retry_backoff_delay(10, retry_attempt=20) == RETRY_BACKOFF_CAP_SECONDS
 
 
 # ---------------------------------------------------------------------------
@@ -192,6 +215,26 @@ class TestHandleRunEndIdempotency:
             _handle_run_end(_run_end_payload(status="timed_out"))
 
         mock_retry.assert_called_once()
+
+    def test_scheduler_retry_delay_backs_off_on_second_attempt(self):
+        """The first retry keeps its configured base delay; a later retry backs off."""
+        existing = {"_id": "r1", "status": "running", "start_ts": datetime.now(timezone.utc)}
+        db = _make_db(existing_doc=existing)
+        db.job_runs.update_one.return_value = SimpleNamespace(matched_count=1, upserted_id=None)
+        db.job_definitions.find_one.return_value = {"max_retries": 3, "retry_delay_seconds": 10, "priority": 5}
+
+        payload = _run_end_payload(status="timed_out")
+        payload["retry_attempt"] = 1  # this run was itself the first retry; about to enqueue the second
+
+        with patch("scheduler.run_events.get_db", return_value=db), \
+             patch("scheduler.run_events.append_worker_op"), \
+             patch("scheduler.run_events._enqueue_job_for_retry") as mock_retry:
+            _handle_run_end(payload)
+
+        mock_retry.assert_called_once()
+        _, kwargs = mock_retry.call_args
+        assert kwargs["retry_attempt"] == 2
+        assert kwargs["delay_seconds"] == 20  # 10s base doubled once for the 2nd retry
 
     def test_run_end_missing_run_id_is_silently_dropped(self):
         db = _make_db()

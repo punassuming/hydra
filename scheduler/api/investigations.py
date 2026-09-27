@@ -66,6 +66,14 @@ _CATALOG = [
             f"in the last {RETRY_STORM_LOOKBACK_HOURS}h."
         ),
     },
+    {
+        "key": "dead_letter",
+        "label": "Dead Letter",
+        "description": (
+            "Jobs configured with retries whose most recent run failed or timed out "
+            "after exhausting every configured retry attempt."
+        ),
+    },
 ]
 _CATALOG_BY_KEY = {item["key"]: item for item in _CATALOG}
 
@@ -286,6 +294,47 @@ def _investigate_retry_storm(db, jobs: list) -> list:
     return results
 
 
+def _investigate_dead_letter(db, jobs: list) -> list:
+    """Jobs configured with scheduler-level retries whose most recent run
+    genuinely gave up (failed/timed out after retry_attempt reached
+    max_retries) — distinct from retry_storm, which flags jobs still
+    actively retry-looping, not ones that have stopped retrying entirely.
+    """
+    results = []
+    for job in jobs:
+        job_id = job["_id"]
+        max_retries = job.get("max_retries")
+        try:
+            max_retries = int(max_retries) if max_retries is not None else 0
+        except (TypeError, ValueError):
+            continue
+        if max_retries <= 0:
+            continue
+        latest = next(iter(db.job_runs.find({"job_id": job_id}).sort("start_ts", -1).limit(1)), None)
+        if not latest or latest.get("status") not in ("failed", "timed_out"):
+            continue
+        retry_attempt = latest.get("retry_attempt")
+        try:
+            retry_attempt = int(retry_attempt) if retry_attempt is not None else 0
+        except (TypeError, ValueError):
+            retry_attempt = 0
+        if retry_attempt < max_retries:
+            continue
+        results.append(
+            {
+                "job_id": job_id,
+                "job_name": job.get("name", job_id),
+                "domain": job.get("domain", "prod"),
+                "metric_label": f"retry attempts exhausted (max {max_retries})",
+                "metric_value": retry_attempt,
+                "last_run_id": latest.get("_id"),
+                "last_run_at": _iso(latest.get("start_ts")),
+            }
+        )
+    results.sort(key=lambda r: r["metric_value"], reverse=True)
+    return results
+
+
 @router.get("/")
 def list_investigations():
     return _CATALOG
@@ -297,7 +346,12 @@ def run_investigation(key: str, request: Request):
         raise HTTPException(status_code=404, detail="unknown investigation")
 
     db = get_db()
-    jobs = list(db.job_definitions.find(_scope_query(request), {"name": 1, "domain": 1, "sla_max_duration_seconds": 1}))
+    jobs = list(
+        db.job_definitions.find(
+            _scope_query(request),
+            {"name": 1, "domain": 1, "sla_max_duration_seconds": 1, "max_retries": 1},
+        )
+    )
 
     if key == "failed_recent":
         try:
@@ -313,7 +367,9 @@ def run_investigation(key: str, request: Request):
         results = _investigate_never_succeeded(db, jobs)
     elif key == "sla_miss":
         results = _investigate_sla_miss(db, jobs)
-    else:
+    elif key == "retry_storm":
         results = _investigate_retry_storm(db, jobs)
+    else:
+        results = _investigate_dead_letter(db, jobs)
 
     return {"key": key, "label": _CATALOG_BY_KEY[key]["label"], "results": results}
