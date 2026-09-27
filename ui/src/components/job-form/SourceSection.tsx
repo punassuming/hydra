@@ -1,4 +1,4 @@
-import { Alert, Col, Collapse, Form, Input, Row, Select, Switch, Typography } from "antd";
+import { Alert, Col, Form, Input, Row, Select, Switch, Typography } from "antd";
 import { SourceConfig } from "../../types";
 import { JobPayload } from "../../api/jobs";
 
@@ -9,15 +9,8 @@ interface Props {
 
 export function SourceSection({ source, updateSource }: Props) {
   return (
-    <Collapse
-      size="small"
-      items={[
-        {
-          key: "source",
-          label: "Source Provisioning",
-          children: (
-            <>
-              <Row gutter={16} align="middle">
+    <>
+      <Row gutter={16} align="middle">
                 <Col xs={24} md={12}>
                   <Form.Item label="Enable Source Provisioning">
                     <Switch
@@ -172,10 +165,6 @@ export function SourceSection({ source, updateSource }: Props) {
                   style={{ marginTop: 8 }}
                 />
               )}
-            </>
-          ),
-        },
-      ]}
-    />
+    </>
   );
 }
