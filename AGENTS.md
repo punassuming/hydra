@@ -89,7 +89,7 @@ Hydra Jobs is a distributed job runner designed for flexibility and scalability.
 - `scheduler/api/*` expose jobs, workers, health, events (SSE), logs streaming, history, and admin domain/template management.
 - `scheduler/api/workers.py` — worker list/state + metrics/timeline endpoints.
 - `scheduler/api/ai.py` — AI endpoints: `generate_job` (NL → job JSON), `analyze_run` (single-run log analysis), `predict_duration` (historical duration percentiles, no LLM), `diagnose_regression` (diffs a failed run against the job's last success + duration baseline, returns a structured root-cause hypothesis). `_call_llm()` is the single Gemini/OpenAI dispatch point all four share where applicable; `duration_percentiles()` is shared by `predict_duration`, `diagnose_regression`, and the `long_running_outliers` investigation.
-- `scheduler/api/investigations.py` — canned, LLM-free operational checks (`failed_recent`, `long_running_outliers`, `flaky_jobs`, `never_succeeded`, `sla_miss`, `retry_storm`) exposed as `GET /investigations/` (catalog) and `GET /investigations/{key}` (run one). Deliberately does not call an LLM — every check is a fixed, whitelisted query, so it needs no provider API key and returns instantly. `retry_attempt` (sent by both workers in every `run_end` event) is persisted onto `job_runs` docs by `run_events.py::_handle_run_end` specifically so `retry_storm` has something to query — it was previously received and silently dropped.
+- `scheduler/api/investigations.py` — canned, LLM-free operational checks (`failed_recent`, `long_running_outliers`, `flaky_jobs`, `never_succeeded`, `sla_miss`, `retry_storm`, `dead_letter`) exposed as `GET /investigations/` (catalog) and `GET /investigations/{key}` (run one). Deliberately does not call an LLM — every check is a fixed, whitelisted query, so it needs no provider API key and returns instantly. `retry_attempt` (sent by both workers in every `run_end` event) is persisted onto `job_runs` docs by `run_events.py::_handle_run_end` specifically so `retry_storm`/`dead_letter` have something to query — it was previously received and silently dropped. `dead_letter` flags jobs configured with retries whose most recent run failed/timed out after `retry_attempt` reached `max_retries` — distinct from `retry_storm`, which flags jobs still actively retry-looping.
 - `scheduler/models/*` define Pydantic models for jobs, runs, workers, executors, and scheduling.
 - `scheduler/utils/*` house affinity checks, worker selection, failover logic, auth helpers, schedule math, and logging setup.
 - `worker/worker.py` registers the worker, maintains heartbeats, executes jobs, emits `run_start`/`run_end` events to Redis, and records worker operation events.
@@ -246,6 +246,7 @@ The Compose files themselves (`docker-compose.worker.go.yml`, `docker-compose.wo
 - `SCHEDULER_MONGO_HEALTH_CHECK_INTERVAL` — Seconds between passes of the MongoDB self-healing loop, which pings Mongo and resets the client singleton on persistent failure (default `30`)
 - `HYDRA_RUN_RETENTION_DAYS` — Purge `job_runs` older than this many days via the run_retention_loop background loop. Unset or `0` disables purging entirely (default)
 - `SCHEDULER_RUN_RETENTION_CHECK_INTERVAL` — Seconds between passes of the run retention loop (default `3600`)
+- `SCHEDULER_RETRY_BACKOFF_CAP_SECONDS` — Ceiling for the exponential backoff applied to scheduler-level job retries (each retry's delay doubles from the job's `retry_delay_seconds`, capped here; default `300`)
 - `CORS_ALLOW_ORIGINS` — CORS allowed origins
 - `ADMIN_TOKEN` — Admin authentication token
 - `ADMIN_DOMAIN` — Admin domain name
@@ -282,7 +283,7 @@ The Compose files themselves (`docker-compose.worker.go.yml`, `docker-compose.wo
 *   **AI Log Assistant:** In Run Logs, use AI helper actions for remediation, summary, error extraction, retry tuning, or custom questions. Select between Gemini and OpenAI.
 *   **Duration Prediction:** `POST /ai/predict_duration` — historical median/mean/p90 runtime for a job, no LLM call.
 *   **Run Diff Copilot:** In Run Logs, "Compare vs Last Success" (`POST /ai/diagnose_regression`) diffs the failed run's output against the job's last successful run plus its duration baseline, returning a structured cause/confidence/evidence/fix/transience verdict instead of analyzing one run in isolation.
-*   **Investigate (not AI):** header button opening canned, LLM-free checks (`GET /investigations/`) — recently failed, running longer than usual, flaky, never succeeded, SLA misses, retry storms. No provider key required; complements the AI features above rather than replacing them.
+*   **Investigate (not AI):** header button opening canned, LLM-free checks (`GET /investigations/`) — recently failed, running longer than usual, flaky, never succeeded, SLA misses, retry storms, dead-lettered (retries exhausted). No provider key required; complements the AI features above rather than replacing them.
 *   **Configuration:** Ensure `GEMINI_API_KEY` and/or `OPENAI_API_KEY` are set in the Scheduler environment for the AI-backed features (not needed for Investigate).
 
 ## Git Source Execution
