@@ -421,6 +421,11 @@ jobs:
           ACCEPTANCE_ADMIN_TOKEN: ci-admin-token
           ACCEPTANCE_BACKEND: docker
           ACCEPTANCE_DOCKER_NETWORK: hydra-acceptance_backend
+          # Deterministic thanks to the fixed -p hydra-acceptance project name;
+          # enables the Redis/Mongo restart resilience tests in
+          # tests/acceptance/test_50_resilience.py instead of skipping them.
+          ACCEPTANCE_DOCKER_REDIS_CONTAINER: hydra-acceptance-redis-1
+          ACCEPTANCE_DOCKER_MONGO_CONTAINER: hydra-acceptance-mongo-1
         run: uv run --frozen pytest tests/acceptance -v
 
       - name: Show service logs after failure

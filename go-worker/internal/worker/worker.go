@@ -342,7 +342,14 @@ func (w *workerState) pollLoop(ctx context.Context, queueKey string) error {
 			}
 			blpopBackoff = nextBLPOPBackoff(blpopBackoff)
 			log.Printf("[worker] BLPOP error: %v; retrying in %s", err, blpopBackoff)
-			time.Sleep(blpopBackoff)
+			timer := time.NewTimer(blpopBackoff)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				log.Printf("[worker] shutting down")
+				return nil
+			case <-timer.C:
+			}
 			continue
 		}
 		blpopBackoff = 0

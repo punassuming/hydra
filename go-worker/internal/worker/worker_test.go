@@ -403,6 +403,43 @@ func TestNextBLPOPBackoff(t *testing.T) {
 	}
 }
 
+func TestPollLoop_BLPOPErrorBackoffIsInterruptibleByContext(t *testing.T) {
+	// A worker sitting in the (up to 60s) BLPOP-error backoff must still
+	// return promptly on shutdown instead of riding out the full sleep —
+	// otherwise a short termination grace period hard-kills it mid-backoff.
+	rdb := redis.NewClient(&redis.Options{
+		Addr:        "127.0.0.1:1",
+		DialTimeout: 50 * time.Millisecond,
+		MaxRetries:  -1,
+	})
+	defer rdb.Close()
+
+	w := &workerState{
+		cfg:       &config.Config{WorkerID: "w1", Domain: "prod", MaxConcurrency: 1},
+		rdb:       rdb,
+		activeIDs: make(map[string]struct{}),
+		killChans: make(map[string]context.CancelFunc),
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- w.pollLoop(ctx, "queue:test") }()
+
+	// Give it time for at least one failed BLPOP attempt to land it in the
+	// (2s-floor) backoff sleep before cancelling.
+	time.Sleep(150 * time.Millisecond)
+	cancel()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("expected pollLoop to return nil on shutdown, got %v", err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("pollLoop did not return promptly after context cancellation during BLPOP backoff")
+	}
+}
+
 func TestRunJob_RecoversFromPanicAndMarksRunFailed(t *testing.T) {
 	// A panic anywhere in job execution must not crash the whole worker
 	// process — runJob should recover, log, and return normally so other

@@ -234,13 +234,14 @@ ingress:
 
 ### High availability (PodDisruptionBudgets)
 
-Off by default for `redis`, `mongodb`, and `scheduler` — each defaults to a
-single pod, and a `PodDisruptionBudget` at `minAvailable: 1` for a
-single-pod component blocks *voluntary* disruption (`kubectl drain`, node
-cordon/eviction) entirely until you scale up or explicitly override it.
-That's the right call for a production overlay that wants a human to think
-twice before draining the node MongoDB happens to be on, but it can
-surprise routine node maintenance on a home-lab cluster, so it's opt-in:
+Off by default for `redis`, `mongodb`, `scheduler`, and `orchestrator` —
+each defaults to a single pod, and a `PodDisruptionBudget` at
+`minAvailable: 1` for a single-pod component blocks *voluntary* disruption
+(`kubectl drain`, node cordon/eviction) entirely until you scale up or
+explicitly override it. That's the right call for a production overlay
+that wants a human to think twice before draining the node MongoDB
+happens to be on, but it can surprise routine node maintenance on a
+home-lab cluster, so it's opt-in:
 
 ```yaml
 redis:
@@ -252,6 +253,13 @@ mongodb:
     enabled: true
     minAvailable: 1
 scheduler:
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+# Only takes effect when scheduler.mode: separated — that's the only
+# configuration where the orchestrator (background loops) runs as its own
+# Deployment distinct from the API-only scheduler Deployment above.
+orchestrator:
   podDisruptionBudget:
     enabled: true
     minAvailable: 1

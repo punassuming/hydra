@@ -46,3 +46,22 @@ spec:
     matchLabels:
       {{- include "hydra.componentSelectorLabels" (dict "root" . "component" "scheduler") | nindent 6 }}
 {{- end }}
+---
+{{- if and .Values.scheduler.enabled (eq .Values.scheduler.mode "separated") .Values.orchestrator.podDisruptionBudget.enabled }}
+# In separated mode, background-loop orchestration runs in its own Deployment
+# (component=orchestrator, see scheduler.yaml) distinct from the API-only
+# scheduler Deployment above — it needs its own PDB, or a node drain can still
+# evict the single orchestrator pod and stall dispatch/failover/retention
+# until it reschedules.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "hydra.orchestrator.fullname" . }}
+  labels:
+    {{- include "hydra.componentLabels" (dict "root" . "component" "orchestrator") | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.orchestrator.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "hydra.componentSelectorLabels" (dict "root" . "component" "orchestrator") | nindent 6 }}
+{{- end }}
