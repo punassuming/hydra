@@ -84,6 +84,9 @@ orchestrator:
   nodeSelector: {}
   tolerations: []
   affinity: {}
+  podDisruptionBudget:
+    enabled: false
+    minAvailable: 1
 ui:
   enabled: true
   replicas: 1
