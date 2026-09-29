@@ -90,6 +90,7 @@ def test_list_investigations_returns_catalog():
     keys = {item["key"] for item in response.json()}
     assert keys == {
         "failed_recent", "long_running_outliers", "flaky_jobs", "never_succeeded", "sla_miss", "retry_storm",
+        "dead_letter",
     }
 
 
@@ -244,3 +245,42 @@ def test_retry_storm_requires_minimum_retried_run_count():
     assert len(data["results"]) == 1
     assert data["results"][0]["job_id"] == "job-storm"
     assert data["results"][0]["metric_value"] == 3
+
+
+def test_dead_letter_requires_exhausted_retries_on_latest_run():
+    jobs = [
+        # Exhausted all 2 configured retries, latest run still failed.
+        {"_id": "job-exhausted", "name": "exhausted", "domain": "prod", "max_retries": 2},
+        # Still has retries left (retry_attempt 1 of 2) — not exhausted yet.
+        {"_id": "job-retrying", "name": "retrying", "domain": "prod", "max_retries": 2},
+        # No retry policy configured at all — never counts as "exhausted".
+        {"_id": "job-no-retries", "name": "no-retries", "domain": "prod", "max_retries": 0},
+        # Exhausted retries, but the latest run actually succeeded.
+        {"_id": "job-recovered", "name": "recovered", "domain": "prod", "max_retries": 2},
+    ]
+    runs = [
+        {
+            "_id": "e1", "job_id": "job-exhausted", "status": "failed", "retry_attempt": 2,
+            "start_ts": _now() - timedelta(hours=1),
+        },
+        {
+            "_id": "r1", "job_id": "job-retrying", "status": "failed", "retry_attempt": 1,
+            "start_ts": _now() - timedelta(hours=1),
+        },
+        {
+            "_id": "n1", "job_id": "job-no-retries", "status": "failed", "retry_attempt": 0,
+            "start_ts": _now() - timedelta(hours=1),
+        },
+        {
+            "_id": "c1", "job_id": "job-recovered", "status": "success", "retry_attempt": 2,
+            "start_ts": _now() - timedelta(hours=1),
+        },
+    ]
+    db = _FakeDB(jobs, runs)
+    with patch("scheduler.api.investigations.get_db", return_value=db):
+        response = client.get("/investigations/dead_letter", headers=_auth_headers())
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["results"]) == 1
+    assert data["results"][0]["job_id"] == "job-exhausted"
+    assert data["results"][0]["metric_value"] == 2

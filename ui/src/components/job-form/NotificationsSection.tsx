@@ -1,4 +1,4 @@
-import { Col, Collapse, Form, Input, Row, Space, Switch, Typography } from "antd";
+import { Col, Form, Input, Row, Space, Switch, Typography } from "antd";
 import { JobPayload } from "../../api/jobs";
 import { parseList } from "./defaults";
 
@@ -20,14 +20,7 @@ export function NotificationsSection({
   setNotifyEmailEnabled,
 }: Props) {
   return (
-    <Collapse
-      size="small"
-      items={[
-        {
-          key: "notifications",
-          label: "Notifications",
-          children: (
-            <Space direction="vertical" style={{ width: "100%" }} size={6}>
+    <Space direction="vertical" style={{ width: "100%" }} size={6}>
               <Space>
                 <Typography.Text strong>Webhook Alerts</Typography.Text>
                 <Switch checked={notifyWebhookEnabled} onChange={setNotifyWebhookEnabled} />
@@ -72,10 +65,6 @@ export function NotificationsSection({
                   </Form.Item>
                 </>
               )}
-            </Space>
-          ),
-        },
-      ]}
-    />
+    </Space>
   );
 }

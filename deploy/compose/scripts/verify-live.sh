@@ -17,18 +17,30 @@ api_url=${HYDRA_API_URL:-http://${HYDRA_DEPLOY_HOST_IP:-127.0.0.1}:${HYDRA_DEPLO
 ui_url=${HYDRA_UI_URL:-http://${HYDRA_DEPLOY_HOST_IP:-127.0.0.1}:${HYDRA_DEPLOY_UI_PORT:-5173}}
 
 test "$(git -C "$repo" status --porcelain)" = ""
-resolved=$(cd "$repo" && docker compose -f docker-compose.yml -f docker-compose.worker.yml config --format json)
+compose=(docker compose -f docker-compose.yml -f docker-compose.worker.yml)
+resolved=$(cd "$repo" && "${compose[@]}" config --format json)
+# Resolve actual container names via `compose ps`, not the default
+# "<project>_<service>_1"/"<project>-<service>-1" naming convention — that
+# breaks silently under a custom `-p`/COMPOSE_PROJECT_NAME or the multi-pool
+# naming scheme (docker-compose.workers.yml). `head -n1` picks one
+# representative container if a service is scaled to multiple replicas.
+container_name() {
+  (cd "$repo" && "${compose[@]}" ps --format '{{.Name}}' "$1") | head -n1
+}
+
 for service in scheduler ui worker; do
   expected=$(printf '%s' "$resolved" | python3 -c "import json,sys; print(json.load(sys.stdin)['services']['$service']['image'])")
-  actual=$(docker inspect "hydra-${service}-1" --format '{{.Config.Image}}')
+  container=$(container_name "$service")
+  actual=$(docker inspect "$container" --format '{{.Config.Image}}')
   test "$actual" = "$expected"
-  test "$(docker inspect "hydra-${service}-1" --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}')" = healthy
+  test "$(docker inspect "$container" --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}')" = healthy
 done
 
 test "$(curl -fsS --max-time 5 "$api_url/health" | python3 -c 'import json,sys; x=json.load(sys.stdin); print(x["status"], x["workers"])')" = "ok 1"
 test "$(curl -sS -o /dev/null -w '%{http_code}' "$api_url/jobs/")" = 401
 test "$(curl -sS -o /dev/null -w '%{http_code}' "$ui_url/")" = 200
 for store in redis mongo; do
-  test -z "$(docker inspect "hydra-${store}-1" --format '{{range $port,$bindings := .NetworkSettings.Ports}}{{if $bindings}}published{{end}}{{end}}')"
+  container=$(container_name "$store")
+  test -z "$(docker inspect "$container" --format '{{range $port,$bindings := .NetworkSettings.Ports}}{{if $bindings}}published{{end}}{{end}}')"
 done
 echo 'live_verification=passed'

@@ -1,14 +1,19 @@
 package worker
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/redis/go-redis/v9"
+
+	"github.com/punassuming/hydra/go-worker/internal/config"
 	"github.com/punassuming/hydra/go-worker/internal/executor"
 )
 
@@ -379,4 +384,112 @@ func TestTouchHeartbeatFile_SurvivesUnwritablePath(t *testing.T) {
 	// A liveness file write failure must never panic — it's best-effort.
 	t.Setenv("WORKER_HEARTBEAT_FILE", "/nonexistent-dir/heartbeat")
 	touchHeartbeatFile()
+}
+
+func TestNextBLPOPBackoff(t *testing.T) {
+	if got := nextBLPOPBackoff(0); got != blpopBackoffInitial {
+		t.Errorf("expected the floor %s from a reset (0) state, got %s", blpopBackoffInitial, got)
+	}
+	if got := nextBLPOPBackoff(blpopBackoffInitial); got != blpopBackoffInitial*2 {
+		t.Errorf("expected doubling to %s, got %s", blpopBackoffInitial*2, got)
+	}
+	if got := nextBLPOPBackoff(blpopBackoffMax); got != blpopBackoffMax {
+		t.Errorf("expected the backoff to stay capped at %s, got %s", blpopBackoffMax, got)
+	}
+	// A value already past the cap (shouldn't happen in practice, but the
+	// helper must not overflow/undercut the cap) still clamps to the cap.
+	if got := nextBLPOPBackoff(blpopBackoffMax * 10); got != blpopBackoffMax {
+		t.Errorf("expected an over-cap input to clamp to %s, got %s", blpopBackoffMax, got)
+	}
+}
+
+func TestPollLoop_BLPOPErrorBackoffIsInterruptibleByContext(t *testing.T) {
+	// A worker sitting in the (up to 60s) BLPOP-error backoff must still
+	// return promptly on shutdown instead of riding out the full sleep —
+	// otherwise a short termination grace period hard-kills it mid-backoff.
+	rdb := redis.NewClient(&redis.Options{
+		Addr:        "127.0.0.1:1",
+		DialTimeout: 50 * time.Millisecond,
+		MaxRetries:  -1,
+	})
+	defer rdb.Close()
+
+	w := &workerState{
+		cfg:       &config.Config{WorkerID: "w1", Domain: "prod", MaxConcurrency: 1},
+		rdb:       rdb,
+		activeIDs: make(map[string]struct{}),
+		killChans: make(map[string]context.CancelFunc),
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- w.pollLoop(ctx, "queue:test") }()
+
+	// Give it time for at least one failed BLPOP attempt to land it in the
+	// (2s-floor) backoff sleep before cancelling.
+	time.Sleep(150 * time.Millisecond)
+	cancel()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("expected pollLoop to return nil on shutdown, got %v", err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("pollLoop did not return promptly after context cancellation during BLPOP backoff")
+	}
+}
+
+func TestRunJob_RecoversFromPanicAndMarksRunFailed(t *testing.T) {
+	// A panic anywhere in job execution must not crash the whole worker
+	// process — runJob should recover, log, and return normally so other
+	// concurrently-running jobs on this worker are unaffected.
+	original := execJob
+	defer func() { execJob = original }()
+	execJob = func(_ context.Context, _ *executor.JobEnvelope, _ func(string), _ func(string)) *executor.ExecResult {
+		panic("simulated executor panic")
+	}
+
+	// Nothing listens on this address; every Redis call below fails fast
+	// (short dial timeout, no retries) rather than blocking — runJob's own
+	// Redis calls all ignore their error returns already, so this is enough
+	// to exercise the function without a real or fake Redis server.
+	rdb := redis.NewClient(&redis.Options{
+		Addr:        "127.0.0.1:1",
+		DialTimeout: 100 * time.Millisecond,
+		MaxRetries:  -1,
+	})
+	defer rdb.Close()
+
+	w := &workerState{
+		cfg:       &config.Config{WorkerID: "w1", Domain: "prod", MaxConcurrency: 2},
+		rdb:       rdb,
+		activeIDs: make(map[string]struct{}),
+		killChans: make(map[string]context.CancelFunc),
+	}
+
+	env := &executor.JobEnvelope{
+		JobID: "job-1",
+		RunID: "run-1",
+		Job:   executor.JobDef{ID: "job-1", User: "tester"},
+	}
+
+	done := make(chan struct{})
+	go func() {
+		w.runJob(context.Background(), env)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("runJob did not return — the panic was not recovered")
+	}
+
+	if _, stillActive := w.activeIDs["job-1"]; stillActive {
+		t.Error("expected job-1 to be removed from activeIDs after the panic")
+	}
+	if running := atomic.LoadInt32(&w.running); running != 0 {
+		t.Errorf("expected running count to be 0 after the panic, got %d", running)
+	}
 }

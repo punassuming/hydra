@@ -17,9 +17,9 @@ image tags all move together on release).
 
 | Component | Kind | Notes |
 |---|---|---|
-| Redis | StatefulSet + headless Service | single instance, PVC-backed, no Sentinel/cluster |
-| MongoDB | StatefulSet + headless Service | single instance, PVC-backed, no `--replSet` |
-| Scheduler | Deployment + Service | `scheduler.mode: separated` splits API and orchestrator into two Deployments |
+| Redis | StatefulSet + headless Service | single instance, PVC-backed, no Sentinel/cluster; optional PodDisruptionBudget |
+| MongoDB | StatefulSet + headless Service | single instance, PVC-backed, no `--replSet`; optional PodDisruptionBudget |
+| Scheduler | Deployment + Service | `scheduler.mode: separated` splits API and orchestrator into two Deployments; optional PodDisruptionBudget |
 | UI | Deployment + Service | nginx serving the built React app, runtime-configurable API URL |
 | Worker pool(s) | one Deployment (+ optional HPA) per `workers[]` entry | mix Python and Go workers freely |
 | Domain seed Secret | Secret | ADMIN_TOKEN, CREDENTIAL_ENCRYPTION_KEY, default-domain token/password — generated once, preserved across upgrades |
@@ -231,6 +231,42 @@ ingress:
   scheduler:
     host: hydra-api.home.lab
 ```
+
+### High availability (PodDisruptionBudgets)
+
+Off by default for `redis`, `mongodb`, `scheduler`, and `orchestrator` —
+each defaults to a single pod, and a `PodDisruptionBudget` at
+`minAvailable: 1` for a single-pod component blocks *voluntary* disruption
+(`kubectl drain`, node cordon/eviction) entirely until you scale up or
+explicitly override it. That's the right call for a production overlay
+that wants a human to think twice before draining the node MongoDB
+happens to be on, but it can surprise routine node maintenance on a
+home-lab cluster, so it's opt-in:
+
+```yaml
+redis:
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+mongodb:
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+scheduler:
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+# Only takes effect when scheduler.mode: separated — that's the only
+# configuration where the orchestrator (background loops) runs as its own
+# Deployment distinct from the API-only scheduler Deployment above.
+orchestrator:
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+```
+
+`minAvailable` accepts either an absolute pod count or a Kubernetes
+percentage string (e.g. `"50%"`).
 
 ## Uninstalling
 

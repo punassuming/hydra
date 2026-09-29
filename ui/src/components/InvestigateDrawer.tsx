@@ -11,6 +11,7 @@ import {
   ReloadOutlined,
   ClockCircleOutlined,
   RedoOutlined,
+  InboxOutlined,
 } from "@ant-design/icons";
 import { fetchInvestigationCatalog, runInvestigation, InvestigationResultRow } from "../api/investigations";
 
@@ -26,6 +27,7 @@ const ICONS: Record<string, JSX.Element> = {
   never_succeeded: <StopOutlined />,
   sla_miss: <ClockCircleOutlined />,
   retry_storm: <RedoOutlined />,
+  dead_letter: <InboxOutlined />,
 };
 
 /** Canned, LLM-free investigations — click a card, get a straight answer

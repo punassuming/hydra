@@ -1,4 +1,5 @@
 import json
+import os
 import smtplib
 import threading
 import time
@@ -19,6 +20,26 @@ from .utils.worker_ops import append_worker_op
 log = setup_logging("scheduler.run_events")
 # Maximum length of error_message sent in webhook payloads
 _WEBHOOK_MAX_ERROR_LEN = 2000
+# Ceiling for the exponential retry backoff below, mirroring the 2s-doubling
+# shape already used for connection-retry backoff elsewhere (worker/worker.py's
+# kill-listener reconnect loop uses 2s -> 60s; job retries default to a longer
+# cap since they represent actual work being redone, not a reconnect probe).
+RETRY_BACKOFF_CAP_SECONDS = int(os.getenv("SCHEDULER_RETRY_BACKOFF_CAP_SECONDS", "300"))
+
+
+def _compute_retry_backoff_delay(base_delay_seconds: int, retry_attempt: int) -> int:
+    """Exponential backoff for scheduler-level job retries.
+
+    base_delay_seconds doubles per retry attempt, capped at
+    RETRY_BACKOFF_CAP_SECONDS. retry_attempt is 1-indexed (the attempt about to
+    run), so a job's first retry keeps its configured base delay unchanged --
+    only a second or later retry actually backs off. A base_delay_seconds of 0
+    (the default -- immediate retry) stays 0 regardless of attempt.
+    """
+    if base_delay_seconds <= 0:
+        return 0
+    multiplier = 2 ** max(retry_attempt - 1, 0)
+    return min(base_delay_seconds * multiplier, RETRY_BACKOFF_CAP_SECONDS)
 
 
 def _to_datetime(value: Any) -> datetime | None:
@@ -413,12 +434,13 @@ def _handle_run_end(payload: Dict[str, Any]):
             retry_delay = int(job_doc.get("retry_delay_seconds", 0))
             retry_attempt = int(payload.get("retry_attempt", 0))
             if max_retries > 0 and retry_attempt < max_retries:
+                next_attempt = retry_attempt + 1
                 _enqueue_job_for_retry(
                     job_id=job_id,
                     domain=domain,
                     priority=int(job_doc.get("priority", 5)),
-                    retry_attempt=retry_attempt + 1,
-                    delay_seconds=retry_delay,
+                    retry_attempt=next_attempt,
+                    delay_seconds=_compute_retry_backoff_delay(retry_delay, next_attempt),
                 )
             else:
                 # Terminal failure — fire webhooks

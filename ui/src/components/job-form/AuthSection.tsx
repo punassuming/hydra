@@ -1,4 +1,4 @@
-import { Col, Collapse, Form, Input, Row, Typography } from "antd";
+import { Col, Form, Input, Row, Typography } from "antd";
 import { JobPayload } from "../../api/jobs";
 
 interface Props {
@@ -8,15 +8,8 @@ interface Props {
 
 export function AuthSection({ executor, updateExecutor }: Props) {
   return (
-    <Collapse
-      size="small"
-      items={[
-        {
-          key: "auth",
-          label: "Authentication / Impersonation",
-          children: (
-            <>
-              <Row gutter={16}>
+    <>
+      <Row gutter={16}>
                 <Col xs={24} md={8}>
                   <Form.Item label="Linux Impersonation User">
                     <Input
@@ -66,13 +59,9 @@ export function AuthSection({ executor, updateExecutor }: Props) {
                   </Form.Item>
                 </Col>
               </Row>
-              <Typography.Text type="secondary">
-                Linux workers only. If impersonate_user is set, worker runs command as sudo -n -u &lt;user&gt; and runs kinit -kt before job execution when Kerberos fields are provided.
-              </Typography.Text>
-            </>
-          ),
-        },
-      ]}
-    />
+      <Typography.Text type="secondary">
+        Linux workers only. If impersonate_user is set, worker runs command as sudo -n -u &lt;user&gt; and runs kinit -kt before job execution when Kerberos fields are provided.
+      </Typography.Text>
+    </>
   );
 }

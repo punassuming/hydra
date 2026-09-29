@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/user"
 	"runtime"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -31,6 +32,11 @@ import (
 // version skew at a glance on the workers list — not a dispatch-time gate.
 // Keep in sync with worker/worker.py's WORKER_PROTOCOL_VERSION.
 const workerProtocolVersion = "1.0"
+
+// execJob is executor.Execute by default; overridable in tests so a panic
+// deep in job execution can be simulated deterministically without needing
+// a real crafted panic path through the executor package.
+var execJob = executor.Execute
 
 // Start registers the worker in Redis, starts the heartbeat and kill
 // listener goroutines, and begins the job polling loop.
@@ -289,11 +295,34 @@ func (w *workerState) killListener(ctx context.Context) {
 // Poll loop + job dispatch
 // ---------------------------------------------------------------------------
 
+// blpopBackoffInitial/blpopBackoffMax mirror the Python worker's kill-listener
+// reconnect backoff (worker/worker.py's _BACKOFF_INITIAL/_BACKOFF_MAX: 2s,
+// doubling up to 60s) rather than the previous fixed 1s retry, so a
+// persistent Redis outage doesn't spam BLPOP calls once per second.
+const (
+	blpopBackoffInitial = 2 * time.Second
+	blpopBackoffMax     = 60 * time.Second
+)
+
+// nextBLPOPBackoff doubles prev up to blpopBackoffMax; prev <= 0 (the reset
+// state after any successful BLPOP) returns the floor.
+func nextBLPOPBackoff(prev time.Duration) time.Duration {
+	if prev <= 0 {
+		return blpopBackoffInitial
+	}
+	next := prev * 2
+	if next > blpopBackoffMax {
+		return blpopBackoffMax
+	}
+	return next
+}
+
 func (w *workerState) pollLoop(ctx context.Context, queueKey string) error {
 	// Semaphore for concurrency control.
 	sem := make(chan struct{}, w.cfg.MaxConcurrency)
 
 	log.Printf("[worker] listening on queue %q", queueKey)
+	var blpopBackoff time.Duration
 	for {
 		select {
 		case <-ctx.Done():
@@ -304,16 +333,26 @@ func (w *workerState) pollLoop(ctx context.Context, queueKey string) error {
 
 		result, err := w.rdb.BLPop(ctx, 2*time.Second, queueKey).Result()
 		if err == redis.Nil {
+			blpopBackoff = 0
 			continue
 		}
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil
 			}
-			log.Printf("[worker] BLPOP error: %v", err)
-			time.Sleep(time.Second)
+			blpopBackoff = nextBLPOPBackoff(blpopBackoff)
+			log.Printf("[worker] BLPOP error: %v; retrying in %s", err, blpopBackoff)
+			timer := time.NewTimer(blpopBackoff)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				log.Printf("[worker] shutting down")
+				return nil
+			case <-timer.C:
+			}
 			continue
 		}
+		blpopBackoff = 0
 		if len(result) < 2 {
 			continue
 		}
@@ -372,6 +411,47 @@ func (w *workerState) runJob(ctx context.Context, env *executor.JobEnvelope) {
 		}
 		queueLatencyMs = &lat
 	}
+
+	// A panic anywhere below (source fetch, executor dispatch, completion
+	// evaluation) must not take down the whole worker process — unlike the
+	// Python worker, where an unhandled exception in one job's thread never
+	// crashes the process, a Go panic otherwise propagates and kills every
+	// other job this worker is running. Recover, log, and mark this run
+	// failed instead. Registered before the cleanup defer below so it runs
+	// last during unwind (LIFO) — cleanup still happens first either way.
+	defer func() {
+		r := recover()
+		if r == nil {
+			return
+		}
+		log.Printf("[worker] job %s (run %s) panicked: %v\n%s", jobID, runID, r, debug.Stack())
+		endTS := float64(time.Now().UnixMilli()) / 1000.0
+		w.publishRunEvent(ctx, map[string]interface{}{
+			"type":               "run_end",
+			"run_id":             runID,
+			"job_id":             jobID,
+			"user":               env.Job.User,
+			"domain":             w.cfg.Domain,
+			"worker_id":          w.cfg.WorkerID,
+			"status":             "failed",
+			"returncode":         1,
+			"stderr":             fmt.Sprintf("worker panic: %v", r),
+			"attempt":            1,
+			"completion_reason":  "worker panicked during execution",
+			"slot":               slot,
+			"retries_remaining":  retriesRemaining,
+			"retry_attempt":      retryAttempt,
+			"queue_latency_ms":   queueLatencyMs,
+			"bypass_concurrency": env.Job.BypassConcurrency,
+			"start_ts":           startedTS,
+			"scheduled_ts":       orDefault(env.DispatchTS, startedTS),
+			"end_ts":             endTS,
+			"total_run_ms":       round2((endTS - startedTS) * 1000),
+		})
+		appendWorkerOp(ctx, w.rdb, w.cfg.Domain, w.cfg.WorkerID, "run_result",
+			fmt.Sprintf("Job %s panicked during execution", jobID),
+			map[string]interface{}{"run_id": runID, "job_id": jobID, "status": "failed"})
+	}()
 
 	// Register a cancel context for kill support.
 	jobCtx, jobCancel := context.WithCancel(ctx)
@@ -517,7 +597,7 @@ func (w *workerState) runJob(ctx context.Context, env *executor.JobEnvelope) {
 
 	for i := 0; i < attempts; i++ {
 		runStartTime := time.Now()
-		result = executor.Execute(jobCtx, env,
+		result = execJob(jobCtx, env,
 			func(line string) { handleStdout(line) },
 			func(line string) { streamLog("stderr", line) },
 		)
