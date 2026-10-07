@@ -9,12 +9,14 @@ those when you need a specific run explained, reach for this when you want a
 quick "what needs attention right now" sweep across all jobs.
 """
 
+import os
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Request
 
 from ..mongo_client import get_db
+from ..redis_client import get_redis
 from .ai import MAX_PREDICTION_SAMPLE_SIZE, duration_percentiles
 
 router = APIRouter(prefix="/investigations", tags=["Investigations"])
@@ -28,6 +30,10 @@ DEFAULT_RECENT_HOURS = 24
 SLA_MISS_LOOKBACK_HOURS = 24
 RETRY_STORM_LOOKBACK_HOURS = 24
 RETRY_STORM_MIN_COUNT = 3
+# A cron/interval job whose next_run_at is this far in the past isn't being
+# triggered: schedule_trigger_loop advances next_run_at the moment it enqueues,
+# so a stale value means the orchestrator is down or wedged.
+SCHEDULE_OVERDUE_GRACE_SECONDS = 300
 
 _CATALOG = [
     {
@@ -72,6 +78,31 @@ _CATALOG = [
         "description": (
             "Jobs configured with retries whose most recent run failed or timed out "
             "after exhausting every configured retry attempt."
+        ),
+    },
+    {
+        "key": "queue_starvation",
+        "label": "Queue Starvation",
+        "description": (
+            "Pending jobs that have been requeued repeatedly because no eligible worker "
+            "exists (at or above SCHEDULER_STARVATION_WARN_THRESHOLD misses)."
+        ),
+    },
+    {
+        "key": "worker_offline",
+        "label": "Offline Workers",
+        "description": (
+            "Registered workers whose heartbeat has lapsed and that were not deliberately "
+            "set offline by an operator."
+        ),
+    },
+    {
+        "key": "schedule_overdue",
+        "label": "Overdue Schedules",
+        "description": (
+            f"Enabled cron/interval jobs whose next run is more than "
+            f"{SCHEDULE_OVERDUE_GRACE_SECONDS // 60} minutes in the past, meaning the "
+            "scheduler is not triggering them."
         ),
     },
 ]
@@ -335,6 +366,120 @@ def _investigate_dead_letter(db, jobs: list) -> list:
     return results
 
 
+def _as_utc(value: Any) -> Optional[datetime]:
+    """Coerce a stored timestamp (datetime or ISO string) to an aware UTC datetime."""
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if not isinstance(value, datetime):
+        return None
+    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+
+def _investigate_queue_starvation(r, jobs: list) -> list:
+    """Jobs sitting in a domain's pending queue that the scheduler keeps
+    requeueing because no worker is eligible (job_enqueue_meta.no_worker_count,
+    maintained by the scheduling loop)."""
+    threshold = int(os.getenv("SCHEDULER_STARVATION_WARN_THRESHOLD", "5"))
+    by_domain: dict = {}
+    for job in jobs:
+        by_domain.setdefault(job.get("domain", "prod"), {})[job["_id"]] = job
+    results = []
+    for domain, domain_jobs in by_domain.items():
+        for job_id in r.zrange(f"job_queue:{domain}:pending", 0, -1):
+            job = domain_jobs.get(job_id)
+            if job is None:
+                continue
+            meta = r.hgetall(f"job_enqueue_meta:{domain}:{job_id}") or {}
+            try:
+                misses = int(meta.get("no_worker_count", 0))
+            except (TypeError, ValueError):
+                continue
+            if misses < threshold:
+                continue
+            enqueued = meta.get("enqueued_ts")
+            try:
+                enqueued_iso = datetime.fromtimestamp(float(enqueued), tz=timezone.utc).isoformat()
+            except (TypeError, ValueError):
+                enqueued_iso = None
+            results.append(
+                {
+                    "job_id": job_id,
+                    "job_name": job.get("name", job_id),
+                    "domain": domain,
+                    "metric_label": "scheduling attempts with no eligible worker",
+                    "metric_value": misses,
+                    "last_run_id": None,
+                    "last_run_at": enqueued_iso,
+                }
+            )
+    results.sort(key=lambda row: row["metric_value"], reverse=True)
+    return results
+
+
+def _investigate_worker_offline(r, domains: list) -> list:
+    """Workers that registered but stopped heartbeating. Workers an operator
+    set to offline on purpose are excluded (that's intent, not an incident).
+    Rows use entity="worker": job_id/job_name carry the worker id."""
+    ttl = max(2, int(os.getenv("SCHEDULER_HEARTBEAT_TTL", "10")))
+    now = datetime.now(timezone.utc).timestamp()
+    results = []
+    for domain in domains:
+        for key in r.scan_iter(f"workers:{domain}:*"):
+            worker_id = key.split(":", 2)[2] if key.count(":") >= 2 else key
+            data = r.hgetall(key) or {}
+            if str(data.get("state", "online")).lower() in ("offline", "disabled"):
+                continue
+            heartbeat = r.zscore(f"worker_heartbeats:{domain}", worker_id)
+            if heartbeat is None or now - float(heartbeat) <= ttl:
+                continue
+            results.append(
+                {
+                    "entity": "worker",
+                    "job_id": worker_id,
+                    "job_name": data.get("hostname") or worker_id,
+                    "domain": domain,
+                    "metric_label": "seconds since last heartbeat",
+                    "metric_value": round(now - float(heartbeat)),
+                    "last_run_id": None,
+                    "last_run_at": datetime.fromtimestamp(float(heartbeat), tz=timezone.utc).isoformat(),
+                }
+            )
+    results.sort(key=lambda row: row["metric_value"], reverse=True)
+    return results
+
+
+def _investigate_schedule_overdue(jobs: list) -> list:
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(seconds=SCHEDULE_OVERDUE_GRACE_SECONDS)
+    results = []
+    for job in jobs:
+        schedule = job.get("schedule") or {}
+        if not schedule.get("enabled") or schedule.get("mode") not in ("cron", "interval"):
+            continue
+        next_run = _as_utc(schedule.get("next_run_at"))
+        if next_run is None or next_run >= cutoff:
+            continue
+        end_at = _as_utc(schedule.get("end_at"))
+        if end_at is not None and end_at <= now:
+            continue  # window has closed; not being triggered is expected
+        results.append(
+            {
+                "job_id": job["_id"],
+                "job_name": job.get("name", job["_id"]),
+                "domain": job.get("domain", "prod"),
+                "metric_label": "minutes overdue",
+                "metric_value": round((now - next_run).total_seconds() / 60, 1),
+                "last_run_id": None,
+                "last_run_at": _iso(next_run),
+            }
+        )
+    results.sort(key=lambda row: row["metric_value"], reverse=True)
+    return results
+
+
 @router.get("/")
 def list_investigations():
     return _CATALOG
@@ -349,7 +494,7 @@ def run_investigation(key: str, request: Request):
     jobs = list(
         db.job_definitions.find(
             _scope_query(request),
-            {"name": 1, "domain": 1, "sla_max_duration_seconds": 1, "max_retries": 1},
+            {"name": 1, "domain": 1, "sla_max_duration_seconds": 1, "max_retries": 1, "schedule": 1},
         )
     )
 
@@ -369,6 +514,18 @@ def run_investigation(key: str, request: Request):
         results = _investigate_sla_miss(db, jobs)
     elif key == "retry_storm":
         results = _investigate_retry_storm(db, jobs)
+    elif key == "queue_starvation":
+        results = _investigate_queue_starvation(get_redis(), jobs)
+    elif key == "worker_offline":
+        scope = _scope_query(request)
+        if "domain" in scope:
+            domains = [scope["domain"]]
+        else:
+            r = get_redis()
+            domains = sorted({k.split(":")[1] for k in r.scan_iter("workers:*") if k.count(":") >= 2})
+        results = _investigate_worker_offline(get_redis(), domains)
+    elif key == "schedule_overdue":
+        results = _investigate_schedule_overdue(jobs)
     else:
         results = _investigate_dead_letter(db, jobs)
 
