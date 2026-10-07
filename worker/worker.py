@@ -227,6 +227,9 @@ def worker_main():
                 mapping={
                     "worker_id": worker_id,
                     "heartbeat": started_ts,
+                    # Immutable: the heartbeat tick overwrites "heartbeat" every
+                    # ~2s, so the scheduler's timeout backstop needs this.
+                    "started_ts": started_ts,
                     "user": job.get("user", ""),
                     "domain": domain,
                     "run_id": run_id,

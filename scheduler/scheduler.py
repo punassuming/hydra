@@ -643,7 +643,10 @@ def timeout_enforcement_loop(stop_event: threading.Event):
                     run_id = data.get("run_id")
                     if not run_id:
                         continue
-                    started_ts = float(data.get("heartbeat", now))
+                    # `heartbeat` is overwritten by the worker every ~2s, so it only
+                    # reflects the run's start for workers that predate started_ts
+                    # (and then this check is effectively a no-op, as before).
+                    started_ts = float(data.get("started_ts") or data.get("heartbeat", now))
                     elapsed = now - started_ts
                     job_doc = db.job_definitions.find_one({"_id": job_id}, {"timeout": 1})
                     if not job_doc:
