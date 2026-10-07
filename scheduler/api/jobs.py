@@ -58,6 +58,9 @@ def _sanitize_job_response(job: JobDefinition) -> dict:
     return _sanitize_job_dict(job.model_dump(by_alias=True))
 
 
+_VERSION_INSERT_ATTEMPTS = 5
+
+
 def _record_job_version(db, job_id: str, before: dict, after: JobDefinition, *, domain: str, is_admin: bool) -> None:
     """Insert an audit snapshot of a job update into job_versions.
 
@@ -67,20 +70,34 @@ def _record_job_version(db, job_id: str, before: dict, after: JobDefinition, *, 
     the entire `schedule` sub-object, not just the one field. A deep-diff
     would mislabel unrelated nested fields as "changed".
     """
-    version = db.job_versions.count_documents({"job_id": job_id}) + 1
-    db.job_versions.insert_one(
-        {
-            "_id": f"{job_id}:{version}",
-            "job_id": job_id,
-            "domain": domain,
-            "version": version,
-            "changed_at": datetime.now(timezone.utc),
-            "changed_by_domain": domain,
-            "changed_by_is_admin": is_admin,
-            "before": _sanitize_job_dict(before),
-            "after": _sanitize_job_dict(after.to_mongo()),
-        }
-    )
+    snapshot = {
+        "job_id": job_id,
+        "domain": domain,
+        "changed_by_domain": domain,
+        "changed_by_is_admin": is_admin,
+        "before": _sanitize_job_dict(before),
+        "after": _sanitize_job_dict(after.to_mongo()),
+    }
+    # `_id` is "<job_id>:<version>", so two concurrent updates that compute the
+    # same next version collide on the primary key. Derive the number from the
+    # latest recorded version (not a document count, which reuses numbers after
+    # a delete) and retry on that collision with a recomputed version.
+    for attempt in range(_VERSION_INSERT_ATTEMPTS):
+        latest = next(iter(db.job_versions.find({"job_id": job_id}, {"version": 1}).sort("version", -1)), None)
+        version = (latest["version"] if latest else 0) + 1
+        try:
+            db.job_versions.insert_one(
+                {
+                    **snapshot,
+                    "_id": f"{job_id}:{version}",
+                    "version": version,
+                    "changed_at": datetime.now(timezone.utc),
+                }
+            )
+            return
+        except DuplicateKeyError:
+            if attempt == _VERSION_INSERT_ATTEMPTS - 1:
+                raise
 
 
 def _insert_job_definition(db, job_def: JobDefinition) -> None:

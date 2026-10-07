@@ -119,6 +119,48 @@ def test_update_job_increments_version_across_multiple_updates():
     assert versions == [1, 2]
 
 
+def _record(db, job_id="job-1"):
+    from scheduler.api.jobs import _record_job_version
+    from scheduler.models.job_definition import JobDefinition
+
+    after = JobDefinition.model_validate(_job_doc(job_id, "prod"))
+    _record_job_version(db, job_id, _job_doc(job_id, "prod"), after, domain="prod", is_admin=False)
+
+
+def test_record_job_version_does_not_reuse_numbers_after_a_gap():
+    """A count-based next version (2) would collide with existing v3; max+1 does not."""
+    db = FakeDB()
+    db.job_versions.docs = [
+        {"_id": "job-1:1", "job_id": "job-1", "version": 1},
+        {"_id": "job-1:3", "job_id": "job-1", "version": 3},
+    ]
+    _record(db)
+    assert sorted(v["version"] for v in db.job_versions.docs) == [1, 3, 4]
+
+
+def test_record_job_version_retries_after_concurrent_insert_collision():
+    from pymongo.errors import DuplicateKeyError
+
+    class CollidingOnce(FakeJobVersions):
+        def __init__(self):
+            super().__init__()
+            self.calls = 0
+
+        def insert_one(self, doc):
+            self.calls += 1
+            if self.calls == 1:
+                # A concurrent writer wins the race for this version number.
+                self.docs.append({"_id": doc["_id"], "job_id": doc["job_id"], "version": doc["version"]})
+                raise DuplicateKeyError("E11000 duplicate key")
+            super().insert_one(doc)
+
+    db = FakeDB()
+    db.job_versions = CollidingOnce()
+    _record(db)
+    assert sorted(v["version"] for v in db.job_versions.docs) == [1, 2]
+    assert db.job_versions.calls == 2
+
+
 def test_update_job_masks_secrets_in_version_snapshot():
     db = FakeDB([
         _job_doc(
