@@ -84,8 +84,16 @@ async def enforce_api_key(request: Request, call_next):
 
     # Admin token short-circuit (respect ?domain override for observation)
     if admin_token and hmac.compare_digest(token or "", admin_token):
-        if req_domain:
-            logger.info("admin token used to access domain=%s path=%s", req_domain, request.url.path)
+        # Audit trail: cross-domain overrides and every state-changing admin
+        # call. Routine admin reads (UI polling) stay silent to avoid log spam.
+        method = request.method.upper()
+        if req_domain or method not in ("GET", "HEAD"):
+            logger.info(
+                "admin token used method=%s domain=%s path=%s",
+                method,
+                req_domain or ADMIN_DOMAIN,
+                request.url.path,
+            )
         request.state.domain = req_domain or ADMIN_DOMAIN
         request.state.is_admin = True
         return await call_next(request)
