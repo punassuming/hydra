@@ -71,6 +71,11 @@ def ensure_indexes() -> None:
     db.job_runs.create_index([("job_id", 1), ("status", 1), ("start_ts", -1)])
     db.job_runs.create_index([("domain", 1), ("worker_id", 1), ("start_ts", 1)])
     db.job_runs.create_index([("status", 1)])
+    # Per-job run history sorted by recency without a status filter (job detail,
+    # investigations), which (job_id, status, start_ts) cannot serve.
+    db.job_runs.create_index([("job_id", 1), ("start_ts", -1)])
+    # Retention purge range-deletes by start_ts across all domains.
+    db.job_runs.create_index([("start_ts", 1)])
 
     db.job_definitions.create_index(
         [("domain", 1), ("schedule.enabled", 1), ("schedule.next_run_at", 1)]

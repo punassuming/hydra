@@ -34,6 +34,8 @@ def test_ensure_indexes_creates_expected_job_runs_indexes():
     assert [("job_id", 1), ("status", 1), ("start_ts", -1)] in created_keys
     assert [("domain", 1), ("worker_id", 1), ("start_ts", 1)] in created_keys
     assert [("status", 1)] in created_keys
+    assert [("job_id", 1), ("start_ts", -1)] in created_keys
+    assert [("start_ts", 1)] in created_keys
 
 
 def test_ensure_indexes_creates_expected_job_definitions_indexes():
@@ -75,4 +77,4 @@ def test_ensure_indexes_survives_pre_existing_duplicate_data():
 
     # The non-unique performance indexes still get created regardless.
     created_keys = [keys for keys, _unique in db.job_runs.created]
-    assert len(created_keys) == 4
+    assert len(created_keys) == 6
