@@ -437,6 +437,40 @@ func TestDetectCapabilities_SQLRequiresPythonAndSQLAlchemy(t *testing.T) {
 	}
 }
 
+func hasCap(caps []string, want string) bool {
+	for _, c := range caps {
+		if c == want {
+			return true
+		}
+	}
+	return false
+}
+
+func TestDetectCapabilities_BatchRequiresWindowsAndCmd(t *testing.T) {
+	origOS, origProbe := currentGOOS, cmdProbe
+	defer func() { currentGOOS, cmdProbe = origOS, origProbe }()
+
+	cases := []struct {
+		name   string
+		goos   string
+		cmdOK  bool
+		expect bool
+	}{
+		{"windows with cmd", "windows", true, true},
+		{"windows without cmd", "windows", false, false},
+		{"linux even if probe would pass", "linux", true, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			currentGOOS = tc.goos
+			cmdProbe = func() bool { return tc.cmdOK }
+			if got := hasCap(DetectCapabilities(), "batch"); got != tc.expect {
+				t.Errorf("batch advertised=%v, want %v", got, tc.expect)
+			}
+		})
+	}
+}
+
 func TestDetectCapabilities_SQLExcludedWhenImportFails(t *testing.T) {
 	// Point HYDRA_PYTHON_PATH at a fake interpreter that answers "--version"
 	// (so findPython() accepts it) but fails "-c import sqlalchemy", to force

@@ -726,6 +726,12 @@ func runCommand(ctx context.Context, cmdArgs []string, env map[string]string, wo
 // Capability / shell detection (used during worker registration)
 // ---------------------------------------------------------------------------
 
+// Test seams for DetectCapabilities' Windows-only batch preflight.
+var (
+	currentGOOS = runtime.GOOS
+	cmdProbe    = func() bool { return probeCmd([]string{"cmd", "/c", "echo ok"}) }
+)
+
 // DetectCapabilities returns the list of executor types this worker supports.
 func DetectCapabilities() []string {
 	caps := []string{"shell", "external"}
@@ -742,7 +748,9 @@ func DetectCapabilities() []string {
 	if findPowershell() != "" {
 		caps = append(caps, "powershell")
 	}
-	if runtime.GOOS == "windows" {
+	// Batch needs cmd.exe to actually run, not just a Windows GOOS —
+	// mirrors the Python worker's shell-probe-gated "batch" capability.
+	if currentGOOS == "windows" && cmdProbe() {
 		caps = append(caps, "batch")
 	}
 	// HTTP executor uses Go's stdlib — always available.
