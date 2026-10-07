@@ -37,8 +37,8 @@ for service in scheduler ui worker; do
 done
 
 test "$(curl -fsS --max-time 5 "$api_url/health" | python3 -c 'import json,sys; x=json.load(sys.stdin); print(x["status"], x["workers"])')" = "ok 1"
-test "$(curl -sS -o /dev/null -w '%{http_code}' "$api_url/jobs/")" = 401
-test "$(curl -sS -o /dev/null -w '%{http_code}' "$ui_url/")" = 200
+test "$(curl -sS --max-time 5 -o /dev/null -w '%{http_code}' "$api_url/jobs/")" = 401
+test "$(curl -sS --max-time 5 -o /dev/null -w '%{http_code}' "$ui_url/")" = 200
 for store in redis mongo; do
   container=$(container_name "$store")
   test -z "$(docker inspect "$container" --format '{{range $port,$bindings := .NetworkSettings.Ports}}{{if $bindings}}published{{end}}{{end}}')"

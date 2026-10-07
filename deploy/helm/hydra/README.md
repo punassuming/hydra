@@ -153,8 +153,10 @@ workers:
 ```
 
 - `flavor: python` gets the full feature set (SQL executor, Kerberos/impersonation).
-- `flavor: go` is a lighter footprint per pod (no SQL executor, no impersonation)
-  — good for scaling many cheap replicas.
+- `flavor: go` is a lighter footprint per pod and supports the same executor
+  types (the SQL executor bridges through the image's Python interpreter) plus
+  impersonation/Kerberos on Linux — good for scaling many cheap replicas. The
+  Windows bootstrap/watchdog is Python-only (irrelevant to Kubernetes pods).
 - All pools targeting `domainSeed.defaultDomain` (default: `prod`) share the
   auto-seeded credentials automatically — no extra setup.
 - A pool targeting a domain **other than** `defaultDomain` needs that domain

@@ -268,9 +268,70 @@ jobs:
           go-version-file: go-worker/go.mod
           cache-dependency-path: go-worker/go.sum
 
+      - name: Check formatting
+        working-directory: go-worker
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "gofmt needed on:" >&2
+            echo "$unformatted" >&2
+            exit 1
+          fi
+
+      - name: Vet
+        working-directory: go-worker
+        run: go vet ./...
+
+      # -race matters here: the worker is heavily concurrent (poll loop,
+      # heartbeat, kill listener, per-job goroutines).
       - name: Run Go worker tests
         working-directory: go-worker
-        run: go test ./...
+        run: go test -race ./...
+
+  # Advisory dependency/vulnerability scan. Deliberately non-blocking
+  # (continue-on-error) until the existing findings have been triaged -- flip
+  # the steps to blocking once the baseline is clean.
+  security-audit:
+    name: Dependency audit (advisory)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: pip-audit (Python dependencies)
+        continue-on-error: true
+        run: |
+          python -m pip install uv==0.5.13 pip-audit
+          uv export --frozen --no-dev --no-hashes --no-emit-project -o "$RUNNER_TEMP/requirements.txt"
+          pip-audit -r "$RUNNER_TEMP/requirements.txt" --no-deps --disable-pip
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: npm audit (UI production dependencies)
+        continue-on-error: true
+        working-directory: ui
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go-worker/go.mod
+          cache-dependency-path: go-worker/go.sum
+
+      - name: govulncheck (Go worker)
+        continue-on-error: true
+        working-directory: go-worker
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
   end-to-end:
     name: Full-stack smoke test
