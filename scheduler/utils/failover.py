@@ -28,6 +28,21 @@ def find_offline_workers(ttl_seconds: int) -> List[Tuple[str, float]]:
     return offline
 
 
+DEFAULT_JOB_PRIORITY = 5
+
+
+def _job_priority(db, job_id: str) -> float:
+    """The job's configured priority, so a failed-over job keeps its place in
+    the pending queue instead of being reset to the default. Falls back to the
+    default if the definition is gone or Mongo is unreachable -- failover must
+    still requeue the job."""
+    try:
+        doc = db.job_definitions.find_one({"_id": job_id}, {"priority": 1}) or {}
+        return float(doc.get("priority", DEFAULT_JOB_PRIORITY))
+    except Exception:
+        return float(DEFAULT_JOB_PRIORITY)
+
+
 def requeue_jobs_for_worker(domain_and_worker: str):
     """Recover all in-flight work from an offline worker.
 
@@ -73,7 +88,7 @@ def requeue_jobs_for_worker(domain_and_worker: str):
                 },
             )
         r.delete(f"job_running:{domain}:{job_id}")
-        r.zadd(f"job_queue:{domain}:pending", {job_id: 5})
+        r.zadd(f"job_queue:{domain}:pending", {job_id: _job_priority(db, job_id)})
         r.hset(
             f"job_enqueue_meta:{domain}:{job_id}",
             mapping={"enqueued_ts": time.time(), "reason": "failover_requeue"},
