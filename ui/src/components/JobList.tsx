@@ -168,6 +168,7 @@ export function JobList({
                     <Button
                       size="small"
                       icon={<CopyOutlined />}
+                      aria-label={`Duplicate job ${record.name}`}
                       onClick={(e) => {
                         e.stopPropagation();
                         onClone(record);
@@ -192,6 +193,7 @@ export function JobList({
                         size="small"
                         danger
                         icon={<DeleteOutlined />}
+                        aria-label={`Delete job ${record.name}`}
                         onClick={(e) => e.stopPropagation()}
                       />
                     </Tooltip>
