@@ -113,6 +113,16 @@ def register_worker(worker_id: str, max_concurrency: int):
     )
 
 
+def _should_retry(success: bool, kill_event: threading.Event) -> bool:
+    """Whether the retry loop should run another attempt.
+
+    A killed run must not be retried: kill_event stays set for the rest of the
+    run, so every further attempt would just spawn a process that the kill
+    watcher terminates immediately.
+    """
+    return not success and not kill_event.is_set()
+
+
 def worker_main():
     r = get_redis()
     worker_id = get_worker_id()
@@ -346,7 +356,7 @@ def worker_main():
                         success = False
                         last_reason = file_reason
                         stream_log("stderr", f"[hydra] file validation failed: {file_reason}")
-                if success:
+                if not _should_retry(success, kill_event):
                     break
 
             end_ts = time.time()
