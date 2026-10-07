@@ -311,7 +311,11 @@ def submit_job(job: JobCreate, request: Request):
         raise HTTPException(status_code=422, detail=validation.errors)
     job_def = _attach_schedule(job_def, force=True)
     _insert_job_definition(db, job_def)
-    if job_def.schedule.mode == "immediate":
+    # A job with depends_on waits for its upstream(s) to succeed (see
+    # run_events._trigger_dependents); the UI's "dependency" mode submits as
+    # mode=immediate, so don't also run it once at creation. It can still be
+    # started manually with POST /jobs/{id}/run.
+    if job_def.schedule.mode == "immediate" and not job_def.depends_on:
         _enqueue_job(job_def.id, reason="immediate_submit", priority=job_def.priority, domain=job_def.domain)
     event_bus.publish(
         "job_submitted",
