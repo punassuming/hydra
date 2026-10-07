@@ -80,6 +80,7 @@ Hydra Jobs is a distributed job runner designed for flexibility and scalability.
   - Logs view supports search/highlight, parsed/raw modes, expansion, and copy actions.
   - AI log helper supports multiple analysis modes (failure fix, summary, error extraction, retry tuning, custom question).
   - Theme and key panel states persist via localStorage.
+  - Accessibility: `StatusBadge` renders every run status (`pending`/`dispatched`/`running`/`success`/`failed`/`timed_out`, plus unknown values) with a distinct icon and text label and an `aria-label`, so status is never conveyed by color alone; icon-only buttons carry `aria-label`s.
   - **Demo mode** (`useDemoMode()` hook, reads `demo_mode` off `GET /health`, driven by the scheduler's `HYDRA_DEMO_MODE` env var — off by default): gates a "Demo Tools" header button on Home (`DemoToolsDrawer.tsx` — executor smoke test over shell/python, a `depends_on` dependency-graph demo using two real jobs created just-in-time so the second's `depends_on` can reference the first's actual `_id`) and Admin's "Import Jobs" card + "Demo Quick Actions" card (`DemoQuickActions.tsx` — create a throwaway domain pre-seeded with `demo-*` templates; a credential create/list/delete round-trip that asserts the secret payload is never echoed back). This is a UI-declutter switch only, not an authorization boundary — every action goes through endpoints (`POST /jobs/`, `POST /admin/domains`, ...) that work identically regardless of the flag.
 
 ## Project Structure & Key Modules
