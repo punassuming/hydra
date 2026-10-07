@@ -30,6 +30,7 @@ spec:
       labels:
         {{- include "hydra.componentSelectorLabels" (dict "root" . "component" "scheduler") | nindent 8 }}
     spec:
+      terminationGracePeriodSeconds: {{ .Values.scheduler.terminationGracePeriodSeconds | default 30 }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -115,6 +116,7 @@ spec:
       labels:
         {{- include "hydra.componentSelectorLabels" (dict "root" . "component" "orchestrator") | nindent 8 }}
     spec:
+      terminationGracePeriodSeconds: {{ .Values.orchestrator.terminationGracePeriodSeconds | default 30 }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}

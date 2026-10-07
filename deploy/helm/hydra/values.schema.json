@@ -147,6 +147,7 @@
           "type": "array",
           "description": "Extra env vars in Kubernetes EnvVar shape, e.g. via valueFrom.secretKeyRef for sensitive values."
         },
+        "terminationGracePeriodSeconds": { "type": "integer", "minimum": 1, "description": "Pod stop timeout in seconds." },
         "nodeSelector": { "type": "object" },
         "tolerations": { "type": "array" },
         "affinity": { "type": "object" },
@@ -159,6 +160,7 @@
       "properties": {
         "replicas": { "type": "integer", "minimum": 0 },
         "resources": { "$ref": "#/$defs/resources" },
+        "terminationGracePeriodSeconds": { "type": "integer", "minimum": 1, "description": "Pod stop timeout in seconds." },
         "nodeSelector": { "type": "object" },
         "tolerations": { "type": "array" },
         "affinity": { "type": "object" },
@@ -214,6 +216,7 @@
           },
           "workerState": { "type": "string", "enum": ["online", "draining", "offline"] },
           "requireRedisAcl": { "type": "boolean" },
+          "terminationGracePeriodSeconds": { "type": "integer", "minimum": 1, "description": "Pod stop timeout in seconds." },
           "image": { "$ref": "#/$defs/image" },
           "resources": { "$ref": "#/$defs/resources" },
           "autoscaling": { "$ref": "#/$defs/autoscaling" },

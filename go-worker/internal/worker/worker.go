@@ -56,14 +56,122 @@ func Start(ctx context.Context, cfg *config.Config, rdb *redis.Client) error {
 		killChans: make(map[string]context.CancelFunc),
 	}
 
-	// Start background goroutines.
-	go w.heartbeatLoop(ctx)
-	go w.killListener(ctx)
+	// SIGTERM cancels ctx, which stops the poll loop from accepting new work.
+	// Heartbeats, the kill listener and in-flight jobs run on workCtx instead
+	// so a graceful shutdown can let running jobs finish (see drain) rather
+	// than killing them and failing to publish their run_end events.
+	workCtx, cancelWork := context.WithCancel(context.WithoutCancel(ctx))
+	defer cancelWork()
+	w.workCtx = workCtx
+
+	// Start supervised background goroutines.
+	supervise(workCtx, "heartbeat", w.heartbeatLoop)
+	supervise(workCtx, "kill-listener", w.killListener)
 
 	queueKey := fmt.Sprintf("job_queue:%s:%s", cfg.Domain, cfg.WorkerID)
 
 	log.Printf("[worker] %s starting with max_concurrency=%d", cfg.WorkerID, cfg.MaxConcurrency)
-	return w.pollLoop(ctx, queueKey)
+	err := w.pollLoop(ctx, queueKey)
+	w.drain(shutdownGrace())
+	return err
+}
+
+const (
+	defaultShutdownGrace = 25 * time.Second
+	forcedCancelWait     = 10 * time.Second
+)
+
+// Package vars so tests can shorten them.
+var (
+	drainForcedCancelWait = forcedCancelWait
+	superviseRestartDelay = 2 * time.Second
+)
+
+// shutdownGrace is how long in-flight jobs may keep running after SIGTERM
+// before they are cancelled. Keep it below the pod/container stop timeout
+// (Kubernetes terminationGracePeriodSeconds, docker stop -t).
+func shutdownGrace() time.Duration {
+	if v := strings.TrimSpace(os.Getenv("WORKER_SHUTDOWN_GRACE_SECONDS")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			return time.Duration(n) * time.Second
+		}
+	}
+	return defaultShutdownGrace
+}
+
+// supervise runs fn in a goroutine and restarts it if it panics or returns
+// while ctx is still live. A panic in the heartbeat or kill listener would
+// otherwise either kill the whole process or silently leave the worker
+// looking offline / unable to cancel jobs.
+func supervise(ctx context.Context, name string, fn func(context.Context)) {
+	go func() {
+		for {
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						log.Printf("[worker] %s goroutine panicked: %v\n%s", name, r, debug.Stack())
+					}
+				}()
+				fn(ctx)
+			}()
+			if ctx.Err() != nil {
+				return
+			}
+			log.Printf("[worker] %s goroutine exited unexpectedly; restarting in %s", name, superviseRestartDelay)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(superviseRestartDelay):
+			}
+		}
+	}()
+}
+
+// drain waits for in-flight jobs. After the grace period it cancels them
+// individually (the work context stays live so each still publishes its
+// run_end), then waits a bounded time for them to finish.
+func (w *workerState) drain(grace time.Duration) {
+	done := make(chan struct{})
+	go func() {
+		w.jobs.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return
+	default:
+	}
+	log.Printf("[worker] shutting down; waiting up to %s for in-flight jobs", grace)
+	select {
+	case <-done:
+		log.Printf("[worker] in-flight jobs finished")
+		return
+	case <-time.After(grace):
+	}
+	log.Printf("[worker] grace period expired; cancelling in-flight jobs")
+	w.cancelAllJobs()
+	select {
+	case <-done:
+	case <-time.After(drainForcedCancelWait):
+		log.Printf("[worker] jobs still running after forced cancel; exiting anyway")
+	}
+}
+
+func (w *workerState) cancelAllJobs() {
+	w.killMu.Lock()
+	defer w.killMu.Unlock()
+	for _, cancel := range w.killChans {
+		cancel()
+	}
+}
+
+// jobBaseCtx is the context jobs run under: workCtx when started via Start,
+// otherwise the caller's ctx (tests that drive pollLoop/runJob directly).
+func (w *workerState) jobBaseCtx(ctx context.Context) context.Context {
+	if w.workCtx != nil {
+		return w.workCtx
+	}
+	return ctx
 }
 
 // workerState holds the mutable runtime state shared between goroutines.
@@ -77,6 +185,9 @@ type workerState struct {
 
 	killMu    sync.Mutex
 	killChans map[string]context.CancelFunc // run_id -> cancel
+
+	workCtx context.Context // not cancelled by SIGTERM; see Start
+	jobs    sync.WaitGroup  // in-flight runJob goroutines
 }
 
 // ---------------------------------------------------------------------------
@@ -363,14 +474,28 @@ func (w *workerState) pollLoop(ctx context.Context, queueKey string) error {
 			continue
 		}
 
-		bypassConcurrency := env.Job.BypassConcurrency
-		if bypassConcurrency {
-			go w.runJob(ctx, &env)
-		} else {
-			sem <- struct{}{}
+		runCtx := w.jobBaseCtx(ctx)
+		if env.Job.BypassConcurrency {
+			w.jobs.Add(1)
 			go func() {
+				defer w.jobs.Done()
+				w.runJob(runCtx, &env)
+			}()
+		} else {
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+				// Shutting down while at capacity: hand the already-popped
+				// envelope back so it isn't lost.
+				w.rdb.LPush(context.WithoutCancel(ctx), queueKey, result[1])
+				log.Printf("[worker] shutting down")
+				return nil
+			}
+			w.jobs.Add(1)
+			go func() {
+				defer w.jobs.Done()
 				defer func() { <-sem }()
-				w.runJob(ctx, &env)
+				w.runJob(runCtx, &env)
 			}()
 		}
 	}
