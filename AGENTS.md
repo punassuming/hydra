@@ -36,7 +36,7 @@ Hydra Jobs is a distributed job runner designed for flexibility and scalability.
 - Worker Redis ACL username is the domain name itself (legacy hashed usernames are cleaned up on rotation/delete).
 - Redis ACL credentials are persisted in Mongo domain metadata when created/rotated, and scheduler startup re-applies stored ACL users/passwords to Redis so worker auth survives Redis restarts/recreates without forced credential rotation.
 - Scheduler worker APIs include:
-  - `GET /workers/` with runtime + 30m metrics summary (memory/process/load), running jobs/users, plus clear `connectivity_status` and `dispatch_status`.
+  - `GET /workers/` with runtime + 30m metrics summary (memory/process/load), running jobs/users, plus clear `connectivity_status` and `dispatch_status`. Each worker also reports `worker_protocol_version` and a `protocol_mismatch` flag (true when it differs from the scheduler's `EXPECTED_WORKER_PROTOCOL_VERSION`, or the worker reports none); the scheduler logs one warning per worker+version and never rejects a mismatched worker, so rolling upgrades of mixed pools keep working. Bump the constant together with `worker/worker.py` and `go-worker/internal/worker/worker.go`.
   - `GET /workers/{worker_id}/metrics` for time-series points.
   - `GET /workers/{worker_id}/timeline` for per-worker execution spans (for Gantt/timeline UI).
   - `GET /workers/{worker_id}/operations` for operational timeline events (start/restart/dispatch/run lifecycle/state changes/failover).

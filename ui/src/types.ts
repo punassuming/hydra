@@ -326,6 +326,7 @@ export interface WorkerInfo {
   dispatch_status?: "online" | "draining" | "offline";
   heartbeat_age_seconds?: number;
   worker_protocol_version?: string;
+  protocol_mismatch?: boolean;
 }
 
 export interface WorkerMetricPoint {
