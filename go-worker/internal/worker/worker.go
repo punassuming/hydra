@@ -602,9 +602,12 @@ func (w *workerState) runJob(ctx context.Context, env *executor.JobEnvelope) {
 	w.rdb.HSet(ctx, fmt.Sprintf("job_running:%s:%s", w.cfg.Domain, jobID), map[string]interface{}{
 		"worker_id": w.cfg.WorkerID,
 		"heartbeat": startedTS,
-		"user":      env.Job.User,
-		"domain":    w.cfg.Domain,
-		"run_id":    runID,
+		// Immutable: the heartbeat tick overwrites "heartbeat" every ~2s, so
+		// the scheduler's timeout backstop needs this.
+		"started_ts": startedTS,
+		"user":       env.Job.User,
+		"domain":     w.cfg.Domain,
+		"run_id":     runID,
 	})
 
 	scheduleMode := "immediate"
