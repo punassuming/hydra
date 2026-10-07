@@ -493,3 +493,111 @@ func TestRunJob_RecoversFromPanicAndMarksRunFailed(t *testing.T) {
 		t.Errorf("expected running count to be 0 after the panic, got %d", running)
 	}
 }
+
+func TestSupervise_RestartsAfterPanic(t *testing.T) {
+	orig := superviseRestartDelay
+	superviseRestartDelay = 10 * time.Millisecond
+	defer func() { superviseRestartDelay = orig }()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var calls int32
+	started := make(chan struct{}, 2)
+	supervise(ctx, "test", func(c context.Context) {
+		n := atomic.AddInt32(&calls, 1)
+		started <- struct{}{}
+		if n == 1 {
+			panic("boom")
+		}
+		<-c.Done()
+	})
+
+	for i := 0; i < 2; i++ {
+		select {
+		case <-started:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("goroutine was not (re)started; calls=%d", atomic.LoadInt32(&calls))
+		}
+	}
+}
+
+func TestSupervise_StopsWhenContextCancelled(t *testing.T) {
+	orig := superviseRestartDelay
+	superviseRestartDelay = 10 * time.Millisecond
+	defer func() { superviseRestartDelay = orig }()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var calls int32
+	supervise(ctx, "test", func(c context.Context) {
+		atomic.AddInt32(&calls, 1)
+		<-c.Done()
+	})
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+	time.Sleep(100 * time.Millisecond)
+	if n := atomic.LoadInt32(&calls); n != 1 {
+		t.Errorf("expected exactly 1 run, got %d", n)
+	}
+}
+
+func TestDrain_WaitsForJobsWithinGrace(t *testing.T) {
+	w := &workerState{killChans: make(map[string]context.CancelFunc)}
+	cancelled := false
+	w.killChans["run-1"] = func() { cancelled = true }
+
+	w.jobs.Add(1)
+	go func() {
+		defer w.jobs.Done()
+		time.Sleep(50 * time.Millisecond)
+	}()
+
+	start := time.Now()
+	w.drain(2 * time.Second)
+	if time.Since(start) > time.Second {
+		t.Errorf("drain should return as soon as jobs finish, took %s", time.Since(start))
+	}
+	if cancelled {
+		t.Error("jobs finishing within the grace period must not be cancelled")
+	}
+}
+
+func TestDrain_CancelsJobsAfterGrace(t *testing.T) {
+	orig := drainForcedCancelWait
+	drainForcedCancelWait = 2 * time.Second
+	defer func() { drainForcedCancelWait = orig }()
+
+	w := &workerState{killChans: make(map[string]context.CancelFunc)}
+	jobCtx, jobCancel := context.WithCancel(context.Background())
+	w.killChans["run-1"] = jobCancel
+
+	w.jobs.Add(1)
+	go func() {
+		defer w.jobs.Done()
+		<-jobCtx.Done() // a long job that only ends when cancelled
+	}()
+
+	start := time.Now()
+	w.drain(50 * time.Millisecond)
+	if time.Since(start) > time.Second {
+		t.Errorf("drain should cancel after grace and return promptly, took %s", time.Since(start))
+	}
+	if jobCtx.Err() == nil {
+		t.Error("expected the in-flight job to be cancelled after the grace period")
+	}
+}
+
+func TestShutdownGrace(t *testing.T) {
+	t.Setenv("WORKER_SHUTDOWN_GRACE_SECONDS", "")
+	if got := shutdownGrace(); got != defaultShutdownGrace {
+		t.Errorf("default grace = %s, want %s", got, defaultShutdownGrace)
+	}
+	t.Setenv("WORKER_SHUTDOWN_GRACE_SECONDS", "7")
+	if got := shutdownGrace(); got != 7*time.Second {
+		t.Errorf("grace = %s, want 7s", got)
+	}
+	t.Setenv("WORKER_SHUTDOWN_GRACE_SECONDS", "junk")
+	if got := shutdownGrace(); got != defaultShutdownGrace {
+		t.Errorf("invalid value should fall back to default, got %s", got)
+	}
+}

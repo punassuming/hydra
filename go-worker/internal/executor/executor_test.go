@@ -533,3 +533,35 @@ func writeFakePythonScript(t *testing.T, importSucceeds bool) string {
 	}
 	return path
 }
+
+func TestScanLines_ContainsCallbackPanic(t *testing.T) {
+	var buf strings.Builder
+	var seen []string
+	scanLines(strings.NewReader("a\nb\nc\n"), &buf, func(line string) {
+		seen = append(seen, line)
+		if line == "a" {
+			panic("callback blew up")
+		}
+	})
+	if got := buf.String(); got != "a\nb\nc\n" {
+		t.Errorf("buffer = %q, want all lines captured despite the panic", got)
+	}
+	if len(seen) != 3 {
+		t.Errorf("expected callback for every line, got %v", seen)
+	}
+}
+
+func TestScanLines_DrainsAfterOverlongLine(t *testing.T) {
+	// bufio.Scanner stops on a line longer than its 64KB buffer; the reader
+	// must still be fully consumed so a real child can't block on its pipe.
+	long := strings.Repeat("x", 70*1024)
+	r := strings.NewReader("ok\n" + long + "\nafter\n")
+	var buf strings.Builder
+	scanLines(r, &buf, nil)
+	if r.Len() != 0 {
+		t.Errorf("expected the reader to be drained, %d bytes left", r.Len())
+	}
+	if !strings.HasPrefix(buf.String(), "ok\n") {
+		t.Errorf("lines before the overlong one should be kept, got %q", buf.String()[:3])
+	}
+}

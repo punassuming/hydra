@@ -4,6 +4,8 @@
 {{- $authSecretName := $isDefaultDomain | ternary (include "hydra.secretName" $root) (printf "%s-domain-%s" (include "hydra.fullname" $root) $pool.domain) }}
 {{- $tokenKey := $isDefaultDomain | ternary "SEED_DOMAIN_TOKEN" "API_TOKEN" }}
 {{- $passwordKey := $isDefaultDomain | ternary "SEED_DOMAIN_REDIS_PASSWORD" "REDIS_PASSWORD" }}
+{{- /* Pod stop timeout; the Go worker drains in-flight jobs for 10s less than this, so it can finish publishing run_end before SIGKILL. */}}
+{{- $grace := int ($pool.terminationGracePeriodSeconds | default 60) }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -20,6 +22,7 @@ spec:
       labels:
         {{- include "hydra.componentSelectorLabels" (dict "root" $root "component" (printf "worker-%s" $pool.name)) | nindent 8 }}
     spec:
+      terminationGracePeriodSeconds: {{ $grace }}
       {{- with $root.Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -72,6 +75,10 @@ spec:
               value: {{ $pool.workerState | quote }}
             - name: DEPLOYMENT_TYPE
               value: kubernetes
+            {{- if eq $pool.flavor "go" }}
+            - name: WORKER_SHUTDOWN_GRACE_SECONDS
+              value: {{ max 0 (sub $grace 10) | quote }}
+            {{- end }}
             {{- if eq $pool.flavor "python" }}
             - name: WORKER_REQUIRE_REDIS_ACL
               value: {{ $pool.requireRedisAcl | quote }}
