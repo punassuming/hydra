@@ -250,6 +250,7 @@ The Compose files themselves (`docker-compose.worker.go.yml`, `docker-compose.wo
 - `HYDRA_RUN_RETENTION_DAYS` — Purge `job_runs` older than this many days via the run_retention_loop background loop. Unset or `0` disables purging entirely (default)
 - `SCHEDULER_RUN_RETENTION_CHECK_INTERVAL` — Seconds between passes of the run retention loop (default `3600`)
 - `SCHEDULER_RETRY_BACKOFF_CAP_SECONDS` — Ceiling for the exponential backoff applied to scheduler-level job retries (each retry's delay doubles from the job's `retry_delay_seconds`, capped here; default `300`)
+- `SCHEDULER_RETRY_JITTER_FRACTION` — +/- fraction of each scheduler-retry delay that is randomised so correlated failures don't retry in lockstep (default `0.2`; `0` disables). Note scheduler-level retries wait in an in-process daemon thread, so a scheduler restart drops retries still waiting out their delay
 - `CORS_ALLOW_ORIGINS` — CORS allowed origins
 - `ADMIN_TOKEN` — Admin authentication token
 - `ADMIN_DOMAIN` — Admin domain name

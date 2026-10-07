@@ -16,6 +16,7 @@ import pytest
 from scheduler.models.job_run import TERMINAL_STATES
 from scheduler.run_events import (
     RETRY_BACKOFF_CAP_SECONDS,
+    _apply_retry_jitter,
     _compute_retry_backoff_delay,
     _handle_event,
     _handle_run_end,
@@ -83,6 +84,33 @@ class TestComputeRetryBackoffDelay:
 
     def test_delay_is_capped(self):
         assert _compute_retry_backoff_delay(10, retry_attempt=20) == RETRY_BACKOFF_CAP_SECONDS
+
+
+class TestApplyRetryJitter:
+    def test_zero_delay_stays_zero(self):
+        assert _apply_retry_jitter(0, rng=lambda: 0.99) == 0
+
+    def test_midpoint_rng_leaves_delay_unchanged(self):
+        assert _apply_retry_jitter(100, rng=lambda: 0.5) == 100
+
+    def test_extremes_stay_within_the_configured_fraction(self):
+        from scheduler.run_events import RETRY_JITTER_FRACTION
+
+        low = _apply_retry_jitter(100, rng=lambda: 0.0)
+        high = _apply_retry_jitter(100, rng=lambda: 0.999999)
+        assert low == round(100 * (1 - RETRY_JITTER_FRACTION))
+        assert high == round(100 * (1 + RETRY_JITTER_FRACTION))
+
+    def test_never_exceeds_the_cap(self):
+        assert _apply_retry_jitter(RETRY_BACKOFF_CAP_SECONDS, rng=lambda: 0.999999) == RETRY_BACKOFF_CAP_SECONDS
+
+    def test_disabled_when_fraction_is_zero(self, monkeypatch):
+        monkeypatch.setattr("scheduler.run_events.RETRY_JITTER_FRACTION", 0.0)
+        assert _apply_retry_jitter(100, rng=lambda: 0.0) == 100
+
+    def test_actually_varies_with_the_default_rng(self):
+        samples = {_apply_retry_jitter(100) for _ in range(200)}
+        assert len(samples) > 1
 
 
 # ---------------------------------------------------------------------------
@@ -234,7 +262,8 @@ class TestHandleRunEndIdempotency:
         mock_retry.assert_called_once()
         _, kwargs = mock_retry.call_args
         assert kwargs["retry_attempt"] == 2
-        assert kwargs["delay_seconds"] == 20  # 10s base doubled once for the 2nd retry
+        # 10s base doubled once for the 2nd retry, then jittered +/-20%.
+        assert 16 <= kwargs["delay_seconds"] <= 24
 
     def test_run_end_missing_run_id_is_silently_dropped(self):
         db = _make_db()
