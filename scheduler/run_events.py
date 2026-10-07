@@ -1,5 +1,6 @@
 import json
 import os
+import random
 import smtplib
 import threading
 import time
@@ -25,6 +26,10 @@ _WEBHOOK_MAX_ERROR_LEN = 2000
 # kill-listener reconnect loop uses 2s -> 60s; job retries default to a longer
 # cap since they represent actual work being redone, not a reconnect probe).
 RETRY_BACKOFF_CAP_SECONDS = int(os.getenv("SCHEDULER_RETRY_BACKOFF_CAP_SECONDS", "300"))
+# +/- fraction of the backoff delay randomised per retry, so a burst of jobs that
+# failed together (e.g. a downstream outage) doesn't retry in lockstep and hit
+# the recovering dependency all at once. 0 disables jitter.
+RETRY_JITTER_FRACTION = max(0.0, min(1.0, float(os.getenv("SCHEDULER_RETRY_JITTER_FRACTION", "0.2"))))
 
 
 def _compute_retry_backoff_delay(base_delay_seconds: int, retry_attempt: int) -> int:
@@ -40,6 +45,18 @@ def _compute_retry_backoff_delay(base_delay_seconds: int, retry_attempt: int) ->
         return 0
     multiplier = 2 ** max(retry_attempt - 1, 0)
     return min(base_delay_seconds * multiplier, RETRY_BACKOFF_CAP_SECONDS)
+
+
+def _apply_retry_jitter(delay_seconds: int, rng=random.random) -> int:
+    """Spread a backoff delay by +/- RETRY_JITTER_FRACTION (never past the cap).
+
+    A zero delay (immediate retry) stays zero. `rng` returns a float in [0, 1)
+    and is injectable so tests are deterministic.
+    """
+    if delay_seconds <= 0 or RETRY_JITTER_FRACTION <= 0:
+        return max(delay_seconds, 0)
+    factor = 1 + (rng() * 2 - 1) * RETRY_JITTER_FRACTION
+    return min(max(int(round(delay_seconds * factor)), 0), RETRY_BACKOFF_CAP_SECONDS)
 
 
 def _to_datetime(value: Any) -> datetime | None:
@@ -440,7 +457,7 @@ def _handle_run_end(payload: Dict[str, Any]):
                     domain=domain,
                     priority=int(job_doc.get("priority", 5)),
                     retry_attempt=next_attempt,
-                    delay_seconds=_compute_retry_backoff_delay(retry_delay, next_attempt),
+                    delay_seconds=_apply_retry_jitter(_compute_retry_backoff_delay(retry_delay, next_attempt)),
                 )
             else:
                 # Terminal failure — fire webhooks
