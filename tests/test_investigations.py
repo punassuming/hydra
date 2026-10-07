@@ -90,7 +90,7 @@ def test_list_investigations_returns_catalog():
     keys = {item["key"] for item in response.json()}
     assert keys == {
         "failed_recent", "long_running_outliers", "flaky_jobs", "never_succeeded", "sla_miss", "retry_storm",
-        "dead_letter",
+        "dead_letter", "queue_starvation", "worker_offline", "schedule_overdue",
     }
 
 
@@ -284,3 +284,107 @@ def test_dead_letter_requires_exhausted_retries_on_latest_run():
     assert len(data["results"]) == 1
     assert data["results"][0]["job_id"] == "job-exhausted"
     assert data["results"][0]["metric_value"] == 2
+
+
+class _FakeRedis:
+    """Just the Redis calls the Redis-backed investigations make."""
+
+    def __init__(self, pending=None, meta=None, workers=None, heartbeats=None):
+        self._pending = pending or {}  # domain -> [job_id]
+        self._meta = meta or {}  # "domain:job_id" -> dict
+        self._workers = workers or {}  # "workers:domain:wid" -> dict
+        self._heartbeats = heartbeats or {}  # (domain, wid) -> ts
+
+    def zrange(self, key, start, end):
+        return list(self._pending.get(key.split(":")[1], []))
+
+    def hgetall(self, key):
+        if key.startswith("job_enqueue_meta:"):
+            return self._meta.get(key.split(":", 1)[1], {})
+        return self._workers.get(key, {})
+
+    def scan_iter(self, pattern):
+        prefix = pattern.rstrip("*")
+        return iter([k for k in self._workers if k.startswith(prefix)])
+
+    def zscore(self, key, member):
+        return self._heartbeats.get((key.split(":", 1)[1], member))
+
+
+def test_queue_starvation_flags_pending_jobs_at_threshold():
+    jobs = [
+        {"_id": "stuck", "name": "needs-gpu", "domain": "prod"},
+        {"_id": "ok", "name": "fine", "domain": "prod"},
+        {"_id": "not-pending", "name": "old-meta", "domain": "prod"},
+    ]
+    r = _FakeRedis(
+        pending={"prod": ["stuck", "ok"]},
+        meta={
+            "prod:stuck": {"no_worker_count": "9", "enqueued_ts": str(_now().timestamp())},
+            "prod:ok": {"no_worker_count": "1"},
+            "prod:not-pending": {"no_worker_count": "50"},  # stale meta, not in the pending queue
+        },
+    )
+    with patch("scheduler.api.investigations.get_db", return_value=_FakeDB(jobs, [])), patch(
+        "scheduler.api.investigations.get_redis", return_value=r
+    ):
+        response = client.get("/investigations/queue_starvation", headers=_auth_headers())
+    assert response.status_code == 200
+    rows = response.json()["results"]
+    assert [row["job_id"] for row in rows] == ["stuck"]
+    assert rows[0]["metric_value"] == 9
+    assert rows[0]["last_run_at"] is not None
+
+
+def test_worker_offline_flags_stale_heartbeats_but_not_deliberate_offline():
+    now = _now().timestamp()
+    r = _FakeRedis(
+        workers={
+            "workers:prod:dead": {"state": "online", "hostname": "box-1"},
+            "workers:prod:healthy": {"state": "online"},
+            "workers:prod:parked": {"state": "offline"},  # operator set it offline
+            "workers:prod:unknown": {"state": "online"},  # no heartbeat on record
+        },
+        heartbeats={
+            ("prod", "dead"): now - 120,
+            ("prod", "healthy"): now - 1,
+            ("prod", "parked"): now - 9999,
+        },
+    )
+    with patch("scheduler.api.investigations.get_db", return_value=_FakeDB([], [])), patch(
+        "scheduler.api.investigations.get_redis", return_value=r
+    ):
+        response = client.get("/investigations/worker_offline?domain=prod", headers=_auth_headers())
+    assert response.status_code == 200
+    rows = response.json()["results"]
+    assert [row["job_id"] for row in rows] == ["dead"]
+    assert rows[0]["entity"] == "worker"
+    assert rows[0]["job_name"] == "box-1"
+    assert rows[0]["metric_value"] >= 120
+
+
+def test_schedule_overdue_flags_only_stale_enabled_cron_and_interval_jobs():
+    now = _now()
+    stale = now - timedelta(minutes=30)
+    jobs = [
+        {"_id": "overdue", "name": "stuck-cron", "domain": "prod",
+         "schedule": {"mode": "cron", "enabled": True, "next_run_at": stale}},
+        {"_id": "iso-string", "name": "iso", "domain": "prod",
+         "schedule": {"mode": "interval", "enabled": True, "next_run_at": stale.isoformat()}},
+        {"_id": "on-time", "name": "fine", "domain": "prod",
+         "schedule": {"mode": "cron", "enabled": True, "next_run_at": now + timedelta(minutes=5)}},
+        {"_id": "just-late", "name": "within-grace", "domain": "prod",
+         "schedule": {"mode": "cron", "enabled": True, "next_run_at": now - timedelta(seconds=30)}},
+        {"_id": "disabled", "name": "paused", "domain": "prod",
+         "schedule": {"mode": "cron", "enabled": False, "next_run_at": stale}},
+        {"_id": "immediate", "name": "one-shot", "domain": "prod",
+         "schedule": {"mode": "immediate", "enabled": True, "next_run_at": stale}},
+        {"_id": "ended", "name": "window-closed", "domain": "prod",
+         "schedule": {"mode": "cron", "enabled": True, "next_run_at": stale, "end_at": now - timedelta(days=1)}},
+        {"_id": "no-schedule", "name": "bare", "domain": "prod"},
+    ]
+    with patch("scheduler.api.investigations.get_db", return_value=_FakeDB(jobs, [])):
+        response = client.get("/investigations/schedule_overdue", headers=_auth_headers())
+    assert response.status_code == 200
+    assert {row["job_id"] for row in response.json()["results"]} == {"overdue", "iso-string"}
+    assert all(row["metric_value"] >= 29 for row in response.json()["results"])

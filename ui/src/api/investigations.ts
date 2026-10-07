@@ -7,6 +7,8 @@ export interface InvestigationCatalogItem {
 }
 
 export interface InvestigationResultRow {
+  /** Defaults to "job". Worker rows carry the worker id in job_id/job_name. */
+  entity?: "job" | "worker";
   job_id: string;
   job_name: string;
   domain: string;

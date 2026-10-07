@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Alert, Button, Card, Drawer, Empty, Space, Spin, Table, Typography } from "antd";
+import { Alert, Button, Card, Drawer, Empty, Space, Spin, Table, Tag, Typography } from "antd";
 import {
   ArrowLeftOutlined,
   FireOutlined,
@@ -12,6 +12,9 @@ import {
   ClockCircleOutlined,
   RedoOutlined,
   InboxOutlined,
+  ApartmentOutlined,
+  DisconnectOutlined,
+  FieldTimeOutlined,
 } from "@ant-design/icons";
 import { fetchInvestigationCatalog, runInvestigation, InvestigationResultRow } from "../api/investigations";
 
@@ -28,6 +31,9 @@ const ICONS: Record<string, JSX.Element> = {
   sla_miss: <ClockCircleOutlined />,
   retry_storm: <RedoOutlined />,
   dead_letter: <InboxOutlined />,
+  queue_starvation: <ApartmentOutlined />,
+  worker_offline: <DisconnectOutlined />,
+  schedule_overdue: <FieldTimeOutlined />,
 };
 
 /** Canned, LLM-free investigations — click a card, get a straight answer
@@ -57,11 +63,18 @@ export function InvestigateDrawer({ open, onClose }: InvestigateDrawerProps) {
 
   const columns = [
     {
-      title: "Job",
+      title: "Subject",
       key: "job",
       render: (_: unknown, row: InvestigationResultRow) => (
         <Space direction="vertical" size={0}>
-          <Typography.Text strong>{row.job_name}</Typography.Text>
+          <Typography.Text strong>
+            {row.job_name}
+            {row.entity === "worker" && (
+              <Tag style={{ marginLeft: 8 }} aria-label="Row is a worker">
+                worker
+              </Tag>
+            )}
+          </Typography.Text>
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
             {row.job_id}
           </Typography.Text>
@@ -80,7 +93,7 @@ export function InvestigateDrawer({ open, onClose }: InvestigateDrawerProps) {
       ),
     },
     {
-      title: "Last Run",
+      title: "Last Seen",
       key: "last_run",
       render: (_: unknown, row: InvestigationResultRow) => (
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
