@@ -93,7 +93,7 @@ export function RunInspector({ run: providedRun, runId, open, onClose }: Props) 
       return;
     }
     const es = new EventSource(runStreamUrl(run._id));
-    es.onmessage = (evt) => {
+    const onChunk = (evt: MessageEvent) => {
       try {
         const payload = JSON.parse(evt.data) as { text?: string; stream?: string };
         if (!payload?.text) return;
@@ -105,6 +105,10 @@ export function RunInspector({ run: providedRun, runId, open, onClose }: Props) 
         // ignore malformed chunks
       }
     };
+    // The server tags each chunk as a named "log_chunk" event, which
+    // EventSource.onmessage never receives (it only fires for unnamed events).
+    es.addEventListener("log_chunk", onChunk as EventListener);
+    es.onmessage = onChunk;
     es.onerror = () => es.close();
     return () => es.close();
     // Re-subscribe only when the drawer opens on a (possibly different) run.
