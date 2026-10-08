@@ -25,7 +25,7 @@ Hydra's documentation is organized by topic so the `docs/` directory stays easy 
 ## Development
 
 - [`development/docker-compose-workflows.md`](development/docker-compose-workflows.md) — local Docker and Compose workflows
-- [`development/testing.md`](development/testing.md) — testing guardrails and test runner guidance
+- [`development/testing.md`](development/testing.md) — testing guardrails, the test runner, and `scripts/ci_local.py` for running the GitHub Actions CI jobs locally
 - [`../tests/acceptance/README.md`](../tests/acceptance/README.md) — home-lab acceptance suite: domain isolation, executor matrix, mixed worker-pool routing, and chaos/resilience checks against a real deployment
 
 ## Design notes
@@ -34,6 +34,7 @@ Hydra's documentation is organized by topic so the `docs/` directory stays easy 
 
 ## Reference
 
+- [`reference/job-parameters.md`](reference/job-parameters.md) — run-time params: how to pass them, the raw-key environment variable convention, validation, and the `HYDRA_*` names the scheduler sets
 - [`reference/generation-prompt.md`](reference/generation-prompt.md) — original repository generation prompt kept for reference
 
 ## UI
