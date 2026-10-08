@@ -8,6 +8,7 @@ from ..event_bus import event_bus
 from ..mongo_client import get_db
 from ..redis_client import get_redis
 from .logging import setup_logging
+from .requeue import requeue_meta
 from .worker_ops import append_worker_op
 
 log = setup_logging("scheduler.failover")
@@ -121,11 +122,7 @@ def requeue_jobs_for_worker(domain_and_worker: str):
         r.zadd(f"job_queue:{domain}:pending", {job_id: priority})
         r.hset(
             f"job_enqueue_meta:{domain}:{job_id}",
-            mapping={
-                "enqueued_ts": envelope.get("enqueued_ts") or time.time(),
-                "reason": "failover_requeue",
-                "retry_attempt": envelope.get("retry_attempt", 0),
-            },
+            mapping=requeue_meta(envelope, "failover_requeue"),
         )
         r.expire(f"job_enqueue_meta:{domain}:{job_id}", 24 * 3600)
         drained_count += 1

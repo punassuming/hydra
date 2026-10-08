@@ -1,0 +1,47 @@
+{
+  "description": "Cross-worker contract for turning run params into environment variables. Consumed by tests/test_param_env_contract.py (Python worker) and go-worker/internal/executor/contract_test.go (Go worker). If you change the rule, change both workers and this file together.",
+  "cases": [
+    {
+      "name": "no params leaves executor env untouched",
+      "executor_env": {"A": "1"},
+      "params": {},
+      "expected_env": {"A": "1"}
+    },
+    {
+      "name": "params are injected under their raw key",
+      "executor_env": {},
+      "params": {"FOO": "bar"},
+      "expected_env": {"FOO": "bar"}
+    },
+    {
+      "name": "params override a same-named executor env entry",
+      "executor_env": {"FOO": "from-executor", "KEEP": "me"},
+      "params": {"FOO": "from-param"},
+      "expected_env": {"FOO": "from-param", "KEEP": "me"}
+    },
+    {
+      "name": "scheduler-injected HYDRA_ keys are ordinary params",
+      "executor_env": {},
+      "params": {"HYDRA_EXECUTION_DATE": "2026-01-01", "HYDRA_IS_BACKFILL": "true"},
+      "expected_env": {"HYDRA_EXECUTION_DATE": "2026-01-01", "HYDRA_IS_BACKFILL": "true"}
+    },
+    {
+      "name": "key case is preserved",
+      "executor_env": {},
+      "params": {"lower_case": "x", "MixedCase": "y"},
+      "expected_env": {"lower_case": "x", "MixedCase": "y"}
+    },
+    {
+      "name": "empty values are kept",
+      "executor_env": {},
+      "params": {"EMPTY": ""},
+      "expected_env": {"EMPTY": ""}
+    },
+    {
+      "name": "values are opaque strings (JSON, spaces, equals signs)",
+      "executor_env": {},
+      "params": {"META": "{\"a\": 1, \"b\": \"x=y\"}"},
+      "expected_env": {"META": "{\"a\": 1, \"b\": \"x=y\"}"}
+    }
+  ]
+}

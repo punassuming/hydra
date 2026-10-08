@@ -60,6 +60,10 @@ commitlint never accepts a type release-please can't parse, or vice versa.
 scanned — write each commit message as if it stands alone, not just the PR
 title.
 
+## Running CI locally
+
+Before pushing, run the same checks CI will: `python scripts/ci_local.py --fast` (lint, Python tests, UI, Go worker) or `--list` to see every job. It reads `.github/workflows/python-ci.yml`, so it stays in step with CI; see [`docs/development/testing.md`](docs/development/testing.md) for flags and what it skips.
+
 ## Release process
 
 1. Every PR merged to `main` (with at least one `fix:`/`feat:`/etc. commit)

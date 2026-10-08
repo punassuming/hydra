@@ -12,6 +12,7 @@ from ..models.worker_info import WorkerInfo
 from ..mongo_client import get_db
 from ..redis_client import get_redis
 from ..utils.auth import get_domain_token_hash
+from ..utils.requeue import requeue_meta
 from ..utils.worker_ops import append_worker_op
 
 router = APIRouter()
@@ -200,11 +201,7 @@ def _requeue_worker_queue(r, domain: str, worker_id: str) -> int:
         r.zadd(f"job_queue:{domain}:pending", {job_id: priority})
         r.hset(
             f"job_enqueue_meta:{domain}:{job_id}",
-            mapping={
-                "enqueued_ts": envelope.get("enqueued_ts") or time.time(),
-                "reason": "worker_detached",
-                "retry_attempt": envelope.get("retry_attempt", 0),
-            },
+            mapping=requeue_meta(envelope, "worker_detached"),
         )
         r.expire(f"job_enqueue_meta:{domain}:{job_id}", 24 * 3600)
         requeued += 1

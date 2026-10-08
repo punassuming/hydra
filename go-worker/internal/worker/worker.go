@@ -703,15 +703,8 @@ func (w *workerState) runJob(ctx context.Context, env *executor.JobEnvelope) {
 		streamLog("stdout", line)
 	}
 
-	// Inject runtime params into executor env.
-	if len(env.Params) > 0 {
-		if env.Job.Executor.Env == nil {
-			env.Job.Executor.Env = make(map[string]string)
-		}
-		for k, v := range env.Params {
-			env.Job.Executor.Env[k] = v
-		}
-	}
+	// Runtime params become environment variables inside executor.Execute
+	// (buildEnv), identically for every executor type.
 
 	// Execute with retries.
 	attempts := env.Job.Retries + 1
