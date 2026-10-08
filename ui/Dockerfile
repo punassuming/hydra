@@ -11,7 +11,7 @@ ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 
 RUN npm run build
 
-FROM nginxinc/nginx-unprivileged:1.29-alpine
+FROM nginxinc/nginx-unprivileged:1.31-alpine
 # The unprivileged base image's own "nginx" user is fixed at 101:101 by that
 # image's own convention (not something we create) — declared once here so
 # every reference below stays in sync if that ever needs to change, instead
