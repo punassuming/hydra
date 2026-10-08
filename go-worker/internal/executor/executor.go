@@ -836,14 +836,16 @@ func DetectShells() []string {
 // ---------------------------------------------------------------------------
 
 // buildEnv merges executor-level env vars and job params into a single map.
-// Params are prefixed with HYDRA_PARAM_ to avoid collisions.
+// A param FOO=bar becomes the environment variable FOO=bar and overrides a
+// same-named executor env entry -- the same rule as the Python worker's
+// worker/utils/params.py, pinned by tests/fixtures/param_env_contract.json.
 func buildEnv(executorEnv, params map[string]string) map[string]string {
 	merged := make(map[string]string, len(executorEnv)+len(params))
 	for k, v := range executorEnv {
 		merged[k] = v
 	}
 	for k, v := range params {
-		merged["HYDRA_PARAM_"+k] = v
+		merged[k] = v
 	}
 	return merged
 }

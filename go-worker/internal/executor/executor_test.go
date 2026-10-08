@@ -221,7 +221,7 @@ func TestExecShell_Params(t *testing.T) {
 		Job: JobDef{
 			Executor: ExecutorSpec{
 				Type:   "shell",
-				Script: "echo $HYDRA_PARAM_FOO",
+				Script: "echo $FOO",
 			},
 		},
 	}
@@ -271,8 +271,11 @@ func TestBuildEnv(t *testing.T) {
 	if env["A"] != "1" {
 		t.Errorf("expected A=1, got %q", env["A"])
 	}
-	if env["HYDRA_PARAM_B"] != "2" {
-		t.Errorf("expected HYDRA_PARAM_B=2, got %q", env["HYDRA_PARAM_B"])
+	if env["B"] != "2" {
+		t.Errorf("expected param B=2 under its raw key, got %q", env["B"])
+	}
+	if _, prefixed := env["HYDRA_PARAM_B"]; prefixed {
+		t.Error("params must not be injected under a HYDRA_PARAM_ prefix")
 	}
 }
 
