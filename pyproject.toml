@@ -32,7 +32,7 @@ include = ["cli*", "scheduler*", "worker*"]
 dev = [
     "httpx",
     "pytest==8.3.5",
-    "ruff==0.15.22",
+    "ruff==0.16.10",
 ]
 
 [tool.ruff]
