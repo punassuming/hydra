@@ -1227,3 +1227,18 @@ def test_execute_job_no_timings_when_not_provided():
     job = {"executor": {"type": "shell", "script": "echo ok", "shell": "bash"}, "timeout": 5}
     rc, out, err = execute_job(job)
     assert rc == 0
+
+
+def test_should_retry_stops_after_success_or_kill():
+    import threading
+
+    from worker.worker import _should_retry
+
+    killed = threading.Event()
+    killed.set()
+    live = threading.Event()
+
+    assert _should_retry(False, live) is True  # failed, not killed: retry
+    assert _should_retry(True, live) is False  # succeeded: done
+    assert _should_retry(False, killed) is False  # killed: never retry
+    assert _should_retry(True, killed) is False

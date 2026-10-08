@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import time
 from datetime import datetime, timedelta, timezone
@@ -14,6 +15,37 @@ from ..utils.auth import get_domain_token_hash
 from ..utils.worker_ops import append_worker_op
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+# The worker Redis protocol version this scheduler was built against. Keep in
+# sync with worker/worker.py's WORKER_PROTOCOL_VERSION and go-worker's
+# workerProtocolVersion. Informational only: a mismatch is surfaced (log +
+# `protocol_mismatch` on GET /workers/), never used to reject a worker, so
+# mixed-version pools keep working during a rolling upgrade.
+EXPECTED_WORKER_PROTOCOL_VERSION = "1.0"
+
+_PROTOCOL_WARN_CACHE_MAX = 1024
+_protocol_warned: set = set()
+
+
+def _protocol_mismatch(domain: str, worker_id: str, version: str | None) -> bool:
+    """True if a worker's protocol version differs from what we expect
+    (including a worker too old to report one). Logs once per worker+version."""
+    if version == EXPECTED_WORKER_PROTOCOL_VERSION:
+        return False
+    key = (domain, worker_id, version)
+    if key not in _protocol_warned:
+        if len(_protocol_warned) >= _PROTOCOL_WARN_CACHE_MAX:
+            _protocol_warned.clear()  # worker ids churn (pod names); keep this bounded
+        _protocol_warned.add(key)
+        logger.warning(
+            "worker %s (domain=%s) reports protocol version %r; scheduler expects %r",
+            worker_id,
+            domain,
+            version,
+            EXPECTED_WORKER_PROTOCOL_VERSION,
+        )
+    return True
 
 
 class WorkerStatePayload(BaseModel):
@@ -252,6 +284,7 @@ def list_workers(request: Request):
                     dispatch_status=dispatch_status,
                     heartbeat_age_seconds=hb_age,
                     worker_protocol_version=data.get("worker_protocol_version"),
+                    protocol_mismatch=_protocol_mismatch(dom, wid, data.get("worker_protocol_version")),
                 )
             )
     return workers

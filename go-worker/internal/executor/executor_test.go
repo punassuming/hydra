@@ -437,6 +437,40 @@ func TestDetectCapabilities_SQLRequiresPythonAndSQLAlchemy(t *testing.T) {
 	}
 }
 
+func hasCap(caps []string, want string) bool {
+	for _, c := range caps {
+		if c == want {
+			return true
+		}
+	}
+	return false
+}
+
+func TestDetectCapabilities_BatchRequiresWindowsAndCmd(t *testing.T) {
+	origOS, origProbe := currentGOOS, cmdProbe
+	defer func() { currentGOOS, cmdProbe = origOS, origProbe }()
+
+	cases := []struct {
+		name   string
+		goos   string
+		cmdOK  bool
+		expect bool
+	}{
+		{"windows with cmd", "windows", true, true},
+		{"windows without cmd", "windows", false, false},
+		{"linux even if probe would pass", "linux", true, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			currentGOOS = tc.goos
+			cmdProbe = func() bool { return tc.cmdOK }
+			if got := hasCap(DetectCapabilities(), "batch"); got != tc.expect {
+				t.Errorf("batch advertised=%v, want %v", got, tc.expect)
+			}
+		})
+	}
+}
+
 func TestDetectCapabilities_SQLExcludedWhenImportFails(t *testing.T) {
 	// Point HYDRA_PYTHON_PATH at a fake interpreter that answers "--version"
 	// (so findPython() accepts it) but fails "-c import sqlalchemy", to force
@@ -498,4 +532,36 @@ func writeFakePythonScript(t *testing.T, importSucceeds bool) string {
 		t.Fatalf("failed to write fake python script: %v", err)
 	}
 	return path
+}
+
+func TestScanLines_ContainsCallbackPanic(t *testing.T) {
+	var buf strings.Builder
+	var seen []string
+	scanLines(strings.NewReader("a\nb\nc\n"), &buf, func(line string) {
+		seen = append(seen, line)
+		if line == "a" {
+			panic("callback blew up")
+		}
+	})
+	if got := buf.String(); got != "a\nb\nc\n" {
+		t.Errorf("buffer = %q, want all lines captured despite the panic", got)
+	}
+	if len(seen) != 3 {
+		t.Errorf("expected callback for every line, got %v", seen)
+	}
+}
+
+func TestScanLines_DrainsAfterOverlongLine(t *testing.T) {
+	// bufio.Scanner stops on a line longer than its 64KB buffer; the reader
+	// must still be fully consumed so a real child can't block on its pipe.
+	long := strings.Repeat("x", 70*1024)
+	r := strings.NewReader("ok\n" + long + "\nafter\n")
+	var buf strings.Builder
+	scanLines(r, &buf, nil)
+	if r.Len() != 0 {
+		t.Errorf("expected the reader to be drained, %d bytes left", r.Len())
+	}
+	if !strings.HasPrefix(buf.String(), "ok\n") {
+		t.Errorf("lines before the overlong one should be kept, got %q", buf.String()[:3])
+	}
 }

@@ -160,3 +160,26 @@ def test_run_adhoc_job_duplicate_name_returns_409_not_500():
             headers=_admin_headers(),
         )
     assert resp.status_code == 409
+
+
+def _submit_and_capture_enqueue(extra):
+    db = FakeDB([])
+    body = {"name": "child", "user": "tester", "executor": {"type": "shell", "script": "echo hi"}}
+    body.update(extra)
+    with patch("scheduler.api.jobs.get_db", return_value=db), \
+         patch("scheduler.api.jobs._enqueue_job") as enqueue:
+        resp = client.post("/jobs/", json=body, headers=_admin_headers())
+    assert resp.status_code == 200, resp.text
+    return enqueue
+
+
+def test_immediate_job_without_dependencies_is_enqueued_at_creation():
+    enqueue = _submit_and_capture_enqueue({})
+    enqueue.assert_called_once()
+
+
+def test_job_with_depends_on_is_not_enqueued_at_creation():
+    """The UI's "dependency" mode submits mode=immediate + depends_on; that job
+    must wait for its upstream rather than also running once on creation."""
+    enqueue = _submit_and_capture_enqueue({"depends_on": ["upstream-job-id"]})
+    enqueue.assert_not_called()

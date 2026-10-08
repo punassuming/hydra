@@ -1211,3 +1211,47 @@ def test_normalize_affinity_sql_sensor_end_to_end_with_passes_affinity():
     normalized = normalize_affinity(job)
     assert passes_affinity(normalized, worker_with_sql)
     assert not passes_affinity(normalized, worker_sensor_only)
+
+
+def test_failover_requeues_running_job_with_its_own_priority():
+    """A failed-over running job keeps its configured priority instead of being
+    reset to the default of 5."""
+    from unittest.mock import MagicMock, patch
+
+    from scheduler.utils.failover import requeue_jobs_for_worker
+
+    mock_r = MagicMock()
+    mock_r.smembers.return_value = {"job-hi"}
+    mock_r.hgetall.return_value = {"run_id": "run-1"}
+    mock_r.lrange.return_value = []
+    mock_db = MagicMock()
+    mock_db.job_definitions.find_one.return_value = {"priority": 9}
+
+    with patch("scheduler.utils.failover.get_redis", return_value=mock_r), \
+         patch("scheduler.utils.failover.get_db", return_value=mock_db), \
+         patch("scheduler.utils.failover.append_worker_op"), \
+         patch("scheduler.utils.failover.event_bus"):
+        requeue_jobs_for_worker("prod:worker-a")
+
+    mock_r.zadd.assert_any_call("job_queue:prod:pending", {"job-hi": 9.0})
+
+
+def test_failover_falls_back_to_default_priority_when_lookup_fails():
+    from unittest.mock import MagicMock, patch
+
+    from scheduler.utils.failover import requeue_jobs_for_worker
+
+    mock_r = MagicMock()
+    mock_r.smembers.return_value = {"job-x"}
+    mock_r.hgetall.return_value = {"run_id": "run-1"}
+    mock_r.lrange.return_value = []
+    mock_db = MagicMock()
+    mock_db.job_definitions.find_one.side_effect = RuntimeError("mongo down")
+
+    with patch("scheduler.utils.failover.get_redis", return_value=mock_r), \
+         patch("scheduler.utils.failover.get_db", return_value=mock_db), \
+         patch("scheduler.utils.failover.append_worker_op"), \
+         patch("scheduler.utils.failover.event_bus"):
+        requeue_jobs_for_worker("prod:worker-a")
+
+    mock_r.zadd.assert_any_call("job_queue:prod:pending", {"job-x": 5.0})

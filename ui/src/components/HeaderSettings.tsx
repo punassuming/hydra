@@ -54,7 +54,7 @@ export function HeaderSettings() {
   return (
     <>
       <Tooltip title="Settings">
-        <Button size="small" shape="circle" icon={<SettingOutlined />} onClick={() => setOpen(true)} />
+        <Button size="small" shape="circle" icon={<SettingOutlined />} aria-label="Open settings" onClick={() => setOpen(true)} />
       </Tooltip>
       <Drawer
         title="Workspace Settings"

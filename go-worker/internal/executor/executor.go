@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -627,6 +628,36 @@ const (
 
 // runCommand executes a command with context-based timeout, streaming
 // stdout/stderr lines via callbacks, and returns the aggregated result.
+// scanLines copies r into buf line by line, forwarding each line to cb.
+// These run in goroutines outside runJob's panic recovery, so a panicking
+// callback is contained here, and a read error (e.g. a line longer than the
+// scanner's buffer) drains the rest of the pipe so the child process can't
+// block forever writing to a pipe nobody reads.
+func scanLines(r io.Reader, buf *strings.Builder, cb func(string)) {
+	scanner := bufio.NewScanner(r)
+	for scanner.Scan() {
+		line := scanner.Text()
+		buf.WriteString(line)
+		buf.WriteByte('\n')
+		safeLineCallback(cb, line)
+	}
+	if scanner.Err() != nil {
+		_, _ = io.Copy(io.Discard, r)
+	}
+}
+
+func safeLineCallback(cb func(string), line string) {
+	if cb == nil {
+		return
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[executor] output callback panicked: %v\n%s", r, debug.Stack())
+		}
+	}()
+	cb(line)
+}
+
 func runCommand(ctx context.Context, cmdArgs []string, env map[string]string, workdir string, onStdout, onStderr func(string)) *ExecResult {
 	if len(cmdArgs) == 0 {
 		return &ExecResult{ReturnCode: 1, Stderr: "empty command"}
@@ -660,28 +691,12 @@ func runCommand(ctx context.Context, cmdArgs []string, env map[string]string, wo
 
 	go func() {
 		defer wg.Done()
-		scanner := bufio.NewScanner(stdoutPipe)
-		for scanner.Scan() {
-			line := scanner.Text()
-			stdoutBuf.WriteString(line)
-			stdoutBuf.WriteByte('\n')
-			if onStdout != nil {
-				onStdout(line)
-			}
-		}
+		scanLines(stdoutPipe, &stdoutBuf, onStdout)
 	}()
 
 	go func() {
 		defer wg.Done()
-		scanner := bufio.NewScanner(stderrPipe)
-		for scanner.Scan() {
-			line := scanner.Text()
-			stderrBuf.WriteString(line)
-			stderrBuf.WriteByte('\n')
-			if onStderr != nil {
-				onStderr(line)
-			}
-		}
+		scanLines(stderrPipe, &stderrBuf, onStderr)
 	}()
 
 	wg.Wait()
@@ -726,6 +741,12 @@ func runCommand(ctx context.Context, cmdArgs []string, env map[string]string, wo
 // Capability / shell detection (used during worker registration)
 // ---------------------------------------------------------------------------
 
+// Test seams for DetectCapabilities' Windows-only batch preflight.
+var (
+	currentGOOS = runtime.GOOS
+	cmdProbe    = func() bool { return probeCmd([]string{"cmd", "/c", "echo ok"}) }
+)
+
 // DetectCapabilities returns the list of executor types this worker supports.
 func DetectCapabilities() []string {
 	caps := []string{"shell", "external"}
@@ -742,7 +763,9 @@ func DetectCapabilities() []string {
 	if findPowershell() != "" {
 		caps = append(caps, "powershell")
 	}
-	if runtime.GOOS == "windows" {
+	// Batch needs cmd.exe to actually run, not just a Windows GOOS —
+	// mirrors the Python worker's shell-probe-gated "batch" capability.
+	if currentGOOS == "windows" && cmdProbe() {
 		caps = append(caps, "batch")
 	}
 	// HTTP executor uses Go's stdlib — always available.

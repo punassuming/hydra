@@ -68,6 +68,7 @@ function CopyableCode({ code }: { code: string }) {
         <Button
           size="small"
           icon={copied ? <CheckOutlined /> : <CopyOutlined />}
+          aria-label={copied ? "Copied to clipboard" : "Copy to clipboard"}
           onClick={handleCopy}
           style={{ position: "absolute", top: 6, right: 6, opacity: 0.75 }}
         />

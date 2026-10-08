@@ -66,6 +66,7 @@ scheduler:
       cpu: 500m
       memory: 512Mi
   extraEnv: []
+  terminationGracePeriodSeconds: 30
   nodeSelector: {}
   tolerations: []
   affinity: {}
@@ -74,6 +75,7 @@ scheduler:
     minAvailable: 1
 orchestrator:
   replicas: 1
+  terminationGracePeriodSeconds: 30
   resources:
     requests:
       cpu: 100m
@@ -115,6 +117,7 @@ workers:
     tags: batch,data
     allowedUsers: ''
     maxConcurrency: 4
+    terminationGracePeriodSeconds: 60
     workerState: online
     requireRedisAcl: true
     image:
@@ -142,6 +145,7 @@ workers:
     tags: go,lightweight
     allowedUsers: ''
     maxConcurrency: 8
+    terminationGracePeriodSeconds: 60
     workerState: online
     requireRedisAcl: true
     image:
