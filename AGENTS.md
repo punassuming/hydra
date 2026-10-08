@@ -54,7 +54,7 @@ Hydra Jobs is a distributed job runner designed for flexibility and scalability.
 - Worker (`worker/`) registers itself in Redis with tags/allowed users/domain token hash, heartbeats every 2s, BLPOPs its queue, tracks `current_running`/`worker_running_set`, streams logs to Redis (per-domain channels), emits run events to `run_events:<domain>`, and records worker operations to `worker_ops:<domain>:<worker_id>`.
 - Worker no longer mutates global domain registry keys; worker Redis writes are domain-scoped to heartbeat/status/queue/log keys.
 - Worker heartbeat stores rolling metrics in Redis (`worker_metrics:<domain>:<worker_id>:history`) including `memory_rss_mb`, `process_count`, and Linux load averages.
-- **Run params** (`POST /jobs/{id}/run`, `hydra-ctl run --param KEY=VALUE`, the UI's "Run with Parameters" modal, plus scheduler-injected `HYDRA_EXECUTION_DATE`/`HYDRA_IS_BACKFILL`/`HYDRA_UPSTREAM_ARTIFACT_METADATA`) become environment variables under their **raw key** on both workers: `FOO=bar` -> `$FOO`, overriding a same-named `executor.env` entry (precedence: worker os.environ < `executor.env` < params < worker-set `KRB5CCNAME`). There is no `HYDRA_PARAM_` prefix. The rule lives in `worker/utils/params.py` and `go-worker` `executor.buildEnv`, pinned for both by `tests/fixtures/param_env_contract.json`. Keys must match `^[A-Za-z_][A-Za-z0-9_]*$` (max 128 chars) and values are strings: enforced by the API (422), the CLI (which never JSON-coerces values) and the UI modal; this is format-only, so a caller can still set names like `PATH` for a run.
+- **Run params** — full reference in `docs/reference/job-parameters.md` (`POST /jobs/{id}/run`, `hydra-ctl run --param KEY=VALUE`, the UI's "Run with Parameters" modal, plus scheduler-injected `HYDRA_EXECUTION_DATE`/`HYDRA_IS_BACKFILL`/`HYDRA_UPSTREAM_ARTIFACT_METADATA`) become environment variables under their **raw key** on both workers: `FOO=bar` -> `$FOO`, overriding a same-named `executor.env` entry (precedence: worker os.environ < `executor.env` < params < worker-set `KRB5CCNAME`). There is no `HYDRA_PARAM_` prefix. The rule lives in `worker/utils/params.py` and `go-worker` `executor.buildEnv`, pinned for both by `tests/fixtures/param_env_contract.json`. Keys must match `^[A-Za-z_][A-Za-z0-9_]*$` (max 128 chars) and values are strings: enforced by the API (422), the CLI (which never JSON-coerces values) and the UI modal; this is format-only, so a caller can still set names like `PATH` for a run.
 - A job with `depends_on` is not enqueued at creation even when its `schedule.mode` is `immediate` (the UI's "dependency" mode submits that way); it runs when an upstream succeeds (`run_events._trigger_dependents`) or when started manually via `POST /jobs/{id}/run`.
 - Jobs support `bypass_concurrency`; scheduler can dispatch these even when workers are at quota, and workers execute them outside normal `ThreadPoolExecutor` limits. The scheduler logs a warning when dispatching a bypass job to an overloaded worker. A soft cap (`SCHEDULER_BYPASS_MAX_EXTRA`) can limit how many bypass jobs each worker carries above its normal concurrency limit.
 - **No-worker starvation tracking**: `job_enqueue_meta:<domain>:<job_id>` records `no_worker_count` (incremented each time a job is requeued due to no eligible worker). A starvation warning is logged when `no_worker_count` reaches `SCHEDULER_STARVATION_WARN_THRESHOLD` (default 5). The count is visible in `/overview/queue` and `/overview/pressure`.
@@ -192,7 +192,8 @@ Located in `scripts/`:
 *   `dev-up.sh`: Starts the development stack.
 *   `dev-down.sh`: Stops the development stack.
 *   `test.sh`: Runs Python backend tests.
-*   `test-all.sh`: Runs all tests.
+*   `test-all.sh`: Quick subset only — `tests/test_scheduler.py` + `tests/test_worker.py` (+ the end-to-end test with `E2E=1`) and the UI build; no ruff, Go checks, vitest or helm.
+*   `ci_local.py`: Runs the GitHub Actions CI jobs locally by parsing `.github/workflows/python-ci.yml` (`--list`, `--fast`, `--only a,b`, `--skip-docker`, `--release`, `--strict`, `--dry-run`); jobs whose tools are missing are reported as SKIP with a reason. Per-job logs go to the git-ignored `.ci-local/`. Each CI job must be classified in its `JOB_META`; `tests/test_workflows.py` fails otherwise (and statically checks pins, permissions, paths and container names).
 *   `worker-up.sh`: Starts a single worker pool against an existing scheduler; `WORKER_FLAVOR=python` (default) or `WORKER_FLAVOR=go` picks `docker-compose.worker.yml` vs `docker-compose.worker.go.yml`.
 *   `build-images.sh`: Builds Docker images.
 *   `create-domain.sh`: Creates a new domain via the API.
@@ -227,6 +228,7 @@ The Compose files themselves (`docker-compose.worker.go.yml`, `docker-compose.wo
 ### Frontend (React)
 
 *   Uses `vitest` for testing.
+*   `python scripts/ci_local.py --fast` reproduces the CI jobs (lint, tests, UI, Go) locally before you push.
 *   Run tests: `cd ui && npm test`
 *   Cypress integration tests: `cd ui && npm run cypress:open` or `cd ui && npm run cypress:run` (expects UI running on `http://localhost:5173`)
 
