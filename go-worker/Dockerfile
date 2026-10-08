@@ -7,7 +7,7 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /out/hydra-go-worker ./main.go
 
-FROM alpine:3.20
+FROM alpine:3.24
 
 RUN apk add --no-cache ca-certificates bash git python3 py3-pip openssh-client rsync \
     && pip install --no-cache-dir --break-system-packages sqlalchemy==2.0.36 pymongo==4.10.1
