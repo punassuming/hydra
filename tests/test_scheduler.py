@@ -1255,3 +1255,43 @@ def test_failover_falls_back_to_default_priority_when_lookup_fails():
         requeue_jobs_for_worker("prod:worker-a")
 
     mock_r.zadd.assert_any_call("job_queue:prod:pending", {"job-x": 5.0})
+
+
+def _failover_with_queued_envelope(envelope):
+    import json
+    from unittest.mock import MagicMock, patch
+
+    from scheduler.utils.failover import requeue_jobs_for_worker
+
+    mock_r = MagicMock()
+    mock_r.smembers.return_value = set()
+    mock_r.lrange.return_value = [json.dumps(envelope)]
+    with patch("scheduler.utils.failover.get_redis", return_value=mock_r), \
+         patch("scheduler.utils.failover.get_db", return_value=MagicMock()), \
+         patch("scheduler.utils.failover.append_worker_op"), \
+         patch("scheduler.utils.failover.event_bus"):
+        requeue_jobs_for_worker("prod:worker-a")
+    return mock_r
+
+
+def test_failover_requeue_preserves_run_params():
+    """A dispatched-but-unstarted envelope that goes back to the pending queue
+    keeps its params, in the same JSON form the scheduling loop reads back."""
+    import json
+
+    envelope = {"job_id": "job-p", "enqueued_ts": 1.0, "retry_attempt": 2,
+                "job": {"priority": 4}, "params": {"DATE": "2026-01-01", "HYDRA_IS_BACKFILL": "true"}}
+    mock_r = _failover_with_queued_envelope(envelope)
+
+    meta_calls = [c for c in mock_r.hset.call_args_list if c.args and c.args[0] == "job_enqueue_meta:prod:job-p"]
+    assert meta_calls, "enqueue meta was not written"
+    mapping = meta_calls[0].kwargs["mapping"]
+    assert json.loads(mapping["params"]) == envelope["params"]
+    assert mapping["reason"] == "failover_requeue"
+    assert mapping["retry_attempt"] == 2
+
+
+def test_failover_requeue_without_params_writes_no_params_field():
+    mock_r = _failover_with_queued_envelope({"job_id": "job-q", "job": {"priority": 5}})
+    meta_calls = [c for c in mock_r.hset.call_args_list if c.args and c.args[0] == "job_enqueue_meta:prod:job-q"]
+    assert "params" not in meta_calls[0].kwargs["mapping"]
