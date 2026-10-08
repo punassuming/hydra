@@ -183,3 +183,25 @@ def test_job_with_depends_on_is_not_enqueued_at_creation():
     must wait for its upstream rather than also running once on creation."""
     enqueue = _submit_and_capture_enqueue({"depends_on": ["upstream-job-id"]})
     enqueue.assert_not_called()
+
+
+def _run_with_params(params):
+    db = FakeDB([_job_doc("job-1", name="runnable", domain="prod")])
+    with patch("scheduler.api.jobs.get_db", return_value=db), \
+         patch("scheduler.api.jobs._enqueue_job") as enqueue:
+        resp = client.post("/jobs/job-1/run", json={"params": params}, headers=_admin_headers())
+    return resp, enqueue
+
+
+def test_run_accepts_valid_param_names():
+    resp, enqueue = _run_with_params({"DATE": "2026-01-01", "_x1": "v", "lower": "ok"})
+    assert resp.status_code == 200, resp.text
+    assert enqueue.call_args.kwargs["params"] == {"DATE": "2026-01-01", "_x1": "v", "lower": "ok"}
+
+
+@pytest.mark.parametrize("bad", ["1BAD", "has-dash", "has space", "A=B", "", "x" * 129])
+def test_run_rejects_invalid_param_names_with_422(bad):
+    resp, enqueue = _run_with_params({bad: "v"})
+    assert resp.status_code == 422
+    assert "invalid param name" in resp.text
+    enqueue.assert_not_called()
