@@ -87,6 +87,32 @@ def test_get_resources_can_emit_json(capsys):
     assert json.loads(capsys.readouterr().out) == workers
 
 
+def test_params_are_always_sent_as_strings_and_validated():
+    from cli.__main__ import _params
+
+    # Values stay opaque strings (no JSON coercion): the API only accepts strings.
+    assert _params(["A=1", "B=true", 'C={"x": 1}', "D=a=b", "E="]) == {
+        "A": "1", "B": "true", "C": '{"x": 1}', "D": "a=b", "E": "",
+    }
+    for bad in ("1BAD=x", "has-dash=x", "has space=x", "PATH;rm=x", "=x"):
+        with pytest.raises(ValueError):
+            _params([bad])
+    with pytest.raises(ValueError):
+        _params(["NOEQUALS"])
+    with pytest.raises(ValueError):
+        _params(["A" * 129 + "=x"])
+
+
+def test_cli_and_api_param_key_rules_match():
+    from cli.__main__ import PARAM_KEY_MAX_LENGTH as cli_max
+    from cli.__main__ import PARAM_KEY_PATTERN as cli_pat
+    from scheduler.api.jobs import PARAM_KEY_MAX_LENGTH as api_max
+    from scheduler.api.jobs import PARAM_KEY_PATTERN as api_pat
+
+    assert cli_pat.pattern == api_pat.pattern
+    assert cli_max == api_max
+
+
 def test_run_resolves_exact_job_name_and_parses_params(capsys):
     client = FakeClient(
         {
@@ -101,7 +127,7 @@ def test_run_resolves_exact_job_name_and_parses_params(capsys):
     assert client.calls[-1] == (
         "POST",
         "/jobs/job-1/run",
-        {"params": {"date": "2026-07-22", "retries": 2}},
+        {"params": {"date": "2026-07-22", "retries": "2"}},
         None,
     )
     assert json.loads(capsys.readouterr().out)["queued"] is True

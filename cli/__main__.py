@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
+import re
 import sys
 import time
 import urllib.parse
@@ -344,18 +344,28 @@ def _load_document(filename: str) -> dict[str, Any]:
     return document
 
 
-def _params(entries: list[str]) -> dict[str, Any]:
-    result: dict[str, Any] = {}
+# Run params become environment variables, so names must be valid variable names.
+# Keep in sync with scheduler/api/jobs.py (PARAM_KEY_PATTERN) and ui/src/utils/params.ts.
+PARAM_KEY_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+PARAM_KEY_MAX_LENGTH = 128
+
+
+def _params(entries: list[str]) -> dict[str, str]:
+    """Parse --param KEY=VALUE entries. Values are always sent as strings
+    (they become environment variables, and the API only accepts strings)."""
+    result: dict[str, str] = {}
     for entry in entries:
         if "=" not in entry:
             raise ValueError(f"invalid parameter {entry!r}; expected KEY=VALUE")
         key, value = entry.split("=", 1)
         if not key:
             raise ValueError("parameter name cannot be empty")
-        try:
-            result[key] = json.loads(value)
-        except json.JSONDecodeError:
-            result[key] = value
+        if len(key) > PARAM_KEY_MAX_LENGTH or not PARAM_KEY_PATTERN.match(key):
+            raise ValueError(
+                f"invalid parameter name {key!r}: use letters, digits and underscores, "
+                f"not starting with a digit (max {PARAM_KEY_MAX_LENGTH} characters)"
+            )
+        result[key] = value
     return result
 
 
