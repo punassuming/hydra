@@ -29,7 +29,7 @@ streaming, kill support, source fetching, and retry logic.
 | Source fetching (git, copy, rsync) | ✅ |
 | Git sparse checkout | ✅ |
 | Git PAT authentication | ✅ |
-| Environment injection (params) | ✅ |
+| Environment injection (params) | ✅ (raw key: `--param FOO=bar` -> `$FOO`; see [job parameters](../docs/reference/job-parameters.md)) |
 | Timeout support | ✅ |
 | Worker ops logging | ✅ |
 | Rich registration (OS, capabilities, shells, hostname) | ✅ |

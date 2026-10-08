@@ -30,6 +30,7 @@ from .redis_client import get_redis
 from .utils.completion import evaluate_completion, evaluate_file_criteria
 from .utils.concurrency import add_active_job, incr_running, remove_active_job
 from .utils.heartbeat import start_heartbeat
+from .utils.params import inject_params
 
 
 def append_worker_op(r, domain: str, worker_id: str, op_type: str, message: str, details: dict | None = None):
@@ -310,14 +311,7 @@ def worker_main():
                 stream_log("stdout", text)
 
             # Inject runtime params as environment variables
-            params = envelope.get("params") or {}
-            if params:
-                job = dict(job)
-                exec_dict = dict(job.get("executor") or {})
-                env_dict = dict(exec_dict.get("env") or {})
-                env_dict.update({k: str(v) for k, v in params.items()})
-                exec_dict["env"] = env_dict
-                job["executor"] = exec_dict
+            job = inject_params(job, envelope.get("params"))
 
             # Register kill event for this run
             kill_event = threading.Event()

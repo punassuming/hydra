@@ -14,3 +14,6 @@ ui/src/*.js.map
 *.egg-info/
 go-worker/hydra-go-worker
 go-worker/hydra-go-worker-*
+
+# Output of scripts/ci_local.py
+.ci-local/

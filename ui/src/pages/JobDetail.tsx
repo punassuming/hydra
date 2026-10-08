@@ -11,6 +11,7 @@ import { JobGraphView } from "../components/JobGraphView";
 import { JobPayload, ValidationResult, deleteJob, fetchJob, fetchJobRuns, runJobNow, killRun, backfillJob, toExportPayload, updateJob, validateJob } from "../api/jobs";
 import { useActiveDomain } from "../context/ActiveDomainContext";
 import { downloadJson, slugify } from "../utils/download";
+import { parseParams } from "../utils/params";
 
 export function JobDetailPage() {
   const { jobId } = useParams<{ jobId: string }>();
@@ -41,15 +42,6 @@ export function JobDetailPage() {
     refetchInterval: 5000,
   });
   const job = jobQuery.data;
-
-  const parseParams = (text: string): Record<string, string> => {
-    const result: Record<string, string> = {};
-    text.split("\n").filter((line) => line.trim()).forEach((line) => {
-      const [k, ...rest] = line.split("=");
-      if (k?.trim() && rest.length) result[k.trim()] = rest.join("=").trim();
-    });
-    return result;
-  };
 
   const manualRun = useMutation({
     mutationFn: ({ id, params }: { id: string; params?: Record<string, string> }) => runJobNow(id, params),
@@ -162,8 +154,11 @@ export function JobDetailPage() {
     setParamsModalVisible(true);
   };
 
+  const parsedParams = parseParams(paramsText);
+
   const handleRunWithParams = () => {
-    const params = parseParams(paramsText);
+    if (parsedParams.errors.length) return;
+    const { params } = parsedParams;
     manualRun.mutate({ id: job!._id, params: Object.keys(params).length ? params : undefined });
     setParamsModalVisible(false);
     setParamsText("");
@@ -375,11 +370,14 @@ export function JobDetailPage() {
         onOk={handleRunWithParams}
         onCancel={() => { setParamsModalVisible(false); setParamsText(""); }}
         okText="Run"
+        okButtonProps={{ disabled: parsedParams.errors.length > 0 }}
       >
         <Form layout="vertical">
           <Form.Item
             label="Runtime Parameters (KEY=VALUE, one per line)"
-            extra="These will be injected as environment variables into the job process."
+            extra="Each becomes an environment variable under exactly that name (KEY=VALUE is available as $KEY). Names use letters, digits and underscores and cannot start with a digit."
+            validateStatus={parsedParams.errors.length ? "error" : undefined}
+            help={parsedParams.errors.length ? parsedParams.errors.map((e) => <div key={e}>{e}</div>) : undefined}
           >
             <Input.TextArea
               value={paramsText}
