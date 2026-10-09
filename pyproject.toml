@@ -12,9 +12,9 @@ dependencies = [
     "fastapi==0.115.0",
     "google-genai>=1.0.0",
     "openai==1.12.0",
-    "pydantic==2.9.2",
+    "pydantic==2.13.5",
     "pymongo==4.10.1",
-    "python-dotenv==1.0.1",
+    "python-dotenv==1.2.4",
     "redis==5.0.8",
     "PyYAML==6.0.3",
     "SQLAlchemy==2.0.36",
@@ -32,7 +32,7 @@ include = ["cli*", "scheduler*", "worker*"]
 dev = [
     "httpx",
     "pytest==8.3.5",
-    "ruff==0.15.22",
+    "ruff==0.16.10",
 ]
 
 [tool.ruff]
