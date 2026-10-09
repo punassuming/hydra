@@ -197,9 +197,9 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "npm"
           cache-dependency-path: ui/package-lock.json
 
@@ -313,9 +313,9 @@ jobs:
           pip-audit -r "$RUNNER_TEMP/requirements.txt" --no-deps --disable-pip
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: "20"
+          node-version: "22"
 
       - name: npm audit (UI production dependencies)
         continue-on-error: true
@@ -386,9 +386,9 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "npm"
           cache-dependency-path: ui/package-lock.json
 
