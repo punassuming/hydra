@@ -9,7 +9,7 @@ requires-python = ">=3.11"
 dependencies = [
     "croniter==2.0.5",
     "cryptography>=46.0.5",
-    "fastapi==0.115.0",
+    "fastapi==0.120.4",
     "google-genai>=1.0.0",
     "openai==1.12.0",
     "pydantic==2.13.5",
@@ -18,7 +18,7 @@ dependencies = [
     "redis==5.0.8",
     "PyYAML==6.0.3",
     "SQLAlchemy==2.0.36",
-    "sse-starlette==2.0.0",
+    "sse-starlette==3.5.0",
     "uvicorn[standard]==0.30.1",
 ]
 
