@@ -15,7 +15,7 @@ dependencies = [
     "pydantic==2.13.5",
     "pymongo==4.10.1",
     "python-dotenv==1.2.4",
-    "redis==5.0.8",
+    "redis==8.1.0",
     "PyYAML==6.0.3",
     "SQLAlchemy==2.0.36",
     "sse-starlette==3.5.0",

@@ -286,6 +286,7 @@ The Compose files themselves (`docker-compose.worker.go.yml`, `docker-compose.wo
 - A separate `.github/workflows/release-please.yml` runs on every push to `main`, driving automatic versioning/changelog/GitHub Releases from commit messages — see the commit-message rule under **Working Agreements** below and `CONTRIBUTING.md`.
 - Environment variables can be configured via `.env` file (see `.env.example`).
 - MongoDB uses a named volume `mongo-data` for persistence.
+- The Python `redis` client is 8.x, which negotiates RESP3 by default; `tests/test_redis_integration.py` runs the repo's own client factories and ACL helpers (`ensure_worker_acl_user`/`delete_worker_acl_user`, including a worker connecting as its restricted ACL user) against a real `redis-server` (skipped if the binary is absent) and pins the return shapes the code unpacks (`bzpopmax`, `blpop`, pub/sub, hashes/sets/zsets). The rest of the suite uses fakes that cannot catch a client-behaviour change.
 - Redis connection precedence: if both `REDIS_SENTINELS` and `REDIS_SENTINEL_MASTER` are set, scheduler/worker use Sentinel discovery; otherwise they use `REDIS_URL`.
 
 ## AI Features
