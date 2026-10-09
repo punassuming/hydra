@@ -19,5 +19,11 @@ module.exports = {
       "always",
       ["feat", "fix", "perf", "revert", "docs", "deps", "chore", "refactor", "test", "build", "ci"],
     ],
+    // Dependabot (and other bots) paste release notes and long URLs into the
+    // commit body, which tripped config-conventional's 100-column limits and
+    // failed otherwise-fine dependency PRs. Line length of free-form body and
+    // footer text carries no information release-please needs.
+    "body-max-line-length": [0],
+    "footer-max-line-length": [0],
   },
 };

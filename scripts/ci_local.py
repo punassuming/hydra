@@ -139,12 +139,16 @@ _TMP_PATH = re.compile(r"(?<![\w./-])/tmp/")
 def expand_expressions(text: str, context: dict[str, str], runner_temp: str) -> str:
     # CI scripts write scratch files under /tmp; keep them in this run's private
     # temp dir so local runs don't litter the machine or collide with each other.
-    text = _TMP_PATH.sub(runner_temp.rstrip("/") + "/", text)
+    # Forward slashes: scripts run under bash, where the backslashes of a Windows
+    # path (C:\Users\...) would be eaten as escapes. A function replacement keeps
+    # re.sub from treating those backslashes as group references too.
+    temp = runner_temp.replace("\\", "/").rstrip("/")
+    text = _TMP_PATH.sub(lambda _match: temp + "/", text)
 
     def replace(match: re.Match) -> str:
         expr = match.group(1)
         if expr == "runner.temp":
-            return runner_temp
+            return temp
         if expr.startswith("matrix."):
             name = expr.split(".", 1)[1]
             if name not in context:

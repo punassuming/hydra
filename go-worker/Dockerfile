@@ -1,4 +1,4 @@
-FROM golang:1.26-alpine AS build
+FROM golang:1.27-alpine AS build
 
 WORKDIR /src
 COPY go.mod go.sum ./
@@ -7,10 +7,11 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /out/hydra-go-worker ./main.go
 
-FROM alpine:3.20
+FROM alpine:3.24
 
 RUN apk add --no-cache ca-certificates bash git python3 py3-pip openssh-client rsync \
-    && pip install --no-cache-dir --break-system-packages sqlalchemy==2.0.36 pymongo==4.10.1
+    && pip install --no-cache-dir --break-system-packages sqlalchemy==2.0.36 pymongo==4.10.1 \
+    && python3 -c "import sqlalchemy, pymongo"
 
 # Compose runs the worker as this dedicated non-root identity — mirrors
 # worker/Dockerfile's Python worker for the same treatment on both. Override

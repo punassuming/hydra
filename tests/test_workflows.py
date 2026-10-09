@@ -168,3 +168,35 @@ def test_commitlint_types_match_release_please_sections():
     config = json.loads((ROOT / "release-please-config.json").read_text(encoding="utf-8"))
     release_types = {section["type"] for section in config["changelog-sections"]}
     assert lint_types == release_types
+
+
+# ---- Dependabot config ------------------------------------------------------------------
+
+DEPENDABOT = ROOT / ".github" / "dependabot.yml"
+
+
+def test_dependabot_python_updates_use_uv_so_the_lock_is_updated():
+    """CI installs with `uv sync --frozen`; a `pip` ecosystem would edit only
+    pyproject.toml, so its PRs would test the old locked versions."""
+    ecosystems = {u["package-ecosystem"] for u in load(DEPENDABOT)["updates"]}
+    assert (ROOT / "uv.lock").exists()
+    assert "uv" in ecosystems
+    assert "pip" not in ecosystems
+
+
+def test_dependabot_directories_exist():
+    for update in load(DEPENDABOT)["updates"]:
+        assert (ROOT / update["directory"].lstrip("/")).is_dir(), update
+
+
+def test_dependabot_covers_every_dockerfile():
+    covered = {u["directory"] for u in load(DEPENDABOT)["updates"] if u["package-ecosystem"] == "docker"}
+    dockerfiles = {"/" + p.parent.name for p in ROOT.glob("*/Dockerfile")}
+    assert dockerfiles <= covered, f"Dockerfiles not watched by Dependabot: {sorted(dockerfiles - covered)}"
+
+
+def test_commitlint_does_not_cap_body_or_footer_line_length():
+    """Dependabot pastes long lines into commit bodies; capping them failed good PRs."""
+    text = (ROOT / "commitlint.config.cjs").read_text(encoding="utf-8")
+    assert re.search(r'"body-max-line-length"\s*:\s*\[\s*0\s*\]', text)
+    assert re.search(r'"footer-max-line-length"\s*:\s*\[\s*0\s*\]', text)

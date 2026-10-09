@@ -88,6 +88,17 @@ def test_tmp_paths_are_remapped_into_the_private_temp_dir():
     assert out == "cat > /tmp/rt/v.yaml; helm -f /tmp/rt/v.yaml; ls /var/tmp/x"
 
 
+def test_windows_style_temp_dir_is_safe_in_expansion():
+    """Regression: a Windows temp path used as a re.sub replacement raised
+    `bad escape \\U`, and its backslashes would be eaten as escapes by bash."""
+    win = "C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\ci-local-x"
+    assert ci.expand_expressions("cat > /tmp/v.yaml", {}, win) == "cat > C:/Users/RUNNER~1/AppData/Local/Temp/ci-local-x/v.yaml"
+    assert ci.expand_expressions("--basetemp=${{ runner.temp }}/pytest", {}, win) == (
+        "--basetemp=C:/Users/RUNNER~1/AppData/Local/Temp/ci-local-x/pytest"
+    )
+    assert ci.expand_expressions("cat > /tmp/v.yaml", {}, "/tmp/rt/") == "cat > /tmp/rt/v.yaml"
+
+
 @pytest.mark.parametrize("expr", ["secrets.TOKEN", "github.head_ref", "matrix.missing", "env.X"])
 def test_unsupported_expressions_fail_loudly(expr):
     with pytest.raises(ci.UnsupportedExpression):

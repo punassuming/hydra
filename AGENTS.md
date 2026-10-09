@@ -69,6 +69,7 @@ Hydra Jobs is a distributed job runner designed for flexibility and scalability.
 - **Run timing fields** in `run_end` events (persisted to `job_runs`): `queue_latency_ms`, `total_run_ms`, `source_fetch_ms` (source provisioning time), `env_prep_ms` (Python env preparation time).
 - Domains: default `prod` is seeded on scheduler startup; additional domains live in Mongo (`domains` collection) with token hashes cached in Redis. Admin token bypasses domain scoping; domain tokens scope all other requests. Admin-token use is audit-logged (INFO, `scheduler.utils.auth`) for every state-changing request (non-GET/HEAD) and every cross-domain `?domain=` override; routine admin reads are deliberately not logged because the UI polls.
 - Domain naming is strict in admin APIs: `2-63` chars, lowercase letters/numbers with optional `_`/`-`, and must start/end with alphanumeric.
+- SSE endpoints (`/events/stream`, `/runs/{id}/stream`) emit *named* events (`log_chunk` etc., which `EventSource.onmessage` does not receive) and never block a worker thread indefinitely: each poll waits at most ~2s so a disconnected client's thread winds down (a bare `q.get()` used to leak one thread per closed tab). sse-starlette keeps a process-wide shutdown flag (`AppStatus.should_exit`) and drains open streams on SIGTERM. `tests/test_sse_streams.py` runs the app on a real loopback uvicorn because Starlette's `TestClient` cannot read an infinite stream.
 - UI (`ui/`) consumes the scheduler API/SSE for jobs, workers, history, and log streaming. Docker Compose builds and serves it on port 5173; adjust `VITE_API_BASE_URL` as needed.
 - UI auth/UX notes:
   - Login gate: when unauthenticated, only the auth modal/screen is shown.
@@ -281,10 +282,11 @@ The Compose files themselves (`docker-compose.worker.go.yml`, `docker-compose.wo
 ### Additional Notes
 
 - Python CI (`.github/workflows/python-ci.yml`) covers 3.11 and 3.13 across Linux, macOS, and Windows, plus separate jobs for lint (ruff), the Go worker (`gofmt` check, `go vet`, `go test -race ./...`), an advisory non-blocking dependency audit (`pip-audit`, `npm audit --omit=dev`, `govulncheck`; flip to blocking once the baseline is triaged), the Helm chart (`helm lint --strict` + `helm template` in three configurations), Docker image builds (scheduler/worker/go-worker/ui, with GHA layer caching), a full-stack Compose smoke test (`tests/test_end_to_end.py`), and a Cypress browser journey. Python container images use 3.13 slim and install the locked environment with `uv`. A separate `acceptance` job runs the opt-in home-lab acceptance suite (`tests/acceptance/`) against a throwaway Compose stack, gated to only run on the release-please-created release PR (`if: startsWith(github.head_ref, 'release-please--')`) rather than every PR, since it takes minutes and needs a live deployment.
-- `.github/dependabot.yml` opens weekly dependency PRs for pip, npm, gomod, GitHub Actions and each Dockerfile directory, with `chore(deps)`/`ci` commit prefixes so they pass commitlint.
+- `.github/dependabot.yml` opens weekly dependency PRs for Python (the `uv` ecosystem, **not** `pip`: CI and the Dockerfiles use `uv sync --frozen`, so only a bump that rewrites `uv.lock` is actually tested), npm, gomod, GitHub Actions and each Dockerfile directory. Minor/patch updates are grouped per ecosystem (all Actions bumps arrive as one PR); majors stay separate. Commit prefixes are `chore(deps)`/`ci`, and `commitlint.config.cjs` does not cap body/footer line length because Dependabot pastes long release-note lines; `tests/test_workflows.py` pins both.
 - A separate `.github/workflows/release-please.yml` runs on every push to `main`, driving automatic versioning/changelog/GitHub Releases from commit messages — see the commit-message rule under **Working Agreements** below and `CONTRIBUTING.md`.
 - Environment variables can be configured via `.env` file (see `.env.example`).
 - MongoDB uses a named volume `mongo-data` for persistence.
+- The Python `redis` client is 8.x, which negotiates RESP3 by default; `tests/test_redis_integration.py` runs the repo's own client factories and ACL helpers (`ensure_worker_acl_user`/`delete_worker_acl_user`, including a worker connecting as its restricted ACL user) against a real `redis-server` (skipped if the binary is absent) and pins the return shapes the code unpacks (`bzpopmax`, `blpop`, pub/sub, hashes/sets/zsets). The rest of the suite uses fakes that cannot catch a client-behaviour change.
 - Redis connection precedence: if both `REDIS_SENTINELS` and `REDIS_SENTINEL_MASTER` are set, scheduler/worker use Sentinel discovery; otherwise they use `REDIS_URL`.
 
 ## AI Features
@@ -324,7 +326,8 @@ The worker will clone the repo to a temporary directory, switch to `path` (if pr
 ### Frontend (React)
 
 *   **Location:** `ui/`
-*   **Stack:** React, TypeScript, Vite, Ant Design.
+*   **Stack:** React 19, TypeScript, Vite, Ant Design 5 on Node 24 LTS (`ui/package.json` `engines`, CI `setup-node`, and the UI image all use 24; vitest, jsdom 30 and Cypress 16 need Node >= 22, and jsdom 30 needs >= 24.15 on the 24 line).
+*   **React 19 + antd 5:** antd's *static* methods (`message.success(...)` etc., used throughout the UI) only render if `@ant-design/v5-patch-for-react-19` is loaded, which `src/main.tsx` does first via `src/antdReact19.ts`. `src/__tests__/antdStaticMessage.test.tsx` fails without it and guards the import order; keep that import first.
 *   **Linting:** Standard Vite/React configurations.
 
 ## Known Gaps / Cleanup Targets

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactElement } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Alert, Button, Card, Drawer, Empty, Space, Spin, Table, Tag, Typography } from "antd";
 import {
@@ -23,7 +23,7 @@ interface InvestigateDrawerProps {
   onClose: () => void;
 }
 
-const ICONS: Record<string, JSX.Element> = {
+const ICONS: Record<string, ReactElement> = {
   failed_recent: <FireOutlined />,
   long_running_outliers: <HourglassOutlined />,
   flaky_jobs: <BranchesOutlined />,
