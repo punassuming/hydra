@@ -326,7 +326,7 @@ The worker will clone the repo to a temporary directory, switch to `path` (if pr
 ### Frontend (React)
 
 *   **Location:** `ui/`
-*   **Stack:** React 19, TypeScript, Vite, Ant Design 5 on Node 22 LTS (`ui/package.json` `engines`, CI `setup-node`, and the UI image all use 22; vitest, jsdom 30 and Cypress 16 need Node >= 22).
+*   **Stack:** React 19, TypeScript, Vite, Ant Design 5 on Node 24 LTS (`ui/package.json` `engines`, CI `setup-node`, and the UI image all use 24; vitest, jsdom 30 and Cypress 16 need Node >= 22, and jsdom 30 needs >= 24.15 on the 24 line).
 *   **React 19 + antd 5:** antd's *static* methods (`message.success(...)` etc., used throughout the UI) only render if `@ant-design/v5-patch-for-react-19` is loaded, which `src/main.tsx` does first via `src/antdReact19.ts`. `src/__tests__/antdStaticMessage.test.tsx` fails without it and guards the import order; keep that import first.
 *   **Linting:** Standard Vite/React configurations.
 

@@ -199,7 +199,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v6
         with:
-          node-version: "22"
+          node-version: "24"
           cache: "npm"
           cache-dependency-path: ui/package-lock.json
 
@@ -315,7 +315,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v6
         with:
-          node-version: "22"
+          node-version: "24"
 
       - name: npm audit (UI production dependencies)
         continue-on-error: true
@@ -388,7 +388,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v6
         with:
-          node-version: "22"
+          node-version: "24"
           cache: "npm"
           cache-dependency-path: ui/package-lock.json
 
