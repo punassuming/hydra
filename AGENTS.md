@@ -217,6 +217,7 @@ The Compose files themselves (`docker-compose.worker.go.yml`, `docker-compose.wo
 *   Specific tests: `uv run pytest tests/test_scheduler.py tests/test_worker.py`
 *   Test files located in `tests/`
 *   Note: The end-to-end test is skipped unless the full stack is running.
+*   Dependency canaries (run unmocked SDK/library code so an upgrade can't change behavior silently): `tests/test_encryption_compat.py` (fixed Fernet tokens that must keep decrypting — never regenerate them to make a failure pass), `tests/test_cron_schedule.py` (cron next-run semantics with fixed clocks), `tests/test_llm_clients.py` (the real `openai`/`google-genai` clients against an `httpx.MockTransport`), `tests/test_bson_datetimes.py`, plus the real-server `tests/test_redis_integration.py` and `tests/test_sse_streams.py`. `tests/test_ai.py` mocks whole SDK modules and cannot catch SDK API changes.
 *   Home-lab acceptance suite (`tests/acceptance/`) is separate from all of the above — opt-in, minutes not seconds, never runs in CI. `./scripts/run-acceptance-tests.sh` or `HYDRA_ACCEPTANCE=1 uv run pytest tests/acceptance -v`. See `tests/acceptance/README.md`.
 
 ### Operator CLI
