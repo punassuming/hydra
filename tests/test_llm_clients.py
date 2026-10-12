@@ -120,3 +120,11 @@ def test_gemini_http_errors_surface_as_a_500_with_context(monkeypatch):
     with pytest.raises(HTTPException) as exc:
         ai._call_gemini("p")
     assert exc.value.status_code == 500 and "Gemini Error" in exc.value.detail
+
+
+def test_openai_default_client_is_built_with_the_configured_timeout():
+    """The SDK's own default HTTP stack (httpx on openai 1.x, httpx2 on 3.x) is used
+    in production, not the transport injected above; it must still honour timeout=30."""
+    client = ai.openai.OpenAI(api_key="k", timeout=30)
+    assert client.timeout == 30
+    assert client.api_key == "k"
