@@ -8,8 +8,18 @@ import { afterEach, describe, expect, it } from "vitest";
 // Admin, Workers, ...). On React 19 those only render if the compatibility patch
 // is loaded; a type-check and component tests would not notice them going silent.
 describe("antd static message API on React 19", () => {
-  afterEach(() => {
-    message.destroy();
+  // The static API renders into its own React root, and its leave animation never
+  // finishes in jsdom, so the DOM is not a usable "done" signal. Unmount inside
+  // act() and let the queued React work and motion timers run while jsdom still
+  // exists; otherwise they fire after vitest tears it down and fail the whole run
+  // with an unhandled "window is not defined" (intermittent under parallel load).
+  afterEach(async () => {
+    await act(async () => {
+      message.destroy();
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    });
   });
 
   it("renders message.success / message.error into the document", async () => {
