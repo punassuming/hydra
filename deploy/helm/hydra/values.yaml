@@ -53,7 +53,7 @@ scheduler:
   replicas: 1
   image:
     repository: hydra-scheduler
-    tag: 0.2.0
+    tag: 0.3.0
   service:
     type: ClusterIP
     port: 8000
@@ -94,7 +94,7 @@ ui:
   replicas: 1
   image:
     repository: hydra-ui
-    tag: 0.2.0
+    tag: 0.3.0
   service:
     type: ClusterIP
     port: 80
@@ -122,7 +122,7 @@ workers:
     requireRedisAcl: true
     image:
       repository: hydra-worker
-      tag: 0.2.0
+      tag: 0.3.0
     resources:
       requests:
         cpu: 100m
@@ -150,7 +150,7 @@ workers:
     requireRedisAcl: true
     image:
       repository: hydra-go-worker
-      tag: 0.2.0
+      tag: 0.3.0
     resources:
       requests:
         cpu: 50m
@@ -171,7 +171,7 @@ domainSeed:
   extraDomains: []
   image:
     repository: hydra-scheduler
-    tag: 0.2.0
+    tag: 0.3.0
 ingress:
   enabled: false
   className: ''
