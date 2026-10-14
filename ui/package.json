@@ -15,7 +15,7 @@
     "cypress:run": "cypress run"
   },
   "dependencies": {
-    "@ant-design/icons": "^5.2.6",
+    "@ant-design/icons": "^6.3.4",
     "@ant-design/v5-patch-for-react-19": "^1.0.3",
     "@tanstack/react-query": "^5.24.7",
     "antd": "^5.19.3",
