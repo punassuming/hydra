@@ -85,7 +85,7 @@ def _daemon(args: argparse.Namespace, client_factory: Any) -> int:
         return 0
     except Exception as exc:  # APIError or OSError; unreachable server is its own exit code
         write_error(str(exc))
-        return 3 if "could not reach" in str(exc) else 1
+        return 3 if "could not reach" in str(exc) else 1  # matches hydra-ctl EXIT_UNREACHABLE
 
 
 def _start_background(args: argparse.Namespace) -> int:

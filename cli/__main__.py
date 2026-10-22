@@ -30,6 +30,22 @@ TABLES = {
 }
 
 
+# Stable exit codes for scripts and integrating applications. 2 is argparse's own usage-error code.
+EXIT_OK = 0
+EXIT_ERROR = 1
+EXIT_UNREACHABLE = 3
+EXIT_NOT_FOUND = 4
+EXIT_RUN_FAILED = 5  # `run --wait` finished with a non-success status
+
+
+def exit_code_for(exc: APIError) -> int:
+    if exc.status is None and "could not reach" in str(exc):
+        return EXIT_UNREACHABLE
+    if exc.status == 404:
+        return EXIT_NOT_FOUND
+    return EXIT_ERROR
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="hydra-ctl", description="Operate a Hydra Jobs deployment")
     parser.add_argument("--api-url", default=os.getenv("HYDRA_API_URL", "http://localhost:8000"))
@@ -158,6 +174,8 @@ def main(argv: list[str] | None = None, client_factory: type[HydraClient] = Hydr
             if args.wait:
                 result["run"] = _wait_for_new_run(client, job_id, known_runs, args.wait_timeout)
             _show(result, args.output)
+            if args.wait and result["run"].get("status") != "success":
+                return EXIT_RUN_FAILED
         elif args.command == "apply":
             document = _load_document(args.filename)
             _show(client.submit(document), args.output)
@@ -203,9 +221,12 @@ def main(argv: list[str] | None = None, client_factory: type[HydraClient] = Hydr
             domain = args.audit_domain if args.audit_domain is not None else args.domain
             _show(client.request("GET", "/history/", query={"domain": domain}), args.output)
         return 0
-    except (APIError, OSError, ValueError, yaml.YAMLError) as exc:
+    except APIError as exc:
         write_error(str(exc))
-        return 1
+        return exit_code_for(exc)
+    except (OSError, ValueError, yaml.YAMLError) as exc:
+        write_error(str(exc))
+        return EXIT_ERROR
 
 
 def _get(client: HydraClient, args: argparse.Namespace) -> int:
