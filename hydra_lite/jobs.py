@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from scheduler.models.job_definition import JobCreate, JobDefinition
+from scheduler.utils.job_validation import validate_job_definition
 from scheduler.utils.schedule import initialize_schedule
 
 MASKED_SECRET = "********"
@@ -26,23 +27,9 @@ def apply_retry_count(payload: dict) -> dict:
 
 
 def validate_definition(job: JobDefinition) -> list[str]:
-    errors: list[str] = []
-    executor = job.executor
-    kind = getattr(executor, "type", None)
-    if kind == "python":
-        code = getattr(executor, "code", "")
-        if not code.strip():
-            errors.append("python executor requires non-empty code")
-        else:
-            try:
-                compile(code, "<job>", "exec")
-            except SyntaxError as exc:
-                errors.append(f"python code syntax error: {exc.msg} (line {exc.lineno})")
-    elif kind in {"shell", "batch", "powershell"}:
-        if not getattr(executor, "script", "").strip():
-            errors.append(f"{kind} executor requires non-empty script")
-    elif kind == "sql":
-        errors.append("sql executor is not supported by the lite edition yet")
+    errors = list(validate_job_definition(job).errors)
+    if getattr(job.executor, "type", None) in {"sql", "sensor"}:
+        errors.append(f"{job.executor.type} executor is not supported by the lite edition yet")
     return errors
 
 
