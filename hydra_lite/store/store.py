@@ -40,6 +40,23 @@ def iso(value: datetime) -> str:
     return value.astimezone(timezone.utc).isoformat(timespec="milliseconds")
 
 
+def norm_ts(value: Any) -> Optional[str]:
+    """Normalise a datetime or ISO string to the store's sortable UTC format."""
+    if not value:
+        return None
+    if isinstance(value, str):
+        value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return iso(value)
+
+
+def _enabled(body: dict, default: bool = True) -> int:
+    if "enabled" in body:
+        return 1 if body["enabled"] else 0
+    return 1 if (body.get("schedule") or {}).get("enabled", default) else 0
+
+
 def _dumps(value: Any) -> str:
     return json.dumps(value, default=str, separators=(",", ":"))
 
@@ -107,14 +124,14 @@ class Store:
         name = body.get("name")
         if not name:
             raise ValueError("job requires a name")
-        enabled = 1 if body.get("enabled", True) else 0
-        next_run = ((body.get("schedule") or {}).get("next_run_at")) or None
+        enabled = _enabled(body)
+        next_run = norm_ts((body.get("schedule") or {}).get("next_run_at"))
         try:
             with self._tx() as c:
                 c.execute(
                     "INSERT INTO jobs (id, name, definition, enabled, next_run_at, created_at, updated_at)"
                     " VALUES (?,?,?,?,?,?,?)",
-                    (job_id, name, _dumps(body), enabled, str(next_run) if next_run else None, ts, ts),
+                    (job_id, name, _dumps(body), enabled, next_run, ts, ts),
                 )
                 c.execute(
                     "INSERT INTO job_versions (job_id, version, definition, changed_at, changed_by) VALUES (?,?,?,?,?)",
@@ -162,12 +179,12 @@ class Store:
                 body = json.loads(row["definition"])
                 body.update({k: v for k, v in patch.items() if k not in ("_id", "created_at", "updated_at")})
                 name = body.get("name") or row["name"]
-                enabled = 1 if body.get("enabled", bool(row["enabled"])) else 0
-                next_run = ((body.get("schedule") or {}).get("next_run_at")) or None
+                enabled = _enabled(body, bool(row["enabled"]))
+                next_run = norm_ts((body.get("schedule") or {}).get("next_run_at"))
                 version = c.execute("SELECT COALESCE(MAX(version),0)+1 FROM job_versions WHERE job_id=?", (job_id,)).fetchone()[0]
                 c.execute(
                     "UPDATE jobs SET name=?, definition=?, enabled=?, next_run_at=?, updated_at=? WHERE id=?",
-                    (name, _dumps(body), enabled, str(next_run) if next_run else None, ts, job_id),
+                    (name, _dumps(body), enabled, next_run, ts, job_id),
                 )
                 c.execute(
                     "INSERT INTO job_versions (job_id, version, definition, changed_at, changed_by) VALUES (?,?,?,?,?)",
@@ -395,6 +412,11 @@ class Store:
     def heartbeat(self, worker_id: str) -> None:
         with self._tx() as c:
             if c.execute("UPDATE workers SET last_heartbeat=? WHERE id=?", (iso(now_utc()), worker_id)).rowcount == 0:
+                raise NotFound(worker_id)
+
+    def set_worker_state(self, worker_id: str, state: str) -> None:
+        with self._tx() as c:
+            if c.execute("UPDATE workers SET state=? WHERE id=?", (state, worker_id)).rowcount == 0:
                 raise NotFound(worker_id)
 
     def list_workers(self) -> list[dict]:
