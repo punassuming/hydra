@@ -94,3 +94,53 @@ def test_cron_forms_used_in_this_repo_stay_valid(expr):
 def test_invalid_cron_expressions_are_rejected_at_submit(expr):
     with pytest.raises((ValidationError, ValueError)):
         cron(expr)
+
+
+# ---------------------------------------------------------------------------
+# schedule.timezone: cron is evaluated in the job's zone (shared by both editions)
+# ---------------------------------------------------------------------------
+
+NY = "America/New_York"
+
+
+def test_cron_fires_at_local_wall_clock_across_spring_forward():
+    # US DST began 2026-03-08 02:00 local. "0 9 * * *" must stay 09:00 local: 14:00Z before, 13:00Z after.
+    s = cron("0 9 * * *", timezone=NY, next_run_at=utc(2026, 3, 7, 14, 0))
+    nxt = advance_schedule(s).next_run_at
+    assert nxt == utc(2026, 3, 8, 13, 0)
+    assert advance_schedule(s.model_copy(update={"next_run_at": nxt})).next_run_at == utc(2026, 3, 9, 13, 0)
+
+
+def test_cron_fires_at_local_wall_clock_across_fall_back():
+    # DST ended 2026-11-01: 09:00 local is 13:00Z before and 14:00Z after.
+    s = cron("0 9 * * *", timezone=NY, next_run_at=utc(2026, 10, 31, 13, 0))
+    assert advance_schedule(s).next_run_at == utc(2026, 11, 1, 14, 0)
+
+
+def test_cron_in_nonexistent_local_hour_still_fires_once_that_day():
+    # 02:30 does not exist on 2026-03-08 in New York; the day must not be skipped or doubled.
+    s = cron("30 2 * * *", timezone=NY, next_run_at=utc(2026, 3, 7, 7, 30))
+    first = advance_schedule(s).next_run_at
+    assert first.date() == datetime(2026, 3, 8).date() and first.hour in (7, 8)
+    second = advance_schedule(s.model_copy(update={"next_run_at": first})).next_run_at
+    assert second.date() == datetime(2026, 3, 9).date()
+
+
+def test_cron_in_repeated_local_hour_fires_once():
+    # 01:30 happens twice on 2026-11-01; it must fire once that day, then the next day.
+    s = cron("30 1 * * *", timezone=NY, next_run_at=utc(2026, 10, 31, 5, 30))
+    first = advance_schedule(s).next_run_at
+    assert first.date() == datetime(2026, 11, 1).date()
+    second = advance_schedule(s.model_copy(update={"next_run_at": first})).next_run_at
+    assert second.date() == datetime(2026, 11, 2).date()
+
+
+def test_default_utc_is_unchanged_and_unknown_timezone_rejected():
+    assert advance_schedule(cron("0 9 * * *", next_run_at=utc(2026, 3, 7, 9, 0))).next_run_at == utc(2026, 3, 8, 9, 0)
+    with pytest.raises(ValidationError):
+        cron("0 9 * * *", timezone="Mars/Olympus")
+
+
+def test_policy_fields_default_to_current_full_edition_behaviour():
+    s = ScheduleConfig()
+    assert (s.misfire_policy, s.overlap_policy) == ("run_once", "allow")

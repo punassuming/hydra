@@ -1,6 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 from typing import List, Literal, Optional
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from croniter import croniter
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -25,8 +26,15 @@ class ScheduleConfig(BaseModel):
     start_at: Optional[datetime] = None
     end_at: Optional[datetime] = None
     next_run_at: Optional[datetime] = None
-    timezone: str = "UTC"
+    timezone: str = "UTC"  # IANA name; cron expressions are evaluated in this zone (interval schedules ignore it)
     enabled: bool = True
+    # Behaviour when the scheduler was down/asleep across one or more due ticks. Honoured by the lite edition;
+    # the full edition's trigger loop does not apply these yet (it fires a missed tick once, i.e. run_once).
+    misfire_policy: Literal["skip", "run_once", "catch_up"] = "run_once"
+    catch_up_limit: int = 10  # max missed ticks enqueued when misfire_policy == "catch_up"
+    # What to do when a tick is due while the previous run of the same job is still pending/active.
+    # Honoured by the lite edition; the full edition does not enforce it yet.
+    overlap_policy: Literal["allow", "skip", "queue"] = "allow"
 
     @model_validator(mode="after")
     def validate_schedule_config(self):
@@ -40,6 +48,10 @@ class ScheduleConfig(BaseModel):
                 croniter(self.cron, datetime.now(timezone.utc)).get_next(datetime)
             except Exception as exc:
                 raise ValueError(f"Invalid cron expression '{self.cron}': {exc}") from exc
+            try:
+                ZoneInfo(self.timezone or "UTC")
+            except (ZoneInfoNotFoundError, ValueError) as exc:
+                raise ValueError(f"Unknown timezone '{self.timezone}': use an IANA name such as 'America/New_York'") from exc
         return self
 
 

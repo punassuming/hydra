@@ -1,9 +1,26 @@
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from croniter import croniter
 
 from ..models.job_definition import ScheduleConfig
+
+
+def cron_next(schedule: ScheduleConfig, after: datetime) -> datetime:
+    """Next cron fire time strictly after ``after``, evaluated in ``schedule.timezone``.
+
+    Returns an aware UTC datetime. Both editions use this so a job fires at the same wall-clock time
+    everywhere; DST gaps/repeats follow croniter's semantics (pinned in tests/test_cron_schedule.py).
+    """
+    zone = ZoneInfo(schedule.timezone or "UTC")
+    prev_local = after.astimezone(zone)
+    local = croniter(schedule.cron, prev_local).get_next(datetime)
+    # Fall-back repeats a wall-clock hour; croniter would fire in both occurrences. Skip the second
+    # occurrence of the tick we just fired so a job runs once per local wall-clock time.
+    if local.replace(tzinfo=None) == prev_local.replace(tzinfo=None) and local.utcoffset() != prev_local.utcoffset():
+        local = croniter(schedule.cron, local).get_next(datetime)
+    return local.astimezone(timezone.utc)
 
 
 def _clamp_to_window(candidate: Optional[datetime], schedule: ScheduleConfig) -> Optional[datetime]:
@@ -24,7 +41,7 @@ def initialize_schedule(schedule: ScheduleConfig, now: datetime) -> ScheduleConf
         base = max(base, now)
         if not schedule.cron:
             raise ValueError("cron schedule requires cron expression")
-        next_run = croniter(schedule.cron, base).get_next(datetime)
+        next_run = cron_next(schedule, base)
     else:  # interval
         if not schedule.interval_seconds or schedule.interval_seconds <= 0:
             raise ValueError("interval schedule requires positive interval_seconds")
@@ -45,7 +62,7 @@ def advance_schedule(schedule: ScheduleConfig) -> ScheduleConfig:
     if schedule.mode == "cron":
         if not schedule.cron:
             raise ValueError("cron schedule requires cron expression")
-        next_run = croniter(schedule.cron, last_run).get_next(datetime)
+        next_run = cron_next(schedule, last_run)
     else:
         if not schedule.interval_seconds or schedule.interval_seconds <= 0:
             raise ValueError("interval schedule requires positive interval_seconds")
