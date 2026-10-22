@@ -26,7 +26,10 @@ dependencies = [
 hydra-ctl = "cli.__main__:entrypoint"
 
 [tool.setuptools.packages.find]
-include = ["cli*", "scheduler*", "worker*"]
+include = ["cli*", "scheduler*", "worker*", "hydra_lite*"]
+
+[tool.setuptools.package-data]
+"hydra_lite.store" = ["schema.sql"]
 
 [dependency-groups]
 dev = [
