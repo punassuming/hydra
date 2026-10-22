@@ -24,6 +24,7 @@ class WorkerPool:
         self.stop = threading.Event()
         self.wake = threading.Event()
         self._kills: dict[str, threading.Event] = {}
+        self._active: dict[str, tuple[str, str]] = {}  # run_id -> (job_id, user)
         self._kill_lock = threading.Lock()
         self._threads: list[threading.Thread] = []
         self.state = "online"  # online | draining | offline
@@ -48,6 +49,12 @@ class WorkerPool:
                 event.set()
         for t in self._threads:
             t.join(timeout=timeout)
+
+    def active(self) -> tuple[list[str], list[str]]:
+        """(running job ids, running users) for the worker listing."""
+        with self._kill_lock:
+            pairs = list(self._active.values())
+        return [j for j, _ in pairs], sorted({u for _, u in pairs})
 
     def kill(self, run_id: str) -> bool:
         with self._kill_lock:
@@ -86,6 +93,8 @@ class WorkerPool:
                 self.running += 1
             try:
                 job = self.store.get_job(run["job_id"])
+                with self._kill_lock:
+                    self._active[run["id"]] = (job["_id"], job.get("user", "default"))
                 execute_run(self.store, self.logs, run, job, kill_event)
             except NotFound:
                 self.store.finish_run(run["id"], "failed", exit_code=1, reason="job was deleted before the run started")
@@ -96,3 +105,4 @@ class WorkerPool:
                     self.running -= 1
                 with self._kill_lock:
                     self._kills.pop(run["id"], None)
+                    self._active.pop(run["id"], None)

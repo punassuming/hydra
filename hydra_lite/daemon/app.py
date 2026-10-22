@@ -299,7 +299,8 @@ def create_app(daemon: Daemon, manage_lifecycle: bool = True) -> FastAPI:
     # ---------------------------------------------------------------- workers
     @app.get("/workers/")
     def list_workers():
-        return [worker_to_api(w, pool.running if w["id"] == pool.worker_id else 0) for w in store.list_workers()]
+        jobs, users = pool.active()
+        return [worker_to_api(w, jobs, users) if w["id"] == pool.worker_id else worker_to_api(w) for w in store.list_workers()]
 
     @app.post("/workers/{worker_id}/state")
     def worker_state(worker_id: str, body: Dict[str, str] = Body(...)):

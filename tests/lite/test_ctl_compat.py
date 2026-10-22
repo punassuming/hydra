@@ -49,7 +49,7 @@ def test_apply_get_describe_validate_delete(ctl, tmp_path):
     assert json.loads(out)["valid"] is True
     assert ctl("delete", "job", "ctl-job", "-o", "json")[0] == 0
     code, _, err = ctl("describe", "job", "ctl-job")
-    assert code == 1 and "was not found" in err
+    assert code == 4 and "was not found" in err  # EXIT_NOT_FOUND
 
 
 def test_run_wait_logs_and_history(ctl, tmp_path, capsys):
@@ -102,11 +102,20 @@ def test_workers_and_doctor(ctl):
         assert ctl("overview", view, "-o", "json")[0] == 0
 
 
-def test_unsupported_commands_explain_themselves(ctl):
+def test_unsupported_commands_explain_themselves(ctl, tmp_path):
     code, _, err = ctl("token", "rotate")
     assert code == 1 and "not supported by this Hydra edition" in err
-    code, _, err = ctl("backfill", "x", "--from", "2026-01-01", "--to", "2026-01-02")
-    assert code == 1
+    _apply(ctl, tmp_path)
+    code, _, err = ctl("backfill", "ctl-job", "--from", "2026-01-01", "--to", "2026-01-02")
+    assert code == 1 and "not supported" in err
+
+
+def test_exit_codes_are_stable(ctl, tmp_path, live_server):
+    doc = {**JOB, "name": "boom", "executor": {"type": "python", "code": "raise SystemExit(7)"}}
+    _apply(ctl, tmp_path, doc)
+    assert ctl("run", "boom", "--wait", "-o", "json")[0] == 5  # EXIT_RUN_FAILED
+    assert ctl("describe", "run", "nope")[0] == 4  # EXIT_NOT_FOUND
+    assert main(["--api-url", "http://127.0.0.1:9", "--timeout", "1", "--token", "x", "get", "jobs"]) == 3  # EXIT_UNREACHABLE
 
 
 def test_wrong_token_is_rejected(live_server, capsys):
