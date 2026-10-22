@@ -347,20 +347,15 @@ def create_app(daemon: Daemon, manage_lifecycle: bool = True) -> FastAPI:
     # --------------------------------------------------------------- overview
     @app.get("/overview/statistics")
     def overview_statistics():
-        counts: dict[str, int] = {}
-        for run in store.list_runs(limit=5000):
-            counts[run["status"]] = counts.get(run["status"], 0) + 1
-        return {"jobs": len(store.list_jobs(limit=10000)), "runs_by_status": counts}
+        return {"jobs": store.count_jobs(), "runs_by_status": store.count_by_status()}
 
     @app.get("/overview/queue")
     def overview_queue(pending_limit: int = 50, upcoming_limit: int = 50):
         pending = store.list_runs(status="pending", limit=pending_limit)
-        upcoming = sorted(
-            (j for j in store.list_jobs(limit=10000) if j["enabled"] and (j.get("schedule") or {}).get("next_run_at")),
-            key=lambda j: j["schedule"]["next_run_at"],
-        )[:upcoming_limit]
+        jobs = store.get_jobs([r["job_id"] for r in pending])
+        upcoming = store.upcoming_jobs(upcoming_limit)
         return {
-            "pending": [run_to_api(r, job_for(r), logs, full=False) for r in pending],
+            "pending": [run_to_api(r, jobs.get(r["job_id"]), logs, full=False) for r in pending],
             "pending_total": store.count_runs("pending"),
             "upcoming": [{"job_id": j["_id"], "name": j["name"], "next_run_at": j["schedule"]["next_run_at"]} for j in upcoming],
         }

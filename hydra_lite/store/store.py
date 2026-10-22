@@ -73,6 +73,10 @@ class Store:
         if self.path != ":memory:":
             Path(self.path).parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
+        self._memory = self.path == ":memory:"
+        self._local = threading.local()
+        self._readers: list[sqlite3.Connection] = []
+        self._readers_lock = threading.Lock()
         self._conn = sqlite3.connect(self.path, check_same_thread=False, isolation_level=None)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
@@ -91,6 +95,25 @@ class Store:
                 self._conn.executescript("BEGIN IMMEDIATE;\n" + script + f"\nPRAGMA user_version={SCHEMA_VERSION};\nCOMMIT;")
 
     @contextlib.contextmanager
+    def _reader(self) -> Iterator[sqlite3.Connection]:
+        """A connection for read-only queries. WAL lets readers run alongside the single writer, so API reads never
+        queue behind a claim/finish transaction. (An in-memory database has one connection, shared under the lock.)"""
+        if self._memory:
+            with self._lock:
+                yield self._conn
+            return
+        conn = getattr(self._local, "conn", None)
+        if conn is None:
+            conn = sqlite3.connect(self.path, check_same_thread=False, isolation_level=None)
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA busy_timeout=5000")
+            conn.execute("PRAGMA query_only=1")
+            self._local.conn = conn
+            with self._readers_lock:
+                self._readers.append(conn)
+        yield conn
+
+    @contextlib.contextmanager
     def _tx(self) -> Iterator[sqlite3.Connection]:
         with self._lock:
             self._conn.execute("BEGIN IMMEDIATE")
@@ -103,6 +126,10 @@ class Store:
                 self._conn.execute("COMMIT")
 
     def close(self) -> None:
+        with self._readers_lock:
+            for conn in self._readers:
+                conn.close()
+            self._readers.clear()
         with self._lock:
             self._conn.close()
 
@@ -148,15 +175,15 @@ class Store:
         return self.get_job(job_id)
 
     def get_job(self, job_id: str) -> dict:
-        with self._lock:
-            row = self._conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
+        with self._reader() as conn:
+            row = conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
         if not row:
             raise NotFound(job_id)
         return self._job_row(row)
 
     def get_job_by_name(self, name: str) -> dict:
-        with self._lock:
-            row = self._conn.execute("SELECT * FROM jobs WHERE name=?", (name,)).fetchone()
+        with self._reader() as conn:
+            row = conn.execute("SELECT * FROM jobs WHERE name=?", (name,)).fetchone()
         if not row:
             raise NotFound(name)
         return self._job_row(row)
@@ -168,8 +195,8 @@ class Store:
             args.append(f"%{search}%")
         sql += " ORDER BY name LIMIT ?"
         args.append(limit)
-        with self._lock:
-            rows = self._conn.execute(sql, args).fetchall()
+        with self._reader() as conn:
+            rows = conn.execute(sql, args).fetchall()
         return [self._job_row(r) for r in rows]
 
     def update_job(self, job_id: str, patch: dict, changed_by: Optional[str] = None) -> dict:
@@ -206,15 +233,15 @@ class Store:
                 raise NotFound(job_id)
 
     def list_versions(self, job_id: str) -> list[dict]:
-        with self._lock:
-            rows = self._conn.execute(
+        with self._reader() as conn:
+            rows = conn.execute(
                 "SELECT version, changed_at, changed_by FROM job_versions WHERE job_id=? ORDER BY version DESC", (job_id,)
             ).fetchall()
         return [dict(r) for r in rows]
 
     def get_version(self, job_id: str, version: int) -> dict:
-        with self._lock:
-            row = self._conn.execute("SELECT * FROM job_versions WHERE job_id=? AND version=?", (job_id, version)).fetchone()
+        with self._reader() as conn:
+            row = conn.execute("SELECT * FROM job_versions WHERE job_id=? AND version=?", (job_id, version)).fetchone()
         if not row:
             raise NotFound(f"{job_id}@{version}")
         return {
@@ -225,8 +252,8 @@ class Store:
         }
 
     def due_jobs(self, now: datetime) -> list[dict]:
-        with self._lock:
-            rows = self._conn.execute(
+        with self._reader() as conn:
+            rows = conn.execute(
                 "SELECT * FROM jobs WHERE enabled=1 AND next_run_at IS NOT NULL AND next_run_at<=? ORDER BY next_run_at",
                 (iso(now),),
             ).fetchall()
@@ -327,9 +354,9 @@ class Store:
 
     def has_pending(self, now: Optional[datetime] = None) -> bool:
         """Cheap read-only check so idle workers polling for work never take the write lock."""
-        with self._lock:
+        with self._reader() as conn:
             return (
-                self._conn.execute(
+                conn.execute(
                     "SELECT 1 FROM runs WHERE status='pending' AND (not_before IS NULL OR not_before<=?) LIMIT 1",
                     (iso(now or now_utc()),),
                 ).fetchone()
@@ -408,8 +435,8 @@ class Store:
         return self.get_run(run_id), True
 
     def get_run(self, run_id: str) -> dict:
-        with self._lock:
-            row = self._conn.execute("SELECT * FROM runs WHERE id=?", (run_id,)).fetchone()
+        with self._reader() as conn:
+            row = conn.execute("SELECT * FROM runs WHERE id=?", (run_id,)).fetchone()
         if not row:
             raise NotFound(run_id)
         return self._run_row(row)
@@ -433,33 +460,130 @@ class Store:
             clauses.append("queued_at<?")
             args.append(before)
         where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
-        with self._lock:
-            rows = self._conn.execute(
+        with self._reader() as conn:
+            rows = conn.execute(
                 f"SELECT * FROM runs{where} ORDER BY queued_at DESC, rowid DESC LIMIT ?", (*args, limit)
             ).fetchall()
         return [self._run_row(r) for r in rows]
 
+    def trigger_schedule(
+        self,
+        job_id: str,
+        expected_next_run_at: Optional[str],
+        next_schedule: dict,
+        ticks: list[dict],
+        dropped: Optional[dict] = None,
+        skip_if_open: bool = False,
+    ) -> Optional[list[dict]]:
+        """Atomically fire a job's due ticks and advance its schedule.
+
+        Compare-and-set on ``next_run_at``: if the job was disabled, edited or already advanced since the caller
+        planned (e.g. a user ``disable`` racing the trigger loop), nothing happens and ``None`` is returned, so a
+        stale plan can neither re-enable a job nor fire a tick twice. Scheduler bookkeeping is *not* a job edit:
+        it bumps neither ``updated_at`` nor ``job_versions``. ``ticks`` items: ``{scheduled_ts, priority, exclusive}``.
+        """
+        created: list[str] = []
+        with self._tx() as c:
+            row = c.execute("SELECT enabled, next_run_at FROM jobs WHERE id=?", (job_id,)).fetchone()
+            if not row or not row["enabled"] or row["next_run_at"] != expected_next_run_at:
+                return None
+            nxt = norm_ts(next_schedule.get("next_run_at"))
+            c.execute(
+                "UPDATE jobs SET definition=json_set(definition, '$.schedule', json(?)), next_run_at=?, enabled=? WHERE id=?",
+                (_dumps(next_schedule), nxt, 1 if next_schedule.get("enabled", True) else 0, job_id),
+            )
+            if dropped:
+                c.execute(
+                    "INSERT INTO schedule_events (job_id, ts, type, detail) VALUES (?,?,?,?)",
+                    (job_id, iso(now_utc()), "misfire_dropped", _dumps(dropped)),
+                )
+            for tick in ticks:
+                if (
+                    skip_if_open
+                    and c.execute(
+                        "SELECT 1 FROM runs WHERE job_id=? AND status IN ('pending','dispatched','running') LIMIT 1", (job_id,)
+                    ).fetchone()
+                ):
+                    c.execute(
+                        "INSERT INTO schedule_events (job_id, ts, type, detail) VALUES (?,?,?,?)",
+                        (job_id, iso(now_utc()), "overlap_skipped", _dumps({"tick": tick["scheduled_ts"].isoformat()})),
+                    )
+                    continue
+                run_id = uuid.uuid4().hex
+                ts = iso(now_utc())
+                c.execute(
+                    "INSERT INTO runs (id, job_id, status, trigger, params, priority, scheduled_ts, queued_at, exclusive)"
+                    " VALUES (?,?,?,?,?,?,?,?,?)",
+                    (
+                        run_id,
+                        job_id,
+                        "pending",
+                        "schedule",
+                        "{}",
+                        tick["priority"],
+                        iso(tick["scheduled_ts"]),
+                        ts,
+                        1 if tick.get("exclusive") else 0,
+                    ),
+                )
+                self._event(c, run_id, "queued", {"trigger": "schedule", "retry_attempt": 0})
+                created.append(run_id)
+        return [self.get_run(r) for r in created]
+
+    def count_jobs(self) -> int:
+        with self._reader() as conn:
+            return conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
+
+    def upcoming_jobs(self, limit: int = 50) -> list[dict]:
+        """Enabled jobs with the soonest ``next_run_at`` (uses the (enabled, next_run_at) index; no JSON scan)."""
+        with self._reader() as conn:
+            rows = conn.execute(
+                "SELECT * FROM jobs WHERE enabled=1 AND next_run_at IS NOT NULL ORDER BY next_run_at LIMIT ?", (limit,)
+            ).fetchall()
+        return [self._job_row(r) for r in rows]
+
+    def get_jobs(self, job_ids: list[str]) -> dict[str, dict]:
+        """Several jobs in one query (missing ids are simply absent)."""
+        ids = list(dict.fromkeys(job_ids))
+        if not ids:
+            return {}
+        with self._reader() as conn:
+            rows = conn.execute(f"SELECT * FROM jobs WHERE id IN ({','.join('?' * len(ids))})", ids).fetchall()
+        return {r["id"]: self._job_row(r) for r in rows}
+
+    def count_by_status(self) -> dict[str, int]:
+        with self._reader() as conn:
+            return {r["status"]: r["n"] for r in conn.execute("SELECT status, COUNT(*) AS n FROM runs GROUP BY status")}
+
+    def seconds_until_next_due(self, now: Optional[datetime] = None) -> Optional[float]:
+        """Seconds until the earliest enabled schedule fires (<= 0 if overdue); None if nothing is scheduled."""
+        with self._reader() as conn:
+            row = conn.execute("SELECT MIN(next_run_at) AS t FROM jobs WHERE enabled=1 AND next_run_at IS NOT NULL").fetchone()
+        if not row or not row["t"]:
+            return None
+        return (datetime.fromisoformat(row["t"]) - (now or now_utc())).total_seconds()
+
     def count_runs(self, status: str) -> int:
-        with self._lock:
-            return self._conn.execute("SELECT COUNT(*) FROM runs WHERE status=?", (status,)).fetchone()[0]
+        with self._reader() as conn:
+            return conn.execute("SELECT COUNT(*) FROM runs WHERE status=?", (status,)).fetchone()[0]
 
     def open_run_count(self, job_id: str) -> int:
         """Runs of ``job_id`` that are pending, dispatched or running."""
-        with self._lock:
-            return self._conn.execute(
+        with self._reader() as conn:
+            return conn.execute(
                 f"SELECT COUNT(*) FROM runs WHERE job_id=? AND status IN ({','.join('?' * len(OPEN_STATUSES))})",
                 (job_id, *OPEN_STATUSES),
             ).fetchone()[0]
 
     def running_runs(self) -> list[dict]:
-        with self._lock:
-            rows = self._conn.execute("SELECT * FROM runs WHERE status='running'").fetchall()
+        with self._reader() as conn:
+            rows = conn.execute("SELECT * FROM runs WHERE status='running'").fetchall()
         return [self._run_row(r) for r in rows]
 
     def active_run_ids(self) -> list[str]:
         """Runs a worker has taken (dispatched/running) but not finished."""
-        with self._lock:
-            return [r["id"] for r in self._conn.execute("SELECT id FROM runs WHERE status IN ('dispatched','running')")]
+        with self._reader() as conn:
+            return [r["id"] for r in conn.execute("SELECT id FROM runs WHERE status IN ('dispatched','running')")]
 
     def mark_sla_alerted(self, run_id: str) -> bool:
         """Set ``sla_miss_alerted`` once; True only for the caller that flipped it."""
@@ -468,8 +592,8 @@ class Store:
 
     def find_dependents(self, job_id: str) -> list[dict]:
         """Enabled jobs whose ``depends_on`` contains ``job_id``."""
-        with self._lock:
-            rows = self._conn.execute(
+        with self._reader() as conn:
+            rows = conn.execute(
                 "SELECT j.* FROM jobs j WHERE j.enabled=1 AND EXISTS ("
                 " SELECT 1 FROM json_each(j.definition, '$.depends_on') d WHERE d.value=?)",
                 (job_id,),
@@ -521,15 +645,13 @@ class Store:
             )
 
     def list_schedule_events(self, job_id: str) -> list[dict]:
-        with self._lock:
-            rows = self._conn.execute(
-                "SELECT ts, type, detail FROM schedule_events WHERE job_id=? ORDER BY id", (job_id,)
-            ).fetchall()
+        with self._reader() as conn:
+            rows = conn.execute("SELECT ts, type, detail FROM schedule_events WHERE job_id=? ORDER BY id", (job_id,)).fetchall()
         return [{"ts": r["ts"], "type": r["type"], "detail": json.loads(r["detail"])} for r in rows]
 
     def list_events(self, run_id: str) -> list[dict]:
-        with self._lock:
-            rows = self._conn.execute("SELECT ts, type, detail FROM run_events WHERE run_id=? ORDER BY id", (run_id,)).fetchall()
+        with self._reader() as conn:
+            rows = conn.execute("SELECT ts, type, detail FROM run_events WHERE run_id=? ORDER BY id", (run_id,)).fetchall()
         return [{"ts": r["ts"], "type": r["type"], "detail": json.loads(r["detail"])} for r in rows]
 
     # ---------------------------------------------------------------- workers
@@ -555,8 +677,8 @@ class Store:
             )
 
     def get_worker(self, worker_id: str) -> dict:
-        with self._lock:
-            row = self._conn.execute("SELECT * FROM workers WHERE id=?", (worker_id,)).fetchone()
+        with self._reader() as conn:
+            row = conn.execute("SELECT * FROM workers WHERE id=?", (worker_id,)).fetchone()
         if not row:
             raise NotFound(worker_id)
         return self._worker_row(row)
@@ -571,8 +693,8 @@ class Store:
 
     def stale_workers(self, cutoff: datetime) -> list[dict]:
         """Workers whose last heartbeat is older than ``cutoff`` (regardless of operator-set state)."""
-        with self._lock:
-            rows = self._conn.execute("SELECT * FROM workers WHERE last_heartbeat<?", (iso(cutoff),)).fetchall()
+        with self._reader() as conn:
+            rows = conn.execute("SELECT * FROM workers WHERE last_heartbeat<?", (iso(cutoff),)).fetchall()
         return [self._worker_row(r) for r in rows]
 
     def delete_worker(self, worker_id: str) -> None:
@@ -580,8 +702,8 @@ class Store:
             c.execute("DELETE FROM workers WHERE id=?", (worker_id,))
 
     def worker_runs(self, worker_id: str, statuses: tuple[str, ...] = ("dispatched", "running")) -> list[dict]:
-        with self._lock:
-            rows = self._conn.execute(
+        with self._reader() as conn:
+            rows = conn.execute(
                 f"SELECT * FROM runs WHERE worker_id=? AND status IN ({','.join('?' * len(statuses))})", (worker_id, *statuses)
             ).fetchall()
         return [self._run_row(r) for r in rows]
@@ -597,6 +719,6 @@ class Store:
                 raise NotFound(worker_id)
 
     def list_workers(self) -> list[dict]:
-        with self._lock:
-            rows = self._conn.execute("SELECT * FROM workers ORDER BY id").fetchall()
+        with self._reader() as conn:
+            rows = conn.execute("SELECT * FROM workers ORDER BY id").fetchall()
         return [self._worker_row(r) for r in rows]

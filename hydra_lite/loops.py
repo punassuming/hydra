@@ -128,7 +128,8 @@ def reap_workers(store: Store, lifecycle: Lifecycle, ttl: float, prune_seconds: 
 
 
 def maintenance_loop(store: Store, lifecycle: Lifecycle, router, logs, stop: threading.Event, config) -> None:
-    last_purge = 0.0
+    # monotonic() has an arbitrary origin (it can be < the interval right after boot), so start at -inf, not 0
+    last_purge = float("-inf")
     import time
 
     while not stop.is_set():

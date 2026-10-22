@@ -303,3 +303,49 @@ def test_daemon_backstop_times_out_a_run_that_ignores_its_timeout(daemon, monkey
         assert "timeout" in done["completion_reason"]
     finally:
         daemon.shutdown()
+
+
+# ------------------------------------------------- trigger/edit races (found by the stress test)
+
+
+def test_a_stale_trigger_plan_cannot_reenable_a_disabled_job(env):
+    """User `disable` landing between the trigger loop's read and write used to be silently undone."""
+    from hydra_lite.jobs import with_schedule_enabled
+    from hydra_lite.scheduling import plan_ticks, select_ticks
+    from scheduler.models.job_definition import ScheduleConfig
+
+    store, _, _ = env
+    t0 = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
+    job = _interval_job(store, t0)
+    stale = ScheduleConfig.model_validate(store.get_job(job["_id"])["schedule"])  # what the trigger loop read
+    ticks, nxt = plan_ticks(stale, t0)
+    store.update_job(job["_id"], with_schedule_enabled(store.get_job(job["_id"]), False), changed_by="user")  # disable wins
+    from hydra_lite.store.store import norm_ts
+
+    fired = store.trigger_schedule(
+        job["_id"],
+        norm_ts(stale.next_run_at),
+        nxt.model_dump(mode="json"),
+        [{"scheduled_ts": t, "priority": 5} for t in select_ticks(stale, ticks, t0)[0]],
+    )
+    assert fired is None
+    after = store.get_job(job["_id"])
+    assert after["schedule"]["enabled"] is False and store.list_runs(job_id=job["_id"]) == []
+
+
+def test_scheduler_bookkeeping_is_not_a_job_version(env):
+    store, _, _ = env
+    t0 = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
+    job = _interval_job(store, t0)
+    for i in range(5):
+        assert tick(store, now=t0 + timedelta(seconds=61 * i)) == 1
+    assert [v["version"] for v in store.list_versions(job["_id"])] == [1]  # only the creation; ticks are not edits
+    assert store.get_job(job["_id"])["updated_at"] == job["updated_at"]
+
+
+def test_double_trigger_of_the_same_tick_fires_once(env):
+    store, _, _ = env
+    t0 = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
+    _interval_job(store, t0)
+    assert tick(store, now=t0) == 1
+    assert tick(store, now=t0) == 0

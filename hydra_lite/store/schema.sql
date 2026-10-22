@@ -49,6 +49,7 @@ CREATE TABLE runs (
 );
 CREATE INDEX idx_runs_queue ON runs (status, priority DESC, queued_at);
 CREATE INDEX idx_runs_job ON runs (job_id, queued_at);
+CREATE INDEX idx_runs_recent ON runs (queued_at DESC);  -- unfiltered history/newest-first listings
 
 CREATE TABLE run_events (
     id     INTEGER PRIMARY KEY AUTOINCREMENT,
