@@ -61,7 +61,8 @@ def test_kill_running_run(client):
     run_id = wait_for(lambda: [r for r in client.get(f"/jobs/{job['_id']}/runs").json() if r["status"] == "running"])[0]["_id"]
     assert client.post(f"/runs/{run_id}/kill").json()["signal"] == "kill_sent"
     run = _terminal(client, run_id)
-    assert run["status"] == "failed" and run["detail_status"] == "killed"
+    assert run["status"] == "failed" and run["completion_reason"] == "killed by request"
+    assert "killed" in [e["type"] for e in client.app.state.daemon.store.list_events(run_id)]
     assert client.post(f"/runs/{run_id}/kill").status_code == 404
 
 

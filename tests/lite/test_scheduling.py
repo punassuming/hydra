@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from hydra_lite.jobs import build_job
-from hydra_lite.scheduling import next_after, tick
+from hydra_lite.scheduling import plan_ticks, select_ticks, tick
 from hydra_lite.store import Store
 from scheduler.models.job_definition import ScheduleConfig
 
@@ -41,17 +41,19 @@ def test_missed_ticks_collapse_to_one_run(store):
     assert later < nxt <= later + timedelta(seconds=60)
 
 
-def test_cron_next_after_skips_to_future():
+def test_cron_plan_ticks_skips_to_future():
     now = datetime(2026, 3, 10, 12, 7, tzinfo=UTC)
-    s = ScheduleConfig(mode="cron", cron="*/5 * * * *", next_run_at=datetime(2026, 3, 10, 9, 0, tzinfo=UTC))
-    assert next_after(s, now).next_run_at == datetime(2026, 3, 10, 12, 10, tzinfo=UTC)
+    s = ScheduleConfig(mode="cron", cron="*/5 * * * *", next_run_at=datetime(2026, 3, 10, 12, 0, tzinfo=UTC))
+    ticks, nxt = plan_ticks(s, now)
+    assert [t.minute for t in ticks] == [0, 5]
+    assert nxt.next_run_at == datetime(2026, 3, 10, 12, 10, tzinfo=UTC)
 
 
 def test_end_window_disables_schedule():
     now = datetime(2026, 3, 10, 12, 0, tzinfo=UTC)
     s = ScheduleConfig(mode="interval", interval_seconds=60, next_run_at=now, end_at=now + timedelta(seconds=30))
-    out = next_after(s, now)
-    assert out.next_run_at is None and out.enabled is False
+    ticks, nxt = plan_ticks(s, now)
+    assert len(ticks) == 1 and nxt.next_run_at is None and nxt.enabled is False
 
 
 def test_disabled_job_not_triggered(store):

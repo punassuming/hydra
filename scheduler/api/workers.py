@@ -123,21 +123,9 @@ def _metrics_summary(r, domain: str, worker_id: str, data: dict) -> dict:
         }
 
     latest = samples[-1]
-    mem_values = [
-        float(s.get("memory_rss_mb"))
-        for s in samples
-        if s.get("memory_rss_mb") is not None
-    ]
-    proc_values = [
-        int(s.get("process_count"))
-        for s in samples
-        if s.get("process_count") is not None
-    ]
-    load_values = [
-        float(s.get("load_1m"))
-        for s in samples
-        if s.get("load_1m") is not None
-    ]
+    mem_values = [float(s.get("memory_rss_mb")) for s in samples if s.get("memory_rss_mb") is not None]
+    proc_values = [int(s.get("process_count")) for s in samples if s.get("process_count") is not None]
+    load_values = [float(s.get("load_1m")) for s in samples if s.get("load_1m") is not None]
     return {
         "memory_rss_mb": float(latest.get("memory_rss_mb")) if latest.get("memory_rss_mb") is not None else None,
         "process_count": int(latest.get("process_count")) if latest.get("process_count") is not None else None,

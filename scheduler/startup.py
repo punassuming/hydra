@@ -50,8 +50,8 @@ def warn_credential_encryption_key() -> None:
             "derived from ADMIN_TOKEN. IMPORTANT: rotating ADMIN_TOKEN will make all "
             "stored credentials unreadable. Set CREDENTIAL_ENCRYPTION_KEY to a stable "
             "32-byte base64-url value for production use. Generate one with: "
-            "python -c \"import secrets,base64; "
-            "print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())\""
+            'python -c "import secrets,base64; '
+            'print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"'
         )
 
 
@@ -77,9 +77,7 @@ def ensure_indexes() -> None:
     # Retention purge range-deletes by start_ts across all domains.
     db.job_runs.create_index([("start_ts", 1)])
 
-    db.job_definitions.create_index(
-        [("domain", 1), ("schedule.enabled", 1), ("schedule.next_run_at", 1)]
-    )
+    db.job_definitions.create_index([("domain", 1), ("schedule.enabled", 1), ("schedule.next_run_at", 1)])
     db.job_definitions.create_index([("domain", 1), ("created_at", -1)])
     db.job_definitions.create_index([("domain", 1), ("depends_on", 1)])
 

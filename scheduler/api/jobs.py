@@ -34,6 +34,7 @@ def _apply_retry_count(payload: dict) -> dict:
         payload["max_retries"] = retry_count
     return payload
 
+
 MASKED_SECRET = "********"
 
 
@@ -115,9 +116,7 @@ def _insert_job_definition(db, job_def: JobDefinition) -> None:
     try:
         db.job_definitions.insert_one(job_def.to_mongo())
     except DuplicateKeyError:
-        raise HTTPException(
-            status_code=409, detail=f"job with name {job_def.name!r} already exists in this domain"
-        )
+        raise HTTPException(status_code=409, detail=f"job with name {job_def.name!r} already exists in this domain")
 
 
 def _replace_job_definition(db, job_id: str, job_def: JobDefinition) -> None:
@@ -126,9 +125,7 @@ def _replace_job_definition(db, job_id: str, job_def: JobDefinition) -> None:
     try:
         db.job_definitions.replace_one({"_id": job_id}, job_def.to_mongo())
     except DuplicateKeyError:
-        raise HTTPException(
-            status_code=409, detail=f"job with name {job_def.name!r} already exists in this domain"
-        )
+        raise HTTPException(status_code=409, detail=f"job with name {job_def.name!r} already exists in this domain")
 
 
 def _fetch_job_runs(job_id: str, domain_filter: str | None = None) -> List[Dict[str, Any]]:
@@ -190,11 +187,7 @@ def _enqueue_job(
 
 def _attach_schedule(job_def: JobDefinition, force: bool = False) -> JobDefinition:
     schedule = job_def.schedule
-    needs_init = force or (
-        schedule.mode != "immediate"
-        and schedule.enabled
-        and schedule.next_run_at is None
-    )
+    needs_init = force or (schedule.mode != "immediate" and schedule.enabled and schedule.next_run_at is None)
     if not needs_init:
         return job_def
     try:
@@ -207,6 +200,7 @@ def _attach_schedule(job_def: JobDefinition, force: bool = False) -> JobDefiniti
 @router.get("/jobs/templates")
 def list_job_templates():
     from ..examples.templates import TEMPLATES
+
     return TEMPLATES
 
 
@@ -218,27 +212,27 @@ def list_jobs(request: Request):
     force_domain = request.query_params.get("domain")
     search = request.query_params.get("search")
     tags_param = request.query_params.get("tags")
-    
+
     if is_admin and force_domain:
         query = {"domain": force_domain}
     elif is_admin:
         query = {}
     else:
         query = {"domain": domain}
-    
+
     # Add search filter
     if search:
         query["$or"] = [
             {"name": {"$regex": search, "$options": "i"}},
             {"_id": {"$regex": search, "$options": "i"}},
         ]
-    
+
     # Add tag filter
     if tags_param:
         tags = [t.strip() for t in tags_param.split(",") if t.strip()]
         if tags:
             query["tags"] = {"$in": tags}
-    
+
     docs = list(db.job_definitions.find(query).sort("created_at", -1))
     return [_sanitize_job_response(JobDefinition.model_validate(doc)) for doc in docs]
 
@@ -269,11 +263,7 @@ def submit_job(job: JobCreate, request: Request):
             "user": job_def.user,
             "domain": job_def.domain,
             "schedule_mode": job_def.schedule.mode,
-            "next_run_at": (
-                job_def.schedule.next_run_at.isoformat()
-                if job_def.schedule.next_run_at
-                else None
-            ),
+            "next_run_at": (job_def.schedule.next_run_at.isoformat() if job_def.schedule.next_run_at else None),
         },
     )
     return _sanitize_job_response(job_def)
@@ -465,7 +455,7 @@ _MAX_BACKFILL_DAYS = 366
 
 class BackfillRequest(BaseModel):
     start_date: str  # YYYY-MM-DD
-    end_date: str    # YYYY-MM-DD
+    end_date: str  # YYYY-MM-DD
 
 
 @router.post("/jobs/{job_id}/backfill")
@@ -509,12 +499,14 @@ def backfill_job(job_id: str, body: BackfillRequest, request: Request):
     current = start_dt
     queued_count = 0
     while current <= end_dt:
-        item = json.dumps({
-            "job_id": job_id,
-            "execution_date": current.isoformat(),
-            "priority": priority,
-            "domain": job_domain,
-        })
+        item = json.dumps(
+            {
+                "job_id": job_id,
+                "execution_date": current.isoformat(),
+                "priority": priority,
+                "domain": job_domain,
+            }
+        )
         r.rpush(f"backfill_queue:{job_domain}", item)
         current += timedelta(days=1)
         queued_count += 1
@@ -598,41 +590,30 @@ def jobs_overview(request: Request):
     for job in job_docs:
         job_id = job["_id"]
         total_runs = db.job_runs.count_documents({"job_id": job_id})
-        success_runs = db.job_runs.count_documents(
-            {"job_id": job_id, "status": "success"}
-        )
-        failed_runs = db.job_runs.count_documents(
-            {"job_id": job_id, "status": "failed"}
-        )
-        queued = 1 if r.zscore(f"job_queue:{job.get('domain','prod')}:pending", job_id) is not None else 0
-        recent_runs_cursor = (
-            db.job_runs.find({"job_id": job_id})
-            .sort("start_ts", -1)
-            .limit(12)
-        )
+        success_runs = db.job_runs.count_documents({"job_id": job_id, "status": "success"})
+        failed_runs = db.job_runs.count_documents({"job_id": job_id, "status": "failed"})
+        queued = 1 if r.zscore(f"job_queue:{job.get('domain', 'prod')}:pending", job_id) is not None else 0
+        recent_runs_cursor = db.job_runs.find({"job_id": job_id}).sort("start_ts", -1).limit(12)
         recent_runs = [_normalize_run_doc(run) for run in recent_runs_cursor]
         last_run_doc = recent_runs[0] if recent_runs else None
-        
+
         # Calculate average duration from successful runs
         avg_duration = None
-        completed_runs = list(db.job_runs.find(
-            {"job_id": job_id, "status": {"$in": ["success", "failed"]}, "duration": {"$ne": None}}
-        ).limit(10))
+        completed_runs = list(
+            db.job_runs.find({"job_id": job_id, "status": {"$in": ["success", "failed"]}, "duration": {"$ne": None}}).limit(10)
+        )
         if completed_runs:
             durations = [run.get("duration", 0) for run in completed_runs if run.get("duration") is not None]
             if durations:
                 avg_duration = sum(durations) / len(durations)
-        
+
         # Get last failure reason
         last_failure_reason = None
         if failed_runs > 0:
-            last_failed = db.job_runs.find_one(
-                {"job_id": job_id, "status": "failed"},
-                sort=[("start_ts", -1)]
-            )
+            last_failed = db.job_runs.find_one({"job_id": job_id, "status": "failed"}, sort=[("start_ts", -1)])
             if last_failed:
                 last_failure_reason = last_failed.get("completion_reason")
-        
+
         overview.append(
             {
                 "job_id": job_id,
@@ -677,6 +658,7 @@ def queue_overview(request: Request):
     domain = getattr(request.state, "domain", "prod")
     is_admin = getattr(request.state, "is_admin", False)
     force_domain = request.query_params.get("domain")
+
     def _parse_limit(name: str, default: int = 100) -> int:
         raw = request.query_params.get(name)
         if raw is None:
@@ -825,7 +807,7 @@ def queue_pressure(request: Request):
         for key in r.scan_iter(f"job_queue:{dom}:*"):
             if not key.startswith(expected_prefix):
                 continue
-            suffix = key[len(expected_prefix):]
+            suffix = key[len(expected_prefix) :]
             if not suffix or suffix == "pending":
                 continue
             depth = int(r.llen(key) or 0)
@@ -841,7 +823,7 @@ def queue_pressure(request: Request):
         for wkey in r.scan_iter(f"workers:{dom}:*"):
             if not wkey.startswith(expected_worker_prefix):
                 continue
-            wid = wkey[len(expected_worker_prefix):]
+            wid = wkey[len(expected_worker_prefix) :]
             if not wid:
                 continue
             hb = r.zscore(f"worker_heartbeats:{dom}", wid) or 0
@@ -991,11 +973,7 @@ def job_graph(job_id: str, request: Request):
     if not is_admin and job.get("domain", "prod") != domain:
         raise HTTPException(status_code=403, detail="forbidden")
     force_domain = request.query_params.get("domain")
-    graph_domain = (
-        force_domain
-        if (is_admin and force_domain)
-        else job.get("domain", "prod")
-    )
+    graph_domain = force_domain if (is_admin and force_domain) else job.get("domain", "prod")
     jobs_in_domain = list(db.job_definitions.find({"domain": graph_domain}))
     jobs_by_id: Dict[str, Dict[str, Any]] = {str(doc["_id"]): doc for doc in jobs_in_domain}
     node_ids, edges = _build_dependency_graph(jobs_by_id, job_id)
@@ -1031,41 +1009,41 @@ def jobs_statistics(request: Request):
     domain = getattr(request.state, "domain", "prod")
     is_admin = getattr(request.state, "is_admin", False)
     force_domain = request.query_params.get("domain")
-    
+
     if is_admin and force_domain:
         query = {"domain": force_domain}
     elif is_admin:
         query = {}
     else:
         query = {"domain": domain}
-    
+
     total_jobs = db.job_definitions.count_documents(query)
-    
+
     # Count jobs by schedule mode
     cron_jobs = db.job_definitions.count_documents({**query, "schedule.mode": "cron"})
     interval_jobs = db.job_definitions.count_documents({**query, "schedule.mode": "interval"})
     immediate_jobs = db.job_definitions.count_documents({**query, "schedule.mode": "immediate"})
-    
+
     # Count enabled vs disabled
     enabled_jobs = db.job_definitions.count_documents({**query, "schedule.enabled": True})
     disabled_jobs = total_jobs - enabled_jobs
-    
+
     # Run statistics
     run_query = query.copy() if "domain" in query else {}
     if "domain" in run_query:
         run_query = {"domain": run_query["domain"]}
-    
+
     total_runs = db.job_runs.count_documents(run_query)
     success_runs = db.job_runs.count_documents({**run_query, "status": "success"})
     failed_runs = db.job_runs.count_documents({**run_query, "status": "failed"})
     running_runs = db.job_runs.count_documents({**run_query, "status": "running"})
-    
+
     # Get unique tags
     all_jobs = list(db.job_definitions.find(query, {"tags": 1}))
     all_tags = set()
     for job in all_jobs:
         all_tags.update(job.get("tags", []))
-    
+
     return {
         "total_jobs": total_jobs,
         "schedule_breakdown": {

@@ -13,11 +13,13 @@ WEBHOOK_MAX_ERROR_LEN = 2000
 
 def fire_webhooks(webhooks: list, job_id: str, run_id: str, error_message: str):
     """Fire HTTP POST to each webhook URL with failure details."""
-    payload = json.dumps({
-        "job_id": job_id,
-        "run_id": run_id,
-        "error_message": error_message,
-    }).encode()
+    payload = json.dumps(
+        {
+            "job_id": job_id,
+            "run_id": run_id,
+            "error_message": error_message,
+        }
+    ).encode()
     for url in webhooks:
         try:
             req = urllib.request.Request(

@@ -17,11 +17,15 @@ from importlib import resources
 from pathlib import Path
 from typing import Any, Iterator, Optional
 
+from scheduler.models.job_run import TERMINAL_STATES
+
 SCHEMA_VERSION = 1
 MIN_SQLITE = (3, 35, 0)
 
-ACTIVE_STATUSES = ("dispatched", "running")
-TERMINAL_STATUSES = ("success", "failed", "timed_out", "killed", "lost", "skipped")
+# Run states are the full edition's (scheduler/models/job_run.py); lite adds none. How a run ended
+# (killed, lost...) lives in completion_reason and the run_events type, not in a new status.
+TERMINAL_STATUSES = tuple(sorted(TERMINAL_STATES))
+OPEN_STATUSES = ("pending", "dispatched", "running")
 
 
 class NotFound(LookupError):
@@ -233,6 +237,7 @@ class Store:
     def _run_row(row: sqlite3.Row) -> dict:
         run = dict(row)
         run["params"] = json.loads(run["params"] or "{}")
+        run["sla_miss_alerted"] = bool(run["sla_miss_alerted"])
         run["_id"] = run["id"]
         return run
 
@@ -242,9 +247,10 @@ class Store:
         trigger: str = "manual",
         params: Optional[dict] = None,
         priority: int = 5,
-        scheduled_for: Optional[datetime] = None,
+        scheduled_ts: Optional[datetime] = None,
         not_before: Optional[datetime] = None,
-        attempt: int = 0,
+        retry_attempt: int = 0,
+        exclusive: bool = False,
     ) -> dict:
         run_id = uuid.uuid4().hex
         ts = iso(now_utc())
@@ -252,33 +258,36 @@ class Store:
             if not c.execute("SELECT 1 FROM jobs WHERE id=?", (job_id,)).fetchone():
                 raise NotFound(job_id)
             c.execute(
-                "INSERT INTO runs (id, job_id, status, trigger, params, priority, scheduled_for, queued_at, not_before, attempt)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO runs (id, job_id, status, trigger, params, priority, scheduled_ts, queued_at, not_before,"
+                " retry_attempt, exclusive) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     run_id,
                     job_id,
-                    "queued",
+                    "pending",
                     trigger,
                     _dumps(params or {}),
                     priority,
-                    iso(scheduled_for) if scheduled_for else None,
+                    iso(scheduled_ts) if scheduled_ts else None,
                     ts,
                     iso(not_before) if not_before else None,
-                    attempt,
+                    retry_attempt,
+                    1 if exclusive else 0,
                 ),
             )
-            self._event(c, run_id, "queued", {"trigger": trigger, "attempt": attempt})
+            self._event(c, run_id, "queued", {"trigger": trigger, "retry_attempt": retry_attempt})
         return self.get_run(run_id)
 
     def claim_run(self, worker_id: str, now: Optional[datetime] = None) -> Optional[dict]:
-        """Atomically hand the best eligible queued run to ``worker_id`` (or None)."""
+        """Atomically hand the best eligible pending run to ``worker_id`` (or None)."""
         now = now or now_utc()
         ts = iso(now)
         with self._tx() as c:
             row = c.execute(
                 "UPDATE runs SET status='dispatched', worker_id=?, queue_latency_ms="
                 " CAST((julianday(?) - julianday(queued_at)) * 86400000 AS INTEGER)"
-                " WHERE id=(SELECT id FROM runs WHERE status='queued' AND (not_before IS NULL OR not_before<=?)"
+                " WHERE id=(SELECT id FROM runs WHERE status='pending' AND (not_before IS NULL OR not_before<=?)"
+                " AND NOT (exclusive=1 AND EXISTS (SELECT 1 FROM runs r2 WHERE r2.job_id=runs.job_id"
+                " AND r2.status IN ('dispatched','running')))"
                 " ORDER BY priority DESC, queued_at, rowid LIMIT 1) RETURNING *",
                 (worker_id, ts, ts),
             ).fetchone()
@@ -291,8 +300,7 @@ class Store:
         ts = iso(now_utc())
         with self._tx() as c:
             n = c.execute(
-                "UPDATE runs SET status='running', started_at=?, log_path=COALESCE(?, log_path), attempt=attempt+1"
-                " WHERE id=? AND status='dispatched'",
+                "UPDATE runs SET status='running', start_ts=?, log_path=COALESCE(?, log_path) WHERE id=? AND status='dispatched'",
                 (ts, log_path, run_id),
             ).rowcount
             if n == 0:
@@ -303,27 +311,38 @@ class Store:
         self,
         run_id: str,
         status: str,
-        exit_code: Optional[int] = None,
-        reason: Optional[str] = None,
-    ) -> dict:
-        if status not in TERMINAL_STATUSES:
+        returncode: Optional[int] = None,
+        completion_reason: Optional[str] = None,
+        attempt: Optional[int] = None,
+        event_type: Optional[str] = None,
+    ) -> tuple[dict, bool]:
+        """Move a run to a terminal ``status``. Returns ``(run, changed)``.
+
+        The first terminal transition wins; later calls are no-ops with ``changed=False``, so callers
+        can run post-run actions (retry, webhooks, dependents) exactly once. ``event_type`` lets the
+        audit trail say *how* it ended (``killed``, ``lost``) without a new status.
+        """
+        if status not in TERMINAL_STATES:
             raise ValueError(f"not a terminal status: {status}")
         end = now_utc()
         with self._tx() as c:
             row = c.execute("SELECT * FROM runs WHERE id=?", (run_id,)).fetchone()
             if not row:
                 raise NotFound(run_id)
-            if row["status"] in TERMINAL_STATUSES:
-                return self._run_row(row)  # idempotent: first terminal state wins
+            if row["status"] in TERMINAL_STATES:
+                return self._run_row(row), False
             total = None
-            if row["started_at"]:
-                total = int((end - datetime.fromisoformat(row["started_at"])).total_seconds() * 1000)
+            if row["start_ts"]:
+                total = int((end - datetime.fromisoformat(row["start_ts"])).total_seconds() * 1000)
             c.execute(
-                "UPDATE runs SET status=?, exit_code=?, reason=?, finished_at=?, total_run_ms=? WHERE id=?",
-                (status, exit_code, reason, iso(end), total, run_id),
+                "UPDATE runs SET status=?, returncode=?, completion_reason=?, end_ts=?, total_run_ms=?,"
+                " attempt=COALESCE(?, attempt) WHERE id=?",
+                (status, returncode, completion_reason, iso(end), total, attempt, run_id),
             )
-            self._event(c, run_id, status, {"exit_code": exit_code, "reason": reason})
-        return self.get_run(run_id)
+            self._event(
+                c, run_id, event_type or status, {"status": status, "returncode": returncode, "reason": completion_reason}
+            )
+        return self.get_run(run_id), True
 
     def get_run(self, run_id: str) -> dict:
         with self._lock:
@@ -357,21 +376,68 @@ class Store:
             ).fetchall()
         return [self._run_row(r) for r in rows]
 
-    def active_run_count(self, job_id: str) -> int:
+    def count_runs(self, status: str) -> int:
+        with self._lock:
+            return self._conn.execute("SELECT COUNT(*) FROM runs WHERE status=?", (status,)).fetchone()[0]
+
+    def open_run_count(self, job_id: str) -> int:
+        """Runs of ``job_id`` that are pending, dispatched or running."""
         with self._lock:
             return self._conn.execute(
-                "SELECT COUNT(*) FROM runs WHERE job_id=? AND status IN ('queued','dispatched','running')", (job_id,)
+                f"SELECT COUNT(*) FROM runs WHERE job_id=? AND status IN ({','.join('?' * len(OPEN_STATUSES))})",
+                (job_id, *OPEN_STATUSES),
             ).fetchone()[0]
 
-    def recover_orphans(self, reason: str = "daemon restarted while run was active") -> list[str]:
-        """Mark runs left dispatched/running (no live owner after a restart) as ``lost``."""
-        end = iso(now_utc())
+    def running_runs(self) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute("SELECT * FROM runs WHERE status='running'").fetchall()
+        return [self._run_row(r) for r in rows]
+
+    def active_run_ids(self) -> list[str]:
+        """Runs a worker has taken (dispatched/running) but not finished."""
+        with self._lock:
+            return [r["id"] for r in self._conn.execute("SELECT id FROM runs WHERE status IN ('dispatched','running')")]
+
+    def mark_sla_alerted(self, run_id: str) -> bool:
+        """Set ``sla_miss_alerted`` once; True only for the caller that flipped it."""
         with self._tx() as c:
-            ids = [r["id"] for r in c.execute("SELECT id FROM runs WHERE status IN ('dispatched','running')")]
+            return c.execute("UPDATE runs SET sla_miss_alerted=1 WHERE id=? AND sla_miss_alerted=0", (run_id,)).rowcount == 1
+
+    def find_dependents(self, job_id: str) -> list[dict]:
+        """Enabled jobs whose ``depends_on`` contains ``job_id``."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT j.* FROM jobs j WHERE j.enabled=1 AND EXISTS ("
+                " SELECT 1 FROM json_each(j.definition, '$.depends_on') d WHERE d.value=?)",
+                (job_id,),
+            ).fetchall()
+        return [self._job_row(r) for r in rows]
+
+    def purge_runs_before(self, cutoff: datetime) -> list[str]:
+        """Delete finished runs (and their events) that ended before ``cutoff``; return the run ids."""
+        with self._tx() as c:
+            ids = [
+                r["id"]
+                for r in c.execute(
+                    "SELECT id FROM runs WHERE end_ts IS NOT NULL AND end_ts<?"
+                    f" AND status IN ({','.join('?' * len(TERMINAL_STATES))})",
+                    (iso(cutoff), *TERMINAL_STATES),
+                )
+            ]
             for run_id in ids:
-                c.execute("UPDATE runs SET status='lost', reason=?, finished_at=? WHERE id=?", (reason, end, run_id))
-                self._event(c, run_id, "lost", {"reason": reason})
+                c.execute("DELETE FROM run_events WHERE run_id=?", (run_id,))
+                c.execute("DELETE FROM runs WHERE id=?", (run_id,))
+            c.execute("DELETE FROM schedule_events WHERE ts<?", (iso(cutoff),))
         return ids
+
+    def recover_orphans(self, reason: str = "lost: daemon restarted while the run was active") -> list[dict]:
+        """Fail runs left dispatched/running with no live owner; returns the runs that were changed."""
+        changed = []
+        for run_id in self.active_run_ids():
+            run, did = self.finish_run(run_id, "failed", completion_reason=reason, event_type="lost")
+            if did:
+                changed.append(run)
+        return changed
 
     # ----------------------------------------------------------------- events
     def _event(self, c: sqlite3.Connection, run_id: str, type_: str, detail: dict) -> None:
@@ -383,6 +449,20 @@ class Store:
     def add_event(self, run_id: str, type_: str, detail: Optional[dict] = None) -> None:
         with self._tx() as c:
             self._event(c, run_id, type_, detail or {})
+
+    def add_schedule_event(self, job_id: str, type_: str, detail: Optional[dict] = None) -> None:
+        with self._tx() as c:
+            c.execute(
+                "INSERT INTO schedule_events (job_id, ts, type, detail) VALUES (?,?,?,?)",
+                (job_id, iso(now_utc()), type_, _dumps(detail or {})),
+            )
+
+    def list_schedule_events(self, job_id: str) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT ts, type, detail FROM schedule_events WHERE job_id=? ORDER BY id", (job_id,)
+            ).fetchall()
+        return [{"ts": r["ts"], "type": r["type"], "detail": json.loads(r["detail"])} for r in rows]
 
     def list_events(self, run_id: str) -> list[dict]:
         with self._lock:

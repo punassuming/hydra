@@ -103,13 +103,16 @@ def test_run_lifecycle_and_event_trail(store):
     assert run["params"] == {"A": "1"}
     store.claim_run("w1")
     store.start_run(run["id"], log_path="x.log")
-    done = store.finish_run(run["id"], "success", exit_code=0)
-    assert done["status"] == "success" and done["attempt"] == 1 and done["total_run_ms"] >= 0
+    done, changed = store.finish_run(run["id"], "success", returncode=0, attempt=1)
+    assert changed and done["status"] == "success" and done["attempt"] == 1 and done["total_run_ms"] >= 0
     assert [e["type"] for e in store.list_events(run["id"])] == ["queued", "dispatched", "started", "success"]
     # first terminal state wins
-    assert store.finish_run(run["id"], "failed", exit_code=1)["status"] == "success"
+    again, changed = store.finish_run(run["id"], "failed", returncode=1)
+    assert again["status"] == "success" and changed is False
     with pytest.raises(ValueError):
         store.finish_run(run["id"], "running")
+    with pytest.raises(ValueError):
+        store.finish_run(run["id"], "killed")  # lite has no statuses beyond the full edition's
 
 
 def test_list_runs_filters_and_cursor(store):
@@ -130,10 +133,12 @@ def test_recover_orphans_marks_active_runs_lost(store):
     store.claim_run("w1")
     store.start_run(r1["id"])
     lost = store.recover_orphans()
-    assert set(lost) == {r1["id"], r2["id"]}
-    assert store.get_run(r1["id"])["status"] == "lost"
-    assert store.get_run(r3["id"])["status"] == "queued"
-    assert store.active_run_count(job["_id"]) == 1
+    assert {r["id"] for r in lost} == {r1["id"], r2["id"]}
+    failed = store.get_run(r1["id"])
+    assert failed["status"] == "failed" and failed["completion_reason"].startswith("lost")
+    assert store.list_events(r1["id"])[-1]["type"] == "lost"
+    assert store.get_run(r3["id"])["status"] == "pending"
+    assert store.open_run_count(job["_id"]) == 1
 
 
 def test_workers_register_and_heartbeat(store):

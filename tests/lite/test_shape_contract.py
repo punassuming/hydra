@@ -43,3 +43,30 @@ def test_worker_response_has_every_main_worker_field(client):
     missing = _aliased_fields(WorkerInfo) - set(worker)
     assert not missing, f"lite worker response lacks main fields: {sorted(missing)}"
     WorkerInfo.model_validate(worker)
+
+
+def test_stored_statuses_are_the_full_editions(client):
+    from scheduler.models.job_run import RUN_STATES
+
+    job = client.post("/jobs/", json=py_job("vocab", "print(1)")).json()
+    wait_for(lambda: client.get(f"/jobs/{job['_id']}/runs").json())
+    store = client.app.state.daemon.store
+    wait_for(lambda: store.list_runs(job_id=job["_id"])[0]["status"] == "success")
+    assert {r["status"] for r in store.list_runs(limit=100)} <= RUN_STATES
+
+
+def test_schedule_keys_exist_on_the_shared_model(client):
+    from scheduler.models.job_definition import ScheduleConfig
+
+    job = client.post("/jobs/", json=py_job("sched-keys", "pass", schedule={"mode": "cron", "cron": "0 0 1 1 *"})).json()
+    assert set(job["schedule"]) <= set(ScheduleConfig.model_fields)
+
+
+def test_lite_rejects_api_mode(tmp_path):
+    import pytest as _pytest
+
+    from hydra_lite import config as config_module
+
+    with _pytest.raises(ValueError, match="not supported by the lite edition"):
+        config_module.load(env={"HYDRA_MODE": "api", "HYDRA_DATA_DIR": str(tmp_path)}, config_path=tmp_path / "none.toml")
+    assert config_module.load(env={"HYDRA_DATA_DIR": str(tmp_path)}, config_path=tmp_path / "none.toml").mode == "combined"

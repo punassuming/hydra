@@ -114,6 +114,7 @@ def _resolve_credential_refs(job: dict, db) -> dict:
                         headers["X-API-Key"] = decrypted["api_key"]
                     elif decrypted.get("username") and decrypted.get("password"):
                         import base64
+
                         creds = base64.b64encode(f"{decrypted['username']}:{decrypted['password']}".encode()).decode()
                         headers["Authorization"] = f"Basic {creds}"
                     job = {**job, "executor": {**executor, "headers": headers}}
@@ -177,9 +178,8 @@ def _resolve_credential_refs(job: dict, db) -> dict:
                             headers["X-API-Key"] = decrypted["api_key"]
                         elif decrypted.get("username") and decrypted.get("password"):
                             import base64
-                            creds = base64.b64encode(
-                                f"{decrypted['username']}:{decrypted['password']}".encode()
-                            ).decode()
+
+                            creds = base64.b64encode(f"{decrypted['username']}:{decrypted['password']}".encode()).decode()
                             headers["Authorization"] = f"Basic {creds}"
                         job = {**job, "executor": {**executor, "headers": headers}}
                 except Exception:
@@ -267,9 +267,7 @@ def scheduling_loop(stop_event: threading.Event):
             # scheduler free from external workload polling.
             job = normalize_affinity(job)
             candidates = [
-                w
-                for w in list_online_workers(ttl, domain, respect_capacity=not bypass_concurrency)
-                if passes_affinity(job, w)
+                w for w in list_online_workers(ttl, domain, respect_capacity=not bypass_concurrency) if passes_affinity(job, w)
             ]
 
             # bypass_concurrency guardrail: if a per-worker extra-bypass cap is
@@ -284,7 +282,10 @@ def scheduling_loop(stop_event: threading.Event):
                     else:
                         log.warning(
                             "Worker %s has %d bypass job(s) running (cap=%d); skipping for bypass job %s",
-                            w["worker_id"], extra, bypass_max_extra, job_id,
+                            w["worker_id"],
+                            extra,
+                            bypass_max_extra,
+                            job_id,
                         )
                 candidates = filtered
 
@@ -294,14 +295,16 @@ def scheduling_loop(stop_event: threading.Event):
                 no_worker_count += 1
                 if no_worker_count == starvation_warn_threshold:
                     log.warning(
-                        "Job %s has been waiting for an eligible worker %d time(s) "
-                        "(starvation risk; bypass_concurrency=%s)",
-                        job_id, no_worker_count, bypass_concurrency,
+                        "Job %s has been waiting for an eligible worker %d time(s) (starvation risk; bypass_concurrency=%s)",
+                        job_id,
+                        no_worker_count,
+                        bypass_concurrency,
                     )
                 elif no_worker_count > starvation_warn_threshold and no_worker_count % starvation_warn_threshold == 0:
                     log.warning(
                         "Job %s still waiting for eligible worker after %d attempt(s)",
-                        job_id, no_worker_count,
+                        job_id,
+                        no_worker_count,
                     )
                 else:
                     log.warning("No eligible worker for job %s; requeuing (no_worker_count=%d)", job_id, no_worker_count)
@@ -338,7 +341,10 @@ def scheduling_loop(stop_event: threading.Event):
                     log.warning(
                         "Dispatching bypass_concurrency job %s to worker %s which is already at capacity "
                         "(%d/%d); this may overload the worker",
-                        job_id, wid, current, cap,
+                        job_id,
+                        wid,
+                        current,
+                        cap,
                     )
 
             envelope = {
@@ -444,6 +450,7 @@ def schedule_trigger_loop(stop_event: threading.Event):
 
 def sla_monitoring_loop(stop_event: threading.Event):
     from .run_events import _fire_email_alert_async, _fire_webhooks_async
+
     db = get_db()
     log.info("SLA monitoring loop started")
     while not stop_event.is_set():
@@ -493,11 +500,13 @@ def sla_monitoring_loop(stop_event: threading.Event):
                         continue
                     log.warning(
                         "SLA missed for job %s run %s (%.1fs > %ss); firing alerts",
-                        job_id, run_id, elapsed, sla_seconds,
+                        job_id,
+                        run_id,
+                        elapsed,
+                        sla_seconds,
                     )
                     alert_message = (
-                        f"SLA Warning: Job exceeded expected duration of {sla_seconds} seconds "
-                        f"(running for {elapsed:.1f}s)"
+                        f"SLA Warning: Job exceeded expected duration of {sla_seconds} seconds (running for {elapsed:.1f}s)"
                     )
                     webhooks = job_doc.get("on_failure_webhooks") or []
                     _fire_webhooks_async(webhooks, job_id, run_id, alert_message)
@@ -616,7 +625,8 @@ def run_retention_loop(stop_event: threading.Event):
     if RUN_RETENTION_DAYS > 0:
         log.info(
             "Run retention loop started (retention=%sd, interval=%ss)",
-            RUN_RETENTION_DAYS, RUN_RETENTION_CHECK_INTERVAL_SECONDS,
+            RUN_RETENTION_DAYS,
+            RUN_RETENTION_CHECK_INTERVAL_SECONDS,
         )
     while not stop_event.is_set():
         try:
@@ -655,7 +665,10 @@ def timeout_enforcement_loop(stop_event: threading.Event):
                     if job_timeout > 0 and elapsed > job_timeout:
                         log.warning(
                             "Timeout exceeded for job %s run %s (%.1fs > %ss); sending kill signal",
-                            job_id, run_id, elapsed, job_timeout,
+                            job_id,
+                            run_id,
+                            elapsed,
+                            job_timeout,
                         )
                         r.publish(f"job_kill:{domain}", run_id)
         except Exception as exc:
@@ -709,16 +722,15 @@ def backfill_dispatch_loop(stop_event: threading.Event):
 
             job = normalize_affinity(job)
             candidates = [
-                w
-                for w in list_online_workers(ttl, domain, respect_capacity=not bypass_concurrency)
-                if passes_affinity(job, w)
+                w for w in list_online_workers(ttl, domain, respect_capacity=not bypass_concurrency) if passes_affinity(job, w)
             ]
             worker = select_best_worker(candidates)
             if not worker:
                 # No worker available; put the item back at the front of the queue and back off.
                 log.warning(
                     "Backfill: no eligible worker for job %s date %s; requeuing",
-                    job_id, execution_date,
+                    job_id,
+                    execution_date,
                 )
                 r.lpush(f"backfill_queue:{domain}", raw)
                 time.sleep(2)
@@ -766,7 +778,9 @@ def backfill_dispatch_loop(stop_event: threading.Event):
             )
             log.info(
                 "Dispatched backfill job %s (date=%s) to worker %s",
-                job_id, execution_date, wid,
+                job_id,
+                execution_date,
+                wid,
             )
         except Exception as e:
             log.exception("Error in backfill dispatch loop: %s", e)

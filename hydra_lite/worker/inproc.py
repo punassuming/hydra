@@ -8,6 +8,7 @@ import socket
 import threading
 from typing import Optional
 
+from ..lifecycle import Lifecycle
 from ..logs import LogStore
 from ..store import NotFound, Store
 from .runner import execute_run
@@ -15,15 +16,24 @@ from .runner import execute_run
 log = logging.getLogger("hydra_lite.worker")
 
 
+class KillEvent(threading.Event):
+    """A kill signal that remembers why it was sent ("request" or "timeout")."""
+
+    reason: Optional[str] = None
+
+
 class WorkerPool:
-    def __init__(self, store: Store, logs: LogStore, max_concurrency: int = 4, worker_id: Optional[str] = None):
+    def __init__(
+        self, store: Store, logs: LogStore, lifecycle: Lifecycle, max_concurrency: int = 4, worker_id: Optional[str] = None
+    ):
         self.store = store
         self.logs = logs
+        self.lifecycle = lifecycle
         self.max_concurrency = max(1, max_concurrency)
         self.worker_id = worker_id or f"local-{socket.gethostname()}"
         self.stop = threading.Event()
-        self.wake = threading.Event()
-        self._kills: dict[str, threading.Event] = {}
+        self.wake = lifecycle.wake
+        self._kills: dict[str, KillEvent] = {}
         self._active: dict[str, tuple[str, str]] = {}  # run_id -> (job_id, user)
         self._kill_lock = threading.Lock()
         self._threads: list[threading.Thread] = []
@@ -56,11 +66,12 @@ class WorkerPool:
             pairs = list(self._active.values())
         return [j for j, _ in pairs], sorted({u for _, u in pairs})
 
-    def kill(self, run_id: str) -> bool:
+    def kill(self, run_id: str, reason: str = "request") -> bool:
         with self._kill_lock:
             event = self._kills.get(run_id)
         if event is None:
             return False
+        event.reason = reason
         event.set()
         return True
 
@@ -86,7 +97,7 @@ class WorkerPool:
                 self.wake.wait(0.5)
                 self.wake.clear()
                 continue
-            kill_event = threading.Event()
+            kill_event = KillEvent()
             with self._kill_lock:
                 self._kills[run["id"]] = kill_event
             with self._count_lock:
@@ -95,9 +106,9 @@ class WorkerPool:
                 job = self.store.get_job(run["job_id"])
                 with self._kill_lock:
                     self._active[run["id"]] = (job["_id"], job.get("user", "default"))
-                execute_run(self.store, self.logs, run, job, kill_event)
+                execute_run(self.store, self.logs, self.lifecycle, run, job, kill_event)
             except NotFound:
-                self.store.finish_run(run["id"], "failed", exit_code=1, reason="job was deleted before the run started")
+                self.lifecycle.finalize(run["id"], "failed", returncode=1, reason="job was deleted before the run started")
             except Exception:
                 log.exception("worker loop error")
             finally:

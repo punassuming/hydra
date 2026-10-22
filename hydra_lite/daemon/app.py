@@ -4,14 +4,15 @@ from __future__ import annotations
 
 import hmac
 import json
-import re
 import time
 from contextlib import asynccontextmanager
 from typing import Any, Dict, Optional
 
 from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel, ValidationError, field_validator
+from pydantic import ValidationError
+
+from scheduler.models.run_params import RunJobRequest
 
 from .. import __version__
 from ..jobs import JobValidationError, build_job, merge_update, to_api, validate_payload, with_schedule_enabled
@@ -20,27 +21,12 @@ from ..store import DuplicateJobName, NotFound
 from ..store.store import TERMINAL_STATUSES
 from .runtime import Daemon
 
-PARAM_KEY_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 UNSUPPORTED_PREFIXES = ("/admin", "/domain", "/credentials", "/ai", "/investigations", "/events")
 OPEN_PATHS = {"/health"}
 
 
-class RunJobRequest(BaseModel):
-    params: Dict[str, str] = {}
-
-    @field_validator("params")
-    @classmethod
-    def _keys(cls, params: Dict[str, str]) -> Dict[str, str]:
-        for key in params:
-            if len(key) > 128 or not PARAM_KEY_PATTERN.match(key):
-                raise ValueError(
-                    f"invalid param name {key!r}: must match {PARAM_KEY_PATTERN.pattern} and be at most 128 characters"
-                )
-        return params
-
-
 def create_app(daemon: Daemon, manage_lifecycle: bool = True) -> FastAPI:
-    store, logs, pool = daemon.store, daemon.logs, daemon.pool
+    store, logs, pool, lifecycle = daemon.store, daemon.logs, daemon.pool, daemon.lifecycle
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -102,10 +88,11 @@ def create_app(daemon: Daemon, manage_lifecycle: bool = True) -> FastAPI:
     # ----------------------------------------------------------------- health
     @app.get("/health")
     def health():
-        queued = len(store.list_runs(status="queued", limit=1000))
+        queued = store.count_runs("pending")
         return {
             "status": "ok",
             "edition": "lite",
+            "mode": daemon.config.mode,
             "version": __version__,
             "workers": len(store.list_workers()),
             "pending_jobs": queued,
@@ -269,8 +256,8 @@ def create_app(daemon: Daemon, manage_lifecycle: bool = True) -> FastAPI:
         run = run_or_404(run_id)
         if run["status"] in TERMINAL_STATUSES:
             raise HTTPException(404, "run not found or not currently running")
-        if run["status"] == "queued":
-            store.finish_run(run_id, "killed", reason="killed while queued")
+        if run["status"] == "pending":
+            lifecycle.finalize(run_id, "failed", reason="killed while pending", event_type="killed")
         elif not pool.kill(run_id):
             raise HTTPException(404, "run not found or not currently running")
         return {"run_id": run_id, "signal": "kill_sent"}
@@ -329,14 +316,14 @@ def create_app(daemon: Daemon, manage_lifecycle: bool = True) -> FastAPI:
 
     @app.get("/overview/queue")
     def overview_queue(pending_limit: int = 50, upcoming_limit: int = 50):
-        pending = store.list_runs(status="queued", limit=pending_limit)
+        pending = store.list_runs(status="pending", limit=pending_limit)
         upcoming = sorted(
             (j for j in store.list_jobs(limit=10000) if j["enabled"] and (j.get("schedule") or {}).get("next_run_at")),
             key=lambda j: j["schedule"]["next_run_at"],
         )[:upcoming_limit]
         return {
             "pending": [run_to_api(r, job_for(r), logs, full=False) for r in pending],
-            "pending_total": len(store.list_runs(status="queued", limit=100000)),
+            "pending_total": store.count_runs("pending"),
             "upcoming": [{"job_id": j["_id"], "name": j["name"], "next_run_at": j["schedule"]["next_run_at"]} for j in upcoming],
         }
 
@@ -344,7 +331,7 @@ def create_app(daemon: Daemon, manage_lifecycle: bool = True) -> FastAPI:
     def overview_pressure():
         workers = store.list_workers()
         return {
-            "pending": len(store.list_runs(status="queued", limit=100000)),
+            "pending": store.count_runs("pending"),
             "running": pool.running,
             "capacity": sum(w["max_concurrency"] for w in workers),
             "online_workers": sum(1 for w in workers if w["state"] == "online"),

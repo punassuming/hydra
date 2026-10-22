@@ -68,8 +68,7 @@ _CATALOG = [
         "key": "retry_storm",
         "label": "Retry Storms",
         "description": (
-            f"Jobs with at least {RETRY_STORM_MIN_COUNT} scheduler-retried runs "
-            f"in the last {RETRY_STORM_LOOKBACK_HOURS}h."
+            f"Jobs with at least {RETRY_STORM_MIN_COUNT} scheduler-retried runs in the last {RETRY_STORM_LOOKBACK_HOURS}h."
         ),
     },
     {
@@ -92,8 +91,7 @@ _CATALOG = [
         "key": "worker_offline",
         "label": "Offline Workers",
         "description": (
-            "Registered workers whose heartbeat has lapsed and that were not deliberately "
-            "set offline by an operator."
+            "Registered workers whose heartbeat has lapsed and that were not deliberately set offline by an operator."
         ),
     },
     {
@@ -130,9 +128,9 @@ def _investigate_failed_recent(db, jobs: list, hours: float) -> list:
     for job in jobs:
         job_id = job["_id"]
         runs = list(
-            db.job_runs.find(
-                {"job_id": job_id, "status": {"$in": ["failed", "timed_out"]}, "start_ts": {"$gte": since}}
-            ).sort("start_ts", -1)
+            db.job_runs.find({"job_id": job_id, "status": {"$in": ["failed", "timed_out"]}, "start_ts": {"$gte": since}}).sort(
+                "start_ts", -1
+            )
         )
         if not runs:
             continue
@@ -303,9 +301,7 @@ def _investigate_retry_storm(db, jobs: list) -> list:
     for job in jobs:
         job_id = job["_id"]
         runs = list(
-            db.job_runs.find(
-                {"job_id": job_id, "retry_attempt": {"$gt": 0}, "start_ts": {"$gte": since}}
-            ).sort("start_ts", -1)
+            db.job_runs.find({"job_id": job_id, "retry_attempt": {"$gt": 0}, "start_ts": {"$gte": since}}).sort("start_ts", -1)
         )
         if len(runs) < RETRY_STORM_MIN_COUNT:
             continue

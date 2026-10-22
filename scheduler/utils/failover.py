@@ -130,7 +130,8 @@ def requeue_jobs_for_worker(domain_and_worker: str):
     if drained_count:
         log.warning(
             "Drained %d dispatched-but-not-started envelope(s) from offline worker %s queue",
-            drained_count, worker_id,
+            drained_count,
+            worker_id,
         )
         append_worker_op(
             domain=domain,

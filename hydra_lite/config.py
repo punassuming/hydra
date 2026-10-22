@@ -12,6 +12,8 @@ from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
+from scheduler.utils.modes import MODE_API, MODE_COMBINED, VALID_MODES
+
 from . import paths
 
 
@@ -26,7 +28,9 @@ class Config:
     max_concurrency: int = 4
     worker_tags: list[str] = field(default_factory=list)
     idle_stop_seconds: int = 0
-    retention_days: int = 90
+    retention_days: int = 90  # lite default (full edition: off); 0 disables. Same env var as the full edition.
+    retention_check_seconds: int = 3600
+    mode: str = MODE_COMBINED
 
     def __post_init__(self) -> None:
         self.data_dir = Path(self.data_dir)
@@ -59,7 +63,9 @@ _SPEC: tuple[tuple[str, str, str, str, Any], ...] = (
     ("max_concurrency", "workers", "max_concurrency", "HYDRA_MAX_CONCURRENCY", _int),
     ("worker_tags", "workers", "tags", "HYDRA_WORKER_TAGS", _tags),
     ("idle_stop_seconds", "workers", "idle_stop_seconds", "HYDRA_IDLE_STOP_SECONDS", _int),
-    ("retention_days", "retention", "days", "HYDRA_RETENTION_DAYS", _int),
+    ("retention_days", "retention", "days", "HYDRA_RUN_RETENTION_DAYS", _int),
+    ("retention_check_seconds", "retention", "check_seconds", "SCHEDULER_RUN_RETENTION_CHECK_INTERVAL", _int),
+    ("mode", "daemon", "mode", "HYDRA_MODE", str),
 )
 
 
@@ -92,4 +98,12 @@ def load(
 
     if values.get("port") is not None and not 0 < values["port"] < 65536:
         raise ValueError(f"port out of range: {values['port']}")
+    mode = values.get("mode", MODE_COMBINED)
+    if mode == MODE_API:
+        raise ValueError(
+            "HYDRA_MODE=api is not supported by the lite edition: it always runs the API together with its "
+            "orchestration loops (use 'combined')"
+        )
+    if mode not in VALID_MODES:
+        raise ValueError(f"unknown HYDRA_MODE {mode!r}; expected one of {', '.join(VALID_MODES)}")
     return Config(**values)

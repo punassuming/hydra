@@ -43,9 +43,7 @@ def decide_post_run(
     max_retries = int(job.get("max_retries", 0) or 0)
     if max_retries > 0 and retry_attempt < max_retries:
         next_attempt = retry_attempt + 1
-        delay = apply_retry_jitter(
-            compute_retry_backoff_delay(int(job.get("retry_delay_seconds", 0) or 0), next_attempt), rng
-        )
+        delay = apply_retry_jitter(compute_retry_backoff_delay(int(job.get("retry_delay_seconds", 0) or 0), next_attempt), rng)
         return PostRunDecision(RETRY, retry_attempt=next_attempt, delay_seconds=delay)
     return PostRunDecision(FINAL_FAILURE)
 

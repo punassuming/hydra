@@ -11,26 +11,13 @@ from typing import Any, Optional
 
 from .logs import LogStore
 
-# Lite keeps richer terminal states; the shared shape (and hydra-ctl's wait loops) only know these.
-_STATUS = {
-    "queued": "pending",
-    "dispatched": "dispatched",
-    "running": "running",
-    "success": "success",
-    "failed": "failed",
-    "timed_out": "timed_out",
-    "killed": "failed",
-    "lost": "failed",
-    "skipped": "success",
-}
-
 
 def _dt(value: Optional[str]) -> Optional[datetime]:
     return datetime.fromisoformat(value) if value else None
 
 
 def run_to_api(run: dict[str, Any], job: Optional[dict], logs: Optional[LogStore] = None, full: bool = True) -> dict[str, Any]:
-    start, end = _dt(run.get("started_at")), _dt(run.get("finished_at"))
+    start, end = _dt(run.get("start_ts")), _dt(run.get("end_ts"))
     duration = (end - start).total_seconds() if start and end else None
     stdout = stderr = ""
     if full and logs is not None:
@@ -45,20 +32,20 @@ def run_to_api(run: dict[str, Any], job: Optional[dict], logs: Optional[LogStore
         "user": (job or {}).get("user", "default"),
         "domain": "prod",
         "worker_id": run.get("worker_id"),
-        "start_ts": run.get("started_at"),
-        "scheduled_ts": run.get("scheduled_for"),
-        "end_ts": run.get("finished_at"),
-        "status": _STATUS.get(run["status"], run["status"]),
-        "detail_status": run["status"],
+        "start_ts": run.get("start_ts"),
+        "scheduled_ts": run.get("scheduled_ts"),
+        "end_ts": run.get("end_ts"),
+        "status": run["status"],
         "trigger": run.get("trigger"),
-        "returncode": run.get("exit_code"),
+        "returncode": run.get("returncode"),
         "stdout": stdout,
         "stderr": stderr,
         "attempt": run.get("attempt"),
         "executor_type": executor,
         "queue_latency_ms": run.get("queue_latency_ms"),
         "total_run_ms": run.get("total_run_ms"),
-        "completion_reason": run.get("reason"),
+        "completion_reason": run.get("completion_reason"),
+        "retry_attempt": run.get("retry_attempt", 0),
         "duration": duration,
         "params": run.get("params") or {},
         # fields defined by the main edition's JobRun that lite has no concept of (kept for shape parity)
@@ -66,10 +53,10 @@ def run_to_api(run: dict[str, Any], job: Optional[dict], logs: Optional[LogStore
         "stderr_tail": stderr[-2000:] if stderr else None,
         "slot": None,
         "retries_remaining": None,
-        "schedule_tick": run.get("scheduled_for"),
+        "schedule_tick": run.get("scheduled_ts"),
         "schedule_mode": ((job or {}).get("schedule") or {}).get("mode"),
         "bypass_concurrency": bool((job or {}).get("bypass_concurrency", False)),
-        "sla_miss_alerted": False,
+        "sla_miss_alerted": bool(run.get("sla_miss_alerted", False)),
     }
     return out
 

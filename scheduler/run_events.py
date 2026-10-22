@@ -53,6 +53,7 @@ def _to_datetime(value: Any) -> datetime | None:
 
 def _enqueue_job_for_retry(job_id: str, domain: str, priority: int, retry_attempt: int, delay_seconds: int = 0):
     """Re-enqueue a failed job for a scheduler-level retry, with optional delay."""
+
     def _do():
         if delay_seconds > 0:
             time.sleep(delay_seconds)
@@ -75,9 +76,7 @@ def _enqueue_job_for_retry(job_id: str, domain: str, priority: int, retry_attemp
 
 def _trigger_dependents(job_id: str, domain: str, db):
     """Enqueue any jobs whose depends_on includes the just-completed job_id."""
-    dependents = list(db.job_definitions.find(
-        {"domain": domain, "depends_on": job_id, "schedule.enabled": True}
-    ))
+    dependents = list(db.job_definitions.find({"domain": domain, "depends_on": job_id, "schedule.enabled": True}))
     if not dependents:
         return
     r = get_redis()
@@ -238,12 +237,16 @@ def _handle_run_start(payload: Dict[str, Any]):
         if existing_status in TERMINAL_STATES:
             log.warning(
                 "Duplicate run_start for already-terminal run %s (status=%s, job=%s); ignoring",
-                run_id, existing_status, job_id,
+                run_id,
+                existing_status,
+                job_id,
             )
         else:
             log.warning(
                 "Duplicate run_start for run %s (current status=%s, job=%s); ignoring",
-                run_id, existing_status, job_id,
+                run_id,
+                existing_status,
+                job_id,
             )
         return
 
@@ -303,7 +306,10 @@ def _handle_run_end(payload: Dict[str, Any]):
             # Do not re-apply the update or re-trigger post-run actions.
             log.warning(
                 "Duplicate run_end for already-terminal run %s (status=%s → %s, job=%s); ignoring",
-                run_id, existing_status, status, job_id,
+                run_id,
+                existing_status,
+                status,
+                job_id,
             )
             return
 
@@ -316,7 +322,9 @@ def _handle_run_end(payload: Dict[str, Any]):
             # Race: another thread beat us to a terminal transition.
             log.warning(
                 "run_end for run %s lost race to terminal transition (job=%s, status=%s); ignoring",
-                run_id, job_id, status,
+                run_id,
+                job_id,
+                status,
             )
             return
     else:
@@ -324,7 +332,9 @@ def _handle_run_end(payload: Dict[str, Any]):
         # Create a minimal fallback document so the run is visible in history.
         log.warning(
             "run_end received before run_start for run %s (job=%s, status=%s); creating fallback doc",
-            run_id, job_id, status,
+            run_id,
+            job_id,
+            status,
         )
         fallback_doc = {
             "_id": run_id,
@@ -353,7 +363,8 @@ def _handle_run_end(payload: Dict[str, Any]):
             if (concurrent or {}).get("status") in TERMINAL_STATES:
                 log.warning(
                     "run_end fallback insert lost race for run %s (job=%s); skipping post-run actions",
-                    run_id, job_id,
+                    run_id,
+                    job_id,
                 )
                 return
             db.job_runs.update_one(
@@ -452,9 +463,9 @@ def _handle_artifact_emitted(payload: Dict[str, Any]):
     log.info("Upserted artifact '%s' in domain '%s' from run %s", artifact_name, domain, run_id)
 
     # Find jobs that should be triggered when this artifact is updated.
-    triggered_jobs = list(db.job_definitions.find(
-        {"domain": domain, "triggers_on_artifacts": artifact_name, "schedule.enabled": True}
-    ))
+    triggered_jobs = list(
+        db.job_definitions.find({"domain": domain, "triggers_on_artifacts": artifact_name, "schedule.enabled": True})
+    )
     if not triggered_jobs:
         return
 
@@ -478,7 +489,9 @@ def _handle_artifact_emitted(payload: Dict[str, Any]):
         r.expire(f"job_enqueue_meta:{domain}:{dep_id}", 24 * 3600)
         log.info(
             "Triggered job %s due to artifact '%s' update (upstream run %s)",
-            dep_id, artifact_name, run_id,
+            dep_id,
+            artifact_name,
+            run_id,
         )
 
 
@@ -512,7 +525,8 @@ def _recover_staging_events(r) -> int:
                 break
             log.info(
                 "Recovered staged run event for domain '%s' back to %s",
-                domain, src_key,
+                domain,
+                src_key,
             )
             recovered += 1
     if recovered:
@@ -544,9 +558,7 @@ def run_event_loop(stop_event: threading.Event):
                 try:
                     payload = json.loads(raw)
                 except Exception:
-                    log.warning(
-                        "Skipping malformed run event payload from %s", src_key
-                    )
+                    log.warning("Skipping malformed run event payload from %s", src_key)
                     r.lrem(staging_key, 1, raw)
                     dispatched = True
                     continue

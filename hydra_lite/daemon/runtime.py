@@ -9,7 +9,9 @@ import threading
 from pathlib import Path
 
 from ..config import Config
+from ..lifecycle import Lifecycle
 from ..logs import LogStore
+from ..loops import maintenance_loop
 from ..scheduling import trigger_loop
 from ..store import Store
 from ..worker.inproc import WorkerPool
@@ -37,17 +39,34 @@ class Daemon:
         self.token = ensure_token(config.token_file)
         self.store = Store(config.db_path)
         self.logs = LogStore(config.log_dir)
-        self.pool = WorkerPool(self.store, self.logs, max_concurrency=config.max_concurrency)
         self.stop = threading.Event()
+        self.lifecycle = Lifecycle(self.store, self.logs)
+        self.pool = WorkerPool(self.store, self.logs, self.lifecycle, max_concurrency=config.max_concurrency)
         self._threads: list[threading.Thread] = []
 
     def start(self) -> None:
-        lost = self.store.recover_orphans()
+        lost = self.lifecycle.recover_orphans()
         if lost:
-            log.warning("marked %d run(s) lost after unclean shutdown", len(lost))
+            log.warning("marked %d run(s) lost after unclean shutdown", lost)
         t = threading.Thread(target=trigger_loop, args=(self.store, self.stop, self.pool.wake), name="hydra-trigger", daemon=True)
         t.start()
         self._threads.append(t)
+        m = threading.Thread(
+            target=maintenance_loop,
+            args=(
+                self.store,
+                self.lifecycle,
+                self.pool,
+                self.logs,
+                self.stop,
+                self.config.retention_days,
+                self.config.retention_check_seconds,
+            ),
+            name="hydra-maintenance",
+            daemon=True,
+        )
+        m.start()
+        self._threads.append(m)
         self.pool.start()
 
     def shutdown(self) -> None:

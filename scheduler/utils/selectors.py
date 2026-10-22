@@ -4,6 +4,7 @@ from typing import Dict, List, Optional
 def select_best_worker(candidates: List[Dict]) -> Optional[Dict]:
     if not candidates:
         return None
+
     # Select by lowest load (current_running / max_concurrency) then by absolute current_running
     def load_key(w: Dict):
         try:
@@ -17,4 +18,3 @@ def select_best_worker(candidates: List[Dict]) -> Optional[Dict]:
         return (cur / max_c, cur)
 
     return sorted(candidates, key=load_key)[0]
-

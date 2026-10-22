@@ -19,6 +19,7 @@ from .orchestrator import OrchestratorManager, create_standard_orchestrator
 from .startup import ensure_admin_token, ensure_domains_seeded, ensure_indexes, warn_credential_encryption_key
 from .utils.auth import enforce_api_key
 from .utils.logging import setup_logging
+from .utils.modes import MODE_API, MODE_COMBINED
 
 log = setup_logging("scheduler.main")
 
@@ -32,7 +33,7 @@ log = setup_logging("scheduler.main")
 #   api       — API only.  No orchestration loops are started.  Run
 #               ``python -m scheduler.orchestrator_entrypoint`` separately.
 #
-HYDRA_MODE = os.getenv("HYDRA_MODE", "combined")
+HYDRA_MODE = os.getenv("HYDRA_MODE", MODE_COMBINED)
 
 # Module-level orchestrator instance — set during startup when running in combined mode.
 _orchestrator: OrchestratorManager | None = None
@@ -44,7 +45,7 @@ def on_startup():
     warn_credential_encryption_key()
     ensure_indexes()
     ensure_domains_seeded()
-    if HYDRA_MODE == "api":
+    if HYDRA_MODE == MODE_API:
         log.info(
             "HYDRA_MODE=api: API service started without orchestration loops. "
             "Run 'python -m scheduler.orchestrator_entrypoint' for the control-plane."
