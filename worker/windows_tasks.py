@@ -87,10 +87,14 @@ def build_schtasks_create_command(
         "schtasks",
         "/Create",
         "/F",  # Force overwrite if task already exists (idempotent)
-        "/TN", task_name,
-        "/TR", quoted_cmd,
-        "/SC", schedule_type,
-        "/RL", "HIGHEST",
+        "/TN",
+        task_name,
+        "/TR",
+        quoted_cmd,
+        "/SC",
+        schedule_type,
+        "/RL",
+        "HIGHEST",
     ]
 
     if schedule_type == "MINUTE":
@@ -223,17 +227,12 @@ def install_task(
         trigger_expr = "New-ScheduledTaskTrigger -AtStartup"
     elif schedule_type == "MINUTE":
         trigger_expr = (
-            f"New-ScheduledTaskTrigger -RepetitionInterval (New-TimeSpan -Minutes {interval_minutes}) "
-            "-Once -At '00:00'"
+            f"New-ScheduledTaskTrigger -RepetitionInterval (New-TimeSpan -Minutes {interval_minutes}) -Once -At '00:00'"
         )
     else:
         raise ValueError(f"Unsupported schedule_type {schedule_type!r}; expected 'ONSTART' or 'MINUTE'.")
 
-    wd_line = (
-        f"-WorkingDirectory '{_ps_escape(working_dir)}' "
-        if working_dir
-        else ""
-    )
+    wd_line = f"-WorkingDirectory '{_ps_escape(working_dir)}' " if working_dir else ""
     run_level = "Highest"
     user_id = "SYSTEM" if run_as_system else "$env:USERNAME"
     user_line = (

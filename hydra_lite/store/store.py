@@ -15,7 +15,7 @@ import uuid
 from datetime import datetime, timezone
 from importlib import resources
 from pathlib import Path
-from typing import Any, Iterator, Optional
+from typing import Any, Callable, Iterator, Optional
 
 from scheduler.models.job_run import TERMINAL_STATES
 
@@ -233,8 +233,13 @@ class Store:
         return [self._job_row(r) for r in rows]
 
     # ------------------------------------------------------------------- runs
+    @classmethod
+    def _run_row_from(cls, row: sqlite3.Row) -> dict:
+        row = {k: row[k] for k in row.keys() if not k.startswith("_")}
+        return cls._run_row(row)
+
     @staticmethod
-    def _run_row(row: sqlite3.Row) -> dict:
+    def _run_row(row: sqlite3.Row | dict) -> dict:
         run = dict(row)
         run["params"] = json.loads(run["params"] or "{}")
         run["sla_miss_alerted"] = bool(run["sla_miss_alerted"])
@@ -277,24 +282,70 @@ class Store:
             self._event(c, run_id, "queued", {"trigger": trigger, "retry_attempt": retry_attempt})
         return self.get_run(run_id)
 
-    def claim_run(self, worker_id: str, now: Optional[datetime] = None) -> Optional[dict]:
-        """Atomically hand the best eligible pending run to ``worker_id`` (or None)."""
+    def claim_run(
+        self,
+        worker_id: str,
+        now: Optional[datetime] = None,
+        accept: Optional[Callable[[dict, Optional[dict]], bool]] = None,
+        scan: int = 50,
+    ) -> Optional[dict]:
+        """Atomically hand the best eligible pending run to ``worker_id`` (or None).
+
+        ``accept(run, job)`` lets the caller veto runs this worker may not take (affinity, capabilities);
+        the best ``scan`` candidates are examined in priority order and the first accepted one is claimed.
+        ``job`` is None when the run's job was deleted (the caller decides how to fail it).
+        """
         now = now or now_utc()
         ts = iso(now)
         with self._tx() as c:
-            row = c.execute(
-                "UPDATE runs SET status='dispatched', worker_id=?, queue_latency_ms="
-                " CAST((julianday(?) - julianday(queued_at)) * 86400000 AS INTEGER)"
-                " WHERE id=(SELECT id FROM runs WHERE status='pending' AND (not_before IS NULL OR not_before<=?)"
-                " AND NOT (exclusive=1 AND EXISTS (SELECT 1 FROM runs r2 WHERE r2.job_id=runs.job_id"
+            rows = c.execute(
+                "SELECT r.*, j.definition AS _definition, j.name AS _job_name FROM runs r LEFT JOIN jobs j ON j.id=r.job_id"
+                " WHERE r.status='pending' AND (r.not_before IS NULL OR r.not_before<=?)"
+                " AND NOT (r.exclusive=1 AND EXISTS (SELECT 1 FROM runs r2 WHERE r2.job_id=r.job_id"
                 " AND r2.status IN ('dispatched','running')))"
-                " ORDER BY priority DESC, queued_at, rowid LIMIT 1) RETURNING *",
-                (worker_id, ts, ts),
-            ).fetchone()
-            if not row:
-                return None
-            self._event(c, row["id"], "dispatched", {"worker_id": worker_id})
-        return self._run_row(row)
+                " ORDER BY r.priority DESC, r.queued_at, r.rowid LIMIT ?",
+                (ts, scan if accept else 1),
+            ).fetchall()
+            for cand in rows:
+                if accept is not None:
+                    job = None
+                    if cand["_definition"] is not None:
+                        job = json.loads(cand["_definition"])
+                        job.update({"_id": cand["job_id"], "name": cand["_job_name"]})
+                    if not accept(self._run_row_from(cand), job):
+                        continue
+                row = c.execute(
+                    "UPDATE runs SET status='dispatched', worker_id=?, dispatched_at=?, queue_latency_ms="
+                    " CAST((julianday(?) - julianday(queued_at)) * 86400000 AS INTEGER)"
+                    " WHERE id=? AND status='pending' RETURNING *",
+                    (worker_id, ts, ts, cand["id"]),
+                ).fetchone()
+                if row:
+                    self._event(c, row["id"], "dispatched", {"worker_id": worker_id})
+                    return self._run_row(row)
+        return None
+
+    def has_pending(self, now: Optional[datetime] = None) -> bool:
+        """Cheap read-only check so idle workers polling for work never take the write lock."""
+        with self._lock:
+            return (
+                self._conn.execute(
+                    "SELECT 1 FROM runs WHERE status='pending' AND (not_before IS NULL OR not_before<=?) LIMIT 1",
+                    (iso(now or now_utc()),),
+                ).fetchone()
+                is not None
+            )
+
+    def requeue_run(self, run_id: str, reason: str) -> bool:
+        """Put a dispatched (never started) run back to pending, e.g. when its worker vanished."""
+        with self._tx() as c:
+            n = c.execute(
+                "UPDATE runs SET status='pending', worker_id=NULL, dispatched_at=NULL WHERE id=? AND status='dispatched'",
+                (run_id,),
+            ).rowcount
+            if n:
+                self._event(c, run_id, "requeued", {"reason": reason})
+            return bool(n)
 
     def start_run(self, run_id: str, log_path: Optional[str] = None) -> None:
         ts = iso(now_utc())
@@ -315,6 +366,7 @@ class Store:
         completion_reason: Optional[str] = None,
         attempt: Optional[int] = None,
         event_type: Optional[str] = None,
+        timings: Optional[dict] = None,
     ) -> tuple[dict, bool]:
         """Move a run to a terminal ``status``. Returns ``(run, changed)``.
 
@@ -336,8 +388,19 @@ class Store:
                 total = int((end - datetime.fromisoformat(row["start_ts"])).total_seconds() * 1000)
             c.execute(
                 "UPDATE runs SET status=?, returncode=?, completion_reason=?, end_ts=?, total_run_ms=?,"
-                " attempt=COALESCE(?, attempt) WHERE id=?",
-                (status, returncode, completion_reason, iso(end), total, attempt, run_id),
+                " attempt=COALESCE(?, attempt), source_fetch_ms=COALESCE(?, source_fetch_ms),"
+                " env_prep_ms=COALESCE(?, env_prep_ms) WHERE id=?",
+                (
+                    status,
+                    returncode,
+                    completion_reason,
+                    iso(end),
+                    total,
+                    attempt,
+                    (timings or {}).get("source_fetch_ms"),
+                    (timings or {}).get("env_prep_ms"),
+                    run_id,
+                ),
             )
             self._event(
                 c, run_id, event_type or status, {"status": status, "returncode": returncode, "reason": completion_reason}
@@ -477,17 +540,51 @@ class Store:
         max_concurrency: int = 1,
         tags: Optional[list] = None,
         capabilities: Optional[list] = None,
+        meta: Optional[dict] = None,
     ) -> None:
         ts = iso(now_utc())
         with self._tx() as c:
             c.execute(
-                "INSERT INTO workers (id, pid, started_at, last_heartbeat, state, max_concurrency, tags, capabilities)"
-                " VALUES (?,?,?,?, 'online', ?,?,?)"
+                "INSERT INTO workers (id, pid, started_at, last_heartbeat, state, max_concurrency, tags, capabilities, meta)"
+                " VALUES (?,?,?,?, 'online', ?,?,?,?)"
                 " ON CONFLICT(id) DO UPDATE SET pid=excluded.pid, started_at=excluded.started_at,"
                 " last_heartbeat=excluded.last_heartbeat, max_concurrency=excluded.max_concurrency,"
-                " tags=excluded.tags, capabilities=excluded.capabilities",
-                (worker_id, pid, ts, ts, max_concurrency, _dumps(tags or []), _dumps(capabilities or [])),
+                " tags=excluded.tags, capabilities=excluded.capabilities, meta=excluded.meta,"
+                " state=CASE WHEN workers.state='offline' THEN 'online' ELSE workers.state END",
+                (worker_id, pid, ts, ts, max_concurrency, _dumps(tags or []), _dumps(capabilities or []), _dumps(meta or {})),
             )
+
+    def get_worker(self, worker_id: str) -> dict:
+        with self._lock:
+            row = self._conn.execute("SELECT * FROM workers WHERE id=?", (worker_id,)).fetchone()
+        if not row:
+            raise NotFound(worker_id)
+        return self._worker_row(row)
+
+    @staticmethod
+    def _worker_row(row: sqlite3.Row) -> dict:
+        w = dict(row)
+        w["tags"] = json.loads(w["tags"])
+        w["capabilities"] = json.loads(w["capabilities"])
+        w["meta"] = json.loads(w["meta"] or "{}")
+        return w
+
+    def stale_workers(self, cutoff: datetime) -> list[dict]:
+        """Workers whose last heartbeat is older than ``cutoff`` (regardless of operator-set state)."""
+        with self._lock:
+            rows = self._conn.execute("SELECT * FROM workers WHERE last_heartbeat<?", (iso(cutoff),)).fetchall()
+        return [self._worker_row(r) for r in rows]
+
+    def delete_worker(self, worker_id: str) -> None:
+        with self._tx() as c:
+            c.execute("DELETE FROM workers WHERE id=?", (worker_id,))
+
+    def worker_runs(self, worker_id: str, statuses: tuple[str, ...] = ("dispatched", "running")) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT * FROM runs WHERE worker_id=? AND status IN ({','.join('?' * len(statuses))})", (worker_id, *statuses)
+            ).fetchall()
+        return [self._run_row(r) for r in rows]
 
     def heartbeat(self, worker_id: str) -> None:
         with self._tx() as c:
@@ -502,10 +599,4 @@ class Store:
     def list_workers(self) -> list[dict]:
         with self._lock:
             rows = self._conn.execute("SELECT * FROM workers ORDER BY id").fetchall()
-        out = []
-        for r in rows:
-            w = dict(r)
-            w["tags"] = json.loads(w["tags"])
-            w["capabilities"] = json.loads(w["capabilities"])
-            out.append(w)
-        return out
+        return [self._worker_row(r) for r in rows]

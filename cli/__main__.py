@@ -106,6 +106,12 @@ def build_parser() -> argparse.ArgumentParser:
     state = worker_commands.add_parser("state", parents=[output_parent], help="Set dispatch state")
     state.add_argument("worker_id")
     state.add_argument("state", choices=("online", "draining", "offline"))
+    spawn = worker_commands.add_parser("spawn", parents=[output_parent], help="Start worker processes (lite edition)")
+    spawn.add_argument("--count", type=int, default=1)
+    spawn.add_argument("--tag", action="append", default=[], help="Worker tag (repeatable)")
+    spawn.add_argument("--max-concurrency", type=int)
+    stop = worker_commands.add_parser("stop", parents=[output_parent], help="Drain and stop a supervised worker (lite edition)")
+    stop.add_argument("worker_id")
     detach = worker_commands.add_parser("detach", parents=[output_parent], help="Detach a worker")
     detach.add_argument("worker_id")
     drain = worker_commands.add_parser(
@@ -207,6 +213,15 @@ def main(argv: list[str] | None = None, client_factory: type[HydraClient] = Hydr
                 if args.worker_command == "drain" and args.wait:
                     result["worker"] = _wait_for_worker_drain(client, args.worker_id, args.wait_timeout)
                 _show(result, args.output)
+            elif args.worker_command == "spawn":
+                body: dict[str, Any] = {"count": args.count}
+                if args.tag:
+                    body["tags"] = args.tag
+                if args.max_concurrency:
+                    body["max_concurrency"] = args.max_concurrency
+                _show(client.request("POST", "/workers/spawn", body=body), args.output)
+            elif args.worker_command == "stop":
+                _show(client.request("POST", f"/workers/{_quote(args.worker_id)}/stop"), args.output)
             else:
                 _show(client.request("POST", f"/workers/{_quote(args.worker_id)}/detach"), args.output)
         elif args.command == "overview":

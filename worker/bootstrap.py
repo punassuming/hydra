@@ -49,6 +49,7 @@ _IS_WINDOWS = platform.system().lower().startswith("win")
 # .env file loader (no external dependencies)
 # ---------------------------------------------------------------------------
 
+
 def _load_env_file(path: Optional[str] = None) -> None:
     """Load key=value pairs from a .env file into os.environ.
 
@@ -80,9 +81,11 @@ def _load_env_file(path: Optional[str] = None) -> None:
     except Exception as exc:  # noqa: BLE001
         logger.debug("Could not load env file %r: %s", candidate, exc)
 
+
 # ---------------------------------------------------------------------------
 # Configuration model
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class BootstrapConfig:
@@ -96,36 +99,30 @@ class BootstrapConfig:
     # Task Scheduler settings
     # ------------------------------------------------------------------
 
-    task_name: str = field(default_factory=lambda: os.environ.get(
-        "HYDRA_BOOTSTRAP_TASK_NAME", "\\Hydra\\WorkerBootstrap"
-    ))
+    task_name: str = field(default_factory=lambda: os.environ.get("HYDRA_BOOTSTRAP_TASK_NAME", "\\Hydra\\WorkerBootstrap"))
     """Name of the Windows Task Scheduler task.
 
     Override with ``HYDRA_BOOTSTRAP_TASK_NAME``.
     Default: ``\\Hydra\\WorkerBootstrap``
     """
 
-    schedule_type: str = field(default_factory=lambda: os.environ.get(
-        "HYDRA_BOOTSTRAP_SCHEDULE_TYPE", "ONSTART"
-    ))
+    schedule_type: str = field(default_factory=lambda: os.environ.get("HYDRA_BOOTSTRAP_SCHEDULE_TYPE", "ONSTART"))
     """Task Scheduler trigger type: ``ONSTART`` (system start-up) or ``MINUTE``.
 
     Override with ``HYDRA_BOOTSTRAP_SCHEDULE_TYPE``.
     Default: ``ONSTART``
     """
 
-    interval_minutes: int = field(default_factory=lambda: int(
-        os.environ.get("HYDRA_BOOTSTRAP_INTERVAL_MINUTES", "5")
-    ))
+    interval_minutes: int = field(default_factory=lambda: int(os.environ.get("HYDRA_BOOTSTRAP_INTERVAL_MINUTES", "5")))
     """Repetition interval in minutes when *schedule_type* is ``MINUTE``.
 
     Override with ``HYDRA_BOOTSTRAP_INTERVAL_MINUTES``.
     Default: ``5``
     """
 
-    run_as_system: bool = field(default_factory=lambda: (
-        os.environ.get("HYDRA_BOOTSTRAP_RUN_AS_SYSTEM", "false").lower() in ("1", "true", "yes")
-    ))
+    run_as_system: bool = field(
+        default_factory=lambda: os.environ.get("HYDRA_BOOTSTRAP_RUN_AS_SYSTEM", "false").lower() in ("1", "true", "yes")
+    )
     """Run the scheduled task as the SYSTEM account.
 
     Override with ``HYDRA_BOOTSTRAP_RUN_AS_SYSTEM`` (``true``/``false``).
@@ -136,19 +133,19 @@ class BootstrapConfig:
     # Watchdog settings
     # ------------------------------------------------------------------
 
-    watchdog_interval_seconds: int = field(default_factory=lambda: int(
-        os.environ.get("HYDRA_BOOTSTRAP_WATCHDOG_INTERVAL", "30")
-    ))
+    watchdog_interval_seconds: int = field(default_factory=lambda: int(os.environ.get("HYDRA_BOOTSTRAP_WATCHDOG_INTERVAL", "30")))
     """Seconds between watchdog health checks.
 
     Override with ``HYDRA_BOOTSTRAP_WATCHDOG_INTERVAL``.
     Default: ``30``
     """
 
-    lock_file: str = field(default_factory=lambda: os.environ.get(
-        "HYDRA_BOOTSTRAP_LOCK_FILE",
-        str(Path(os.environ.get("TEMP", os.environ.get("TMP", "C:\\Windows\\Temp"))) / "hydra_bootstrap.lock")
-    ))
+    lock_file: str = field(
+        default_factory=lambda: os.environ.get(
+            "HYDRA_BOOTSTRAP_LOCK_FILE",
+            str(Path(os.environ.get("TEMP", os.environ.get("TMP", "C:\\Windows\\Temp"))) / "hydra_bootstrap.lock"),
+        )
+    )
     """Path to the PID lock file used to prevent duplicate watchdog processes.
 
     Override with ``HYDRA_BOOTSTRAP_LOCK_FILE``.
@@ -159,28 +156,23 @@ class BootstrapConfig:
     # Worker command settings
     # ------------------------------------------------------------------
 
-    worker_command: str = field(default_factory=lambda: os.environ.get(
-        "HYDRA_BOOTSTRAP_WORKER_COMMAND",
-        f"{sys.executable} -m worker"
-    ))
+    worker_command: str = field(
+        default_factory=lambda: os.environ.get("HYDRA_BOOTSTRAP_WORKER_COMMAND", f"{sys.executable} -m worker")
+    )
     """Command used to launch the Hydra worker process.
 
     Override with ``HYDRA_BOOTSTRAP_WORKER_COMMAND``.
     Default: ``<current python> -m worker``
     """
 
-    working_dir: Optional[str] = field(default_factory=lambda: os.environ.get(
-        "HYDRA_BOOTSTRAP_WORKING_DIR"
-    ))
+    working_dir: Optional[str] = field(default_factory=lambda: os.environ.get("HYDRA_BOOTSTRAP_WORKING_DIR"))
     """Working directory for the worker process.
 
     Override with ``HYDRA_BOOTSTRAP_WORKING_DIR``.
     Default: current working directory at install time.
     """
 
-    log_file: Optional[str] = field(default_factory=lambda: os.environ.get(
-        "HYDRA_BOOTSTRAP_LOG_FILE"
-    ))
+    log_file: Optional[str] = field(default_factory=lambda: os.environ.get("HYDRA_BOOTSTRAP_LOG_FILE"))
     """Path to a file where worker stdout/stderr will be redirected.
 
     Override with ``HYDRA_BOOTSTRAP_LOG_FILE``.
@@ -210,19 +202,16 @@ class BootstrapConfig:
         if not self.worker_command.strip():
             errors.append("HYDRA_BOOTSTRAP_WORKER_COMMAND is empty.")
         if self.watchdog_interval_seconds < 5:
-            errors.append(
-                f"HYDRA_BOOTSTRAP_WATCHDOG_INTERVAL={self.watchdog_interval_seconds} is too small (minimum 5s)."
-            )
+            errors.append(f"HYDRA_BOOTSTRAP_WATCHDOG_INTERVAL={self.watchdog_interval_seconds} is too small (minimum 5s).")
         if self.interval_minutes < 1:
-            errors.append(
-                f"HYDRA_BOOTSTRAP_INTERVAL_MINUTES={self.interval_minutes} must be >= 1."
-            )
+            errors.append(f"HYDRA_BOOTSTRAP_INTERVAL_MINUTES={self.interval_minutes} must be >= 1.")
         return errors
 
 
 # ---------------------------------------------------------------------------
 # Lock / PID helpers
 # ---------------------------------------------------------------------------
+
 
 def _read_lock_pid(lock_path: str) -> Optional[int]:
     """Return the PID recorded in *lock_path*, or ``None`` if unreadable."""
@@ -256,9 +245,7 @@ def _is_pid_alive(pid: int) -> bool:
             import ctypes
 
             process_query_limited_information = 0x1000
-            handle = ctypes.windll.kernel32.OpenProcess(
-                process_query_limited_information, False, pid
-            )
+            handle = ctypes.windll.kernel32.OpenProcess(process_query_limited_information, False, pid)
             if handle:
                 ctypes.windll.kernel32.CloseHandle(handle)
                 return True
@@ -283,9 +270,7 @@ def acquire_bootstrap_lock(lock_path: str) -> bool:
     existing_pid = _read_lock_pid(lock_path)
     if existing_pid is not None and existing_pid != os.getpid():
         if _is_pid_alive(existing_pid):
-            logger.info(
-                "Another bootstrap watchdog is already running (PID %d). Exiting.", existing_pid
-            )
+            logger.info("Another bootstrap watchdog is already running (PID %d). Exiting.", existing_pid)
             return False
         else:
             logger.info("Stale lock file found (PID %d no longer alive). Replacing.", existing_pid)
@@ -298,6 +283,7 @@ def acquire_bootstrap_lock(lock_path: str) -> bool:
 # ---------------------------------------------------------------------------
 # Worker process management
 # ---------------------------------------------------------------------------
+
 
 def _build_worker_env() -> dict:
     """Return an environment dict for the worker process.
@@ -446,6 +432,7 @@ def run_watchdog(config: BootstrapConfig) -> int:
 # Public action functions
 # ---------------------------------------------------------------------------
 
+
 def action_validate(config: BootstrapConfig) -> int:
     """Print validation results and return 0 if valid, 1 otherwise."""
     errors = config.validate()
@@ -476,10 +463,7 @@ def action_install(config: BootstrapConfig) -> int:
     Returns 0 on success, 1 on validation error.
     """
     if not _IS_WINDOWS:
-        raise RuntimeError(
-            "Task Scheduler installation is only supported on Windows. "
-            f"Current platform: {platform.system()!r}."
-        )
+        raise RuntimeError(f"Task Scheduler installation is only supported on Windows. Current platform: {platform.system()!r}.")
 
     errors = config.validate()
     if errors:
@@ -502,11 +486,7 @@ def action_install(config: BootstrapConfig) -> int:
         schedule_type=config.schedule_type,
         interval_minutes=config.interval_minutes,
         run_as_system=config.run_as_system,
-        description=(
-            "Hydra worker bootstrap/watchdog. "
-            f"Domain: {config.domain}. "
-            "Managed by Hydra — do not edit manually."
-        ),
+        description=(f"Hydra worker bootstrap/watchdog. Domain: {config.domain}. Managed by Hydra — do not edit manually."),
     )
 
     print(f"Task {config.task_name!r} installed successfully.")
@@ -523,10 +503,7 @@ def action_remove(config: BootstrapConfig) -> int:
     Returns 0 on success.
     """
     if not _IS_WINDOWS:
-        raise RuntimeError(
-            "Task Scheduler removal is only supported on Windows. "
-            f"Current platform: {platform.system()!r}."
-        )
+        raise RuntimeError(f"Task Scheduler removal is only supported on Windows. Current platform: {platform.system()!r}.")
 
     from .windows_tasks import remove_task
 
@@ -562,6 +539,7 @@ def action_run(config: BootstrapConfig) -> int:
 # ---------------------------------------------------------------------------
 # CLI entry point
 # ---------------------------------------------------------------------------
+
 
 def main(argv: list[str] | None = None) -> int:
     """CLI dispatcher for ``python -m worker bootstrap <subcommand>``.

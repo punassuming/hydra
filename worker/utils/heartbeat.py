@@ -96,18 +96,19 @@ def _collect_process_metrics_windows() -> dict:
     # --- RSS memory via GetProcessMemoryInfo ---
     memory_rss_mb = 0.0
     try:
+
         class _PROCESS_MEMORY_COUNTERS(ctypes.Structure):
             _fields_ = [
-                ("cb",                          ctypes.wintypes.DWORD),
-                ("PageFaultCount",              ctypes.wintypes.DWORD),
-                ("PeakWorkingSetSize",          ctypes.c_size_t),
-                ("WorkingSetSize",              ctypes.c_size_t),
-                ("QuotaPeakPagedPoolUsage",     ctypes.c_size_t),
-                ("QuotaPagedPoolUsage",         ctypes.c_size_t),
-                ("QuotaPeakNonPagedPoolUsage",  ctypes.c_size_t),
-                ("QuotaNonPagedPoolUsage",      ctypes.c_size_t),
-                ("PagefileUsage",               ctypes.c_size_t),
-                ("PeakPagefileUsage",           ctypes.c_size_t),
+                ("cb", ctypes.wintypes.DWORD),
+                ("PageFaultCount", ctypes.wintypes.DWORD),
+                ("PeakWorkingSetSize", ctypes.c_size_t),
+                ("WorkingSetSize", ctypes.c_size_t),
+                ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                ("PagefileUsage", ctypes.c_size_t),
+                ("PeakPagefileUsage", ctypes.c_size_t),
             ]
 
         pmc = _PROCESS_MEMORY_COUNTERS()
@@ -124,7 +125,9 @@ def _collect_process_metrics_windows() -> dict:
         pid = os.getpid()
         result = subprocess.run(
             ["wmic", "process", "where", f"ParentProcessId={pid}", "get", "ProcessId"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         # Output: header "ProcessId\n" + one line per child PID + trailing blank line
         child_pids = [line.strip() for line in result.stdout.splitlines() if line.strip().isdigit()]

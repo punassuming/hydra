@@ -31,6 +31,7 @@ CREATE TABLE runs (
     scheduled_ts     TEXT,
     queued_at        TEXT NOT NULL,
     not_before       TEXT,
+    dispatched_at    TEXT,
     start_ts         TEXT,
     end_ts           TEXT,
     returncode       INTEGER,
@@ -41,6 +42,8 @@ CREATE TABLE runs (
     log_path         TEXT,
     queue_latency_ms INTEGER,
     total_run_ms     INTEGER,
+    source_fetch_ms  REAL,
+    env_prep_ms      REAL,
     sla_miss_alerted INTEGER NOT NULL DEFAULT 0,
     exclusive        INTEGER NOT NULL DEFAULT 0       -- overlap_policy=queue: wait for the job's other runs to end
 );
@@ -74,5 +77,6 @@ CREATE TABLE workers (
     state          TEXT NOT NULL DEFAULT 'online',
     max_concurrency INTEGER NOT NULL DEFAULT 1,
     tags           TEXT NOT NULL DEFAULT '[]',
-    capabilities   TEXT NOT NULL DEFAULT '[]'
+    capabilities   TEXT NOT NULL DEFAULT '[]',
+    meta           TEXT NOT NULL DEFAULT '{}'   -- registration metadata, same keys as the full edition's worker hash
 );

@@ -35,7 +35,7 @@ def _resolve_python_binary(version: Optional[str], default: str) -> str:
 
 
 def prepare_python_command(executor: Dict, job_id: str) -> Tuple[List[str], Optional[Callable[[], None]]]:
-    env_cfg = (executor.get("environment") or {})
+    env_cfg = executor.get("environment") or {}
     env_type = env_cfg.get("type", "system")
     python_version = env_cfg.get("python_version")
     # Resolve interpreter: explicit executor setting > HYDRA_PYTHON_PATH > default
@@ -79,7 +79,7 @@ def prepare_python_command(executor: Dict, job_id: str) -> Tuple[List[str], Opti
             shutil.rmtree(tmp_dir, ignore_errors=True)
 
         cleanup = _cleanup
-    
+
     if requirements or requirements_file:
         _install_requirements(python_bin, requirements, requirements_file)
     return [python_bin], cleanup

@@ -147,3 +147,11 @@ def test_lite_daemon_stop_endpoint_needs_runner(live_server, capsys):
     # the fixture's server was not started via hydra's runner, so shutdown reports why
     assert main(["--api-url", url, "--token", token, "lite", "daemon", "stop"]) == 1
     assert "stop it from its supervisor" in capsys.readouterr().err
+
+
+def test_worker_spawn_and_stop_are_lite_only(live_server, capsys):
+    url, token = live_server
+    # the compat fixtures use in-process workers, so there is no supervisor to spawn into
+    assert main(["--api-url", url, "--token", token, "worker", "spawn"]) == 1
+    assert "managed in-process" in capsys.readouterr().err
+    assert main(["--api-url", url, "--token", token, "worker", "stop", "nope"]) == 4

@@ -13,9 +13,7 @@ _PROCESS_START_TS: float = time.time()
 
 # Identifies the Redis registration/heartbeat/dispatch protocol both worker
 # flavors (Python and Go) speak, so a human can see version skew at a glance
-# on the workers list — not a dispatch-time gate.
-WORKER_PROTOCOL_VERSION = "1.0"
-
+# on the workers list — not a dispatch-time gate. Defined in worker/protocol.py.
 from .config import (
     get_allowed_users,
     get_domain,
@@ -26,6 +24,7 @@ from .config import (
     get_worker_id,
 )
 from .executor import execute_job
+from .protocol import WORKER_PROTOCOL_VERSION  # noqa: E402
 from .redis_client import get_redis
 from .utils.completion import evaluate_completion, evaluate_file_criteria
 from .utils.concurrency import add_active_job, incr_running, remove_active_job
@@ -61,6 +60,7 @@ def register_worker(worker_id: str, max_concurrency: int):
         ip_addr = ""
     subnet = ".".join(ip_addr.split(".")[:3]) if ip_addr else ""
     import pathlib
+
     _in_docker = pathlib.Path("/.dockerenv").exists()
     _default_deployment_type = "docker" if _in_docker else "standalone"
     deployment_type = os.getenv("DEPLOYMENT_TYPE", _default_deployment_type)
@@ -291,20 +291,22 @@ def worker_main():
             def handle_stdout(text: str):
                 stripped = text.strip()
                 if stripped.startswith(_ARTIFACT_PREFIX):
-                    raw_json = stripped[len(_ARTIFACT_PREFIX):].strip()
+                    raw_json = stripped[len(_ARTIFACT_PREFIX) :].strip()
                     try:
                         artifact_payload = json.loads(raw_json)
                         artifact_name = str(artifact_payload.get("name") or "").strip()
                         metadata = artifact_payload.get("metadata") or {}
                         if artifact_name:
-                            publish_run_event({
-                                "type": "artifact_emitted",
-                                "run_id": run_id,
-                                "job_id": job_id,
-                                "domain": domain,
-                                "artifact_name": artifact_name,
-                                "metadata": metadata,
-                            })
+                            publish_run_event(
+                                {
+                                    "type": "artifact_emitted",
+                                    "run_id": run_id,
+                                    "job_id": job_id,
+                                    "domain": domain,
+                                    "artifact_name": artifact_name,
+                                    "metadata": metadata,
+                                }
+                            )
                     except Exception:
                         stream_log("stdout", text)
                     return

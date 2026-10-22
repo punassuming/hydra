@@ -35,8 +35,9 @@ class Lifecycle:
         reason: Optional[str] = None,
         attempt: Optional[int] = None,
         event_type: Optional[str] = None,
+        timings: Optional[dict] = None,
     ) -> dict:
-        run, changed = self.store.finish_run(run_id, status, returncode, reason, attempt, event_type)
+        run, changed = self.store.finish_run(run_id, status, returncode, reason, attempt, event_type, timings)
         if changed:
             try:
                 self._follow_up(run)

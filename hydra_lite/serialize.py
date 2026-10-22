@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import getpass
-import os
-import platform
-import socket
 from datetime import datetime, timezone
 from typing import Any, Optional
+
+from worker.protocol import WORKER_PROTOCOL_VERSION
 
 from .logs import LogStore
 
@@ -61,29 +59,10 @@ def run_to_api(run: dict[str, Any], job: Optional[dict], logs: Optional[LogStore
     return out
 
 
-def _host_info() -> dict[str, Any]:
-    try:
-        ip = socket.gethostbyname(socket.gethostname())
-    except OSError:
-        ip = "127.0.0.1"
-    try:
-        user = getpass.getuser()
-    except Exception:
-        user = None
-    return {
-        "os": platform.system().lower(),
-        "hostname": socket.gethostname(),
-        "ip": ip,
-        "cpu_count": os.cpu_count(),
-        "python_version": platform.python_version(),
-        "cwd": os.getcwd(),
-        "run_user": user,
-        "deployment_type": "standalone",
-        "shells": [],
-    }
-
-
-_HOST = _host_info()
+def _csv(value: Any) -> list[str]:
+    if isinstance(value, str):
+        return [v.strip() for v in value.split(",") if v.strip()]
+    return [str(v) for v in (value or [])]
 
 
 def worker_to_api(
@@ -97,8 +76,18 @@ def worker_to_api(
     online = age <= heartbeat_ttl
     state = worker["state"]
     running_jobs = running_jobs or []
+    meta = worker.get("meta") or {}
     return {
-        **_HOST,
+        "os": meta.get("os", ""),
+        "hostname": meta.get("hostname"),
+        "ip": meta.get("ip"),
+        "subnet": meta.get("subnet"),
+        "cpu_count": meta.get("cpu_count"),
+        "python_version": meta.get("python_version"),
+        "cwd": meta.get("cwd"),
+        "run_user": meta.get("run_user"),
+        "deployment_type": meta.get("deployment_type"),
+        "shells": _csv(meta.get("shells")),
         "_id": worker["id"],
         "worker_id": worker["id"],
         "domain": "prod",
@@ -112,12 +101,11 @@ def worker_to_api(
         "running_users": running_users or [],
         "max_concurrency": worker["max_concurrency"],
         "tags": worker["tags"],
-        "allowed_users": [],
+        "allowed_users": _csv(meta.get("allowed_users")),
         "capabilities": worker["capabilities"],
         "last_heartbeat": beat.timestamp(),
         "heartbeat_age_seconds": round(age, 3),
         "started_at": worker["started_at"],
-        "subnet": None,
         "process_count": None,
         "memory_rss_mb": None,
         "load_1m": None,
@@ -126,6 +114,6 @@ def worker_to_api(
         "memory_rss_mb_max_30m": None,
         "load_1m_max_30m": None,
         "metrics_updated_at": None,
-        "worker_protocol_version": None,
-        "protocol_mismatch": False,
+        "worker_protocol_version": meta.get("worker_protocol_version"),
+        "protocol_mismatch": meta.get("worker_protocol_version") != WORKER_PROTOCOL_VERSION,
     }

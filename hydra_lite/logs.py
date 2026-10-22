@@ -13,6 +13,7 @@ class LogStore:
     def __init__(self, root: Path):
         self.root = Path(root)
         self._lock = threading.Lock()
+        self._open: dict[str, RunLog] = {}
 
     def base(self, run_id: str, month: str) -> Path:
         return self.root / month[:4] / month[5:7] / run_id
@@ -29,6 +30,20 @@ class LogStore:
         base = self.base(run_id, month)
         base.parent.mkdir(parents=True, exist_ok=True)
         return RunLog(base)
+
+    def writer(self, run_id: str, month: str) -> "RunLog":
+        """A cached append handle for ``run_id`` (used when chunks arrive over HTTP); see ``close_run``."""
+        with self._lock:
+            handle = self._open.get(run_id)
+            if handle is None:
+                handle = self._open[run_id] = self.open_writer(run_id, month)
+            return handle
+
+    def close_run(self, run_id: str) -> None:
+        with self._lock:
+            handle = self._open.pop(run_id, None)
+        if handle:
+            handle.close()
 
     def read(self, run_id: str, stream: str, offset: int = 0, limit: int = MAX_READ_BYTES) -> tuple[str, int]:
         """Return (text, next_offset). Offsets are byte offsets into the file."""

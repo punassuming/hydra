@@ -10,23 +10,31 @@ from typing import Any, Dict, Optional
 
 from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from scheduler.models.run_params import RunJobRequest
+from scheduler.models.worker_info import WORKER_STATES
 
 from .. import __version__
 from ..jobs import JobValidationError, build_job, merge_update, to_api, validate_payload, with_schedule_enabled
 from ..serialize import run_to_api, worker_to_api
 from ..store import DuplicateJobName, NotFound
 from ..store.store import TERMINAL_STATUSES
+from .internal import register_internal
 from .runtime import Daemon
 
 UNSUPPORTED_PREFIXES = ("/admin", "/domain", "/credentials", "/ai", "/investigations", "/events")
 OPEN_PATHS = {"/health"}
 
 
+class SpawnBody(BaseModel):
+    count: int = 1
+    tags: Optional[list[str]] = None
+    max_concurrency: Optional[int] = None
+
+
 def create_app(daemon: Daemon, manage_lifecycle: bool = True) -> FastAPI:
-    store, logs, pool, lifecycle = daemon.store, daemon.logs, daemon.pool, daemon.lifecycle
+    store, logs, lifecycle, router = daemon.store, daemon.logs, daemon.lifecycle, daemon.router
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -74,7 +82,7 @@ def create_app(daemon: Daemon, manage_lifecycle: bool = True) -> FastAPI:
 
     def queue_run(job: dict, trigger: str, params: Optional[dict] = None) -> dict:
         run = store.enqueue_run(job["_id"], trigger=trigger, params=params, priority=int(job.get("priority", 5)))
-        pool.wake.set()
+        lifecycle.wake.set()
         return run
 
     def build_or_422(payload: dict) -> dict:
@@ -258,7 +266,7 @@ def create_app(daemon: Daemon, manage_lifecycle: bool = True) -> FastAPI:
             raise HTTPException(404, "run not found or not currently running")
         if run["status"] == "pending":
             lifecycle.finalize(run_id, "failed", reason="killed while pending", event_type="killed")
-        elif not pool.kill(run_id):
+        elif not router.kill(run_id):
             raise HTTPException(404, "run not found or not currently running")
         return {"run_id": run_id, "signal": "kill_sent"}
 
@@ -286,21 +294,51 @@ def create_app(daemon: Daemon, manage_lifecycle: bool = True) -> FastAPI:
     # ---------------------------------------------------------------- workers
     @app.get("/workers/")
     def list_workers():
-        jobs, users = pool.active()
-        return [worker_to_api(w, jobs, users) if w["id"] == pool.worker_id else worker_to_api(w) for w in store.list_workers()]
+        job_users: dict[str, str] = {}
+        out = []
+        for w in store.list_workers():
+            runs = store.worker_runs(w["id"])
+            for run in runs:
+                if run["job_id"] not in job_users:
+                    job = job_for(run)
+                    job_users[run["job_id"]] = (job or {}).get("user", "default")
+            out.append(
+                worker_to_api(
+                    w,
+                    sorted({r["job_id"] for r in runs}),
+                    sorted({job_users[r["job_id"]] for r in runs}),
+                    heartbeat_ttl=daemon.config.heartbeat_ttl,
+                )
+            )
+        return out
 
     @app.post("/workers/{worker_id}/state")
     def worker_state(worker_id: str, body: Dict[str, str] = Body(...)):
         state = {"disabled": "offline"}.get(body.get("state", ""), body.get("state", ""))
-        if state not in {"online", "draining", "offline"}:
+        if state not in WORKER_STATES:
             raise HTTPException(422, "state must be online, draining or offline")
         try:
             store.set_worker_state(worker_id, state)
         except NotFound:
             raise HTTPException(404, "worker not found") from None
-        if worker_id == pool.worker_id:
-            pool.state = state
+        if daemon.pool is not None and worker_id == daemon.pool.worker_id:
+            daemon.pool.state = state
         return {"worker_id": worker_id, "state": state}
+
+    @app.post("/workers/spawn")
+    def spawn_workers(body: SpawnBody = Body(default=SpawnBody())):
+        if daemon.supervisor is None:
+            raise HTTPException(409, "workers are managed in-process (worker_mode=inproc); nothing to spawn")
+        ids = daemon.supervisor.spawn(body.count, body.tags, body.max_concurrency)
+        if not ids:
+            raise HTTPException(409, f"worker limit reached (max {daemon.config.max_workers})")
+        return {"spawned": ids}
+
+    @app.post("/workers/{worker_id}/stop")
+    def stop_worker(worker_id: str):
+        if daemon.supervisor is None or not daemon.supervisor.stop_worker(worker_id):
+            raise HTTPException(404, "no supervised worker with that id")
+        return {"worker_id": worker_id, "stopping": True}
 
     @app.post("/workers/{worker_id}/detach")
     def worker_detach(worker_id: str):
@@ -332,7 +370,7 @@ def create_app(daemon: Daemon, manage_lifecycle: bool = True) -> FastAPI:
         workers = store.list_workers()
         return {
             "pending": store.count_runs("pending"),
-            "running": pool.running,
+            "running": store.count_runs("running"),
             "capacity": sum(w["max_concurrency"] for w in workers),
             "online_workers": sum(1 for w in workers if w["state"] == "online"),
         }
@@ -340,7 +378,12 @@ def create_app(daemon: Daemon, manage_lifecycle: bool = True) -> FastAPI:
     # ----------------------------------------------------------------- system
     @app.get("/system/status")
     def system_status():
-        return {"edition": "lite", "version": __version__, "workers": len(store.list_workers()), "running": pool.running}
+        return {
+            "edition": "lite",
+            "version": __version__,
+            "workers": len(store.list_workers()),
+            "running": store.count_runs("running"),
+        }
 
     @app.post("/system/shutdown")
     def system_shutdown():
@@ -349,6 +392,8 @@ def create_app(daemon: Daemon, manage_lifecycle: bool = True) -> FastAPI:
             raise HTTPException(409, "daemon was not started by hydra's runner; stop it from its supervisor")
         server.should_exit = True
         return {"shutdown": True}
+
+    register_internal(app, daemon)
 
     # ------------------------------------------------------- unsupported area
     for prefix in UNSUPPORTED_PREFIXES:

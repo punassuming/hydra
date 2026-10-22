@@ -11,15 +11,11 @@ from typing import Optional
 from ..lifecycle import Lifecycle
 from ..logs import LogStore
 from ..store import NotFound, Store
-from .runner import execute_run
+from .killevent import KillEvent
+from .meta import build_worker_meta
+from .runner import LocalSink, execute_run
 
 log = logging.getLogger("hydra_lite.worker")
-
-
-class KillEvent(threading.Event):
-    """A kill signal that remembers why it was sent ("request" or "timeout")."""
-
-    reason: Optional[str] = None
 
 
 class WorkerPool:
@@ -42,7 +38,10 @@ class WorkerPool:
         self._count_lock = threading.Lock()
 
     def start(self) -> None:
-        self.store.register_worker(self.worker_id, os.getpid(), self.max_concurrency, capabilities=["shell", "python", "http"])
+        meta = build_worker_meta([])
+        self.store.register_worker(
+            self.worker_id, os.getpid(), self.max_concurrency, tags=[], capabilities=meta["capabilities"].split(","), meta=meta
+        )
         for i in range(self.max_concurrency):
             t = threading.Thread(target=self._loop, name=f"hydra-worker-{i}", daemon=True)
             t.start()
@@ -106,7 +105,7 @@ class WorkerPool:
                 job = self.store.get_job(run["job_id"])
                 with self._kill_lock:
                     self._active[run["id"]] = (job["_id"], job.get("user", "default"))
-                execute_run(self.store, self.logs, self.lifecycle, run, job, kill_event)
+                execute_run(LocalSink(self.store, self.logs, self.lifecycle, self.worker_id), run, job, kill_event)
             except NotFound:
                 self.lifecycle.finalize(run["id"], "failed", returncode=1, reason="job was deleted before the run started")
             except Exception:
