@@ -105,7 +105,7 @@ class TestApplyRetryJitter:
         assert _apply_retry_jitter(RETRY_BACKOFF_CAP_SECONDS, rng=lambda: 0.999999) == RETRY_BACKOFF_CAP_SECONDS
 
     def test_disabled_when_fraction_is_zero(self, monkeypatch):
-        monkeypatch.setattr("scheduler.run_events.RETRY_JITTER_FRACTION", 0.0)
+        monkeypatch.setattr("scheduler.utils.retry.RETRY_JITTER_FRACTION", 0.0)
         assert _apply_retry_jitter(100, rng=lambda: 0.0) == 100
 
     def test_actually_varies_with_the_default_rng(self):

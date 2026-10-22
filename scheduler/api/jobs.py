@@ -1,13 +1,12 @@
 import copy
 import json
 import os
-import re
 import time
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Body, HTTPException, Request
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel
 from pymongo.errors import DuplicateKeyError
 
 from ..event_bus import event_bus
@@ -19,6 +18,7 @@ from ..models.job_definition import (
     ScheduleConfig,
 )
 from ..models.job_run import JobRun
+from ..models.run_params import PARAM_KEY_MAX_LENGTH, PARAM_KEY_PATTERN, RunJobRequest  # noqa: F401 - re-exported
 from ..mongo_client import get_db
 from ..redis_client import get_redis
 from ..utils.job_validation import validate_job_definition as _validate_job_definition
@@ -436,27 +436,6 @@ def validate_payload(job: JobCreate, request: Request):
     payload["domain"] = domain
     job_def = JobDefinition(**payload)
     return _validate_job_definition(job_def)
-
-
-# Run params become environment variables, so keys must be valid variable names.
-# Keep in sync with cli/__main__.py (PARAM_KEY_PATTERN) and ui/src/utils/params.ts.
-PARAM_KEY_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-PARAM_KEY_MAX_LENGTH = 128
-
-
-class RunJobRequest(BaseModel):
-    params: Dict[str, str] = {}
-
-    @field_validator("params")
-    @classmethod
-    def _validate_param_keys(cls, params: Dict[str, str]) -> Dict[str, str]:
-        for key in params:
-            if len(key) > PARAM_KEY_MAX_LENGTH or not PARAM_KEY_PATTERN.match(key):
-                raise ValueError(
-                    f"invalid param name {key!r}: must match {PARAM_KEY_PATTERN.pattern} "
-                    f"and be at most {PARAM_KEY_MAX_LENGTH} characters"
-                )
-        return params
 
 
 @router.post("/jobs/{job_id}/run")

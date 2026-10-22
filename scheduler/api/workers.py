@@ -8,7 +8,7 @@ from typing import List
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from ..models.worker_info import WorkerInfo
+from ..models.worker_info import WORKER_STATES, WorkerInfo
 from ..mongo_client import get_db
 from ..redis_client import get_redis
 from ..utils.auth import get_domain_token_hash
@@ -87,7 +87,7 @@ def _normalize_state(value: str | None) -> str:
     normalized = (value or "online").strip().lower()
     if normalized == "disabled":
         return "offline"
-    if normalized not in {"online", "draining", "offline"}:
+    if normalized not in WORKER_STATES:
         return "online"
     return normalized
 
@@ -389,7 +389,7 @@ def set_worker_state(worker_id: str, payload: WorkerStatePayload, request: Reque
     Draining/offline will prevent new dispatches; running jobs continue.
     """
     raw_state = payload.state.lower()
-    if raw_state not in {"online", "draining", "offline", "disabled"}:
+    if raw_state not in WORKER_STATES | {"disabled"}:
         return {"ok": False, "error": "invalid state"}
     state = _normalize_state(raw_state)
     r = get_redis()
