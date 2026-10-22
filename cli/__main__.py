@@ -108,6 +108,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     commands.add_parser("doctor", parents=[output_parent], help="Read-only API, queue, and worker diagnostic report")
 
+    from hydra_lite import cli_lite
+
+    cli_lite.register(commands, output_parent)
+
     watch = commands.add_parser("watch", parents=[output_parent], help="Show repeated read-only job, run, worker, or queue state")
     watch.add_argument("resource", choices=("run", "worker", "queue", "health"))
     watch.add_argument("name", nargs="?")
@@ -130,6 +134,15 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None, client_factory: type[HydraClient] = HydraClient) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.command == "lite":
+        from hydra_lite import cli_lite
+
+        return cli_lite.dispatch(args, client_factory)
+    if not args.token:
+        # A loopback API URL with no explicit token: use the local lite daemon's token file, if any.
+        from hydra_lite import cli_lite
+
+        args.token = cli_lite.local_token(args.api_url)
     client = client_factory(args.api_url, token=args.token, domain=args.domain, timeout=args.timeout)
     try:
         if args.command == "get":
