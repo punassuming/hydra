@@ -6,6 +6,9 @@ HTTP API as the full edition, so **`hydra-ctl` works against either**.
 
 ## Run it
 
+Install steps, the per-user service (Task Scheduler / `systemd --user`), `doctor` and `backup` are in
+[`install.md`](install.md).
+
 ```bash
 uv run hydra-ctl lite daemon start          # background; or `run` to stay in the foreground
 uv run hydra-ctl lite daemon status

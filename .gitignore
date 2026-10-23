@@ -17,3 +17,6 @@ go-worker/hydra-go-worker-*
 
 # Output of scripts/ci_local.py
 .ci-local/
+
+# setuptools build output
+build/

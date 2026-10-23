@@ -35,7 +35,10 @@ def main() -> int:
     venv = tmp / "venv"
     run([uv, "venv", str(venv)])
     py = venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    had_build = (ROOT / "build").exists()
     run([uv, "pip", "install", "--python", str(py), str(ROOT)])
+    if not had_build:  # setuptools leaves build/ in the source tree
+        shutil.rmtree(ROOT / "build", ignore_errors=True)
     present = json.loads(
         run(
             [
