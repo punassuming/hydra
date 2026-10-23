@@ -46,6 +46,23 @@ def register(commands: Any, output_parent: argparse.ArgumentParser) -> None:
             action.add_argument("--data-dir")
     actions.add_parser("status", parents=[output_parent], help="Show daemon health")
 
+    svc = groups.add_parser("service", help="Run the daemon as a per-user background service (no admin/root needed)")
+    svc_actions = svc.add_subparsers(dest="service_command", required=True)
+    install = svc_actions.add_parser("install", help="Register and start the service (idempotent; upgrades in place)")
+    install.add_argument("--python", help="interpreter to register (default: the one running this command)")
+    install.add_argument("--host")
+    install.add_argument("--port", type=int)
+    install.add_argument("--data-dir")
+    install.add_argument("--no-start", action="store_true", help="register without starting")
+    install.add_argument("--dry-run", action="store_true", help="print what would be registered and change nothing")
+    install.add_argument(
+        "--enable-linger", action="store_true", help="Linux: start at boot, not only at login (loginctl enable-linger)"
+    )
+    svc_actions.add_parser("remove", help="Stop and unregister the service (data is kept)")
+    for name in ("start", "stop", "restart"):
+        svc_actions.add_parser(name, help=f"{name.capitalize()} the registered service")
+    svc_actions.add_parser("status", parents=[output_parent], help="Show whether the service is installed and running")
+
     cfg = groups.add_parser("config", help="Inspect configuration")
     cfg_actions = cfg.add_subparsers(dest="config_command", required=True)
     cfg_actions.add_parser("path", help="Print the config file and data locations")
@@ -60,6 +77,8 @@ def _overrides(args: argparse.Namespace) -> dict:
 def dispatch(args: argparse.Namespace, client_factory: Any) -> int:
     if args.lite_command == "daemon":
         return _daemon(args, client_factory)
+    if args.lite_command == "service":
+        return _service(args)
     return _config(args)
 
 
@@ -92,11 +111,11 @@ def _start_background(args: argparse.Namespace) -> int:
     overrides = {k: v for k, v in _overrides(args).items() if v is not None}
     cfg = config_module.load(overrides=overrides)
     cfg.data_dir.mkdir(parents=True, exist_ok=True)
-    cmd = [sys.executable, "-m", "hydra_lite"]
+    cmd = [sys.executable, "-m", "hydra_lite", "--service"]
     for flag, key in (("--host", "host"), ("--port", "port"), ("--data-dir", "data_dir")):
         if key in overrides:
             cmd += [flag, str(overrides[key])]
-    log_file = open(cfg.data_dir / "daemon.log", "ab")  # noqa: SIM115 - inherited by the child
+    log_file = open(cfg.data_dir / "daemon.stderr.log", "ab")  # noqa: SIM115 - only start-up crashes land here; real logs rotate in daemon.log
     kwargs: dict[str, Any] = {"stdout": log_file, "stderr": subprocess.STDOUT, "stdin": subprocess.DEVNULL}
     if sys.platform == "win32":
         kwargs["creationflags"] = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
@@ -143,3 +162,51 @@ def _config(args: argparse.Namespace) -> int:
     path.write_text(_TEMPLATE, encoding="utf-8")
     print(f"wrote {path}")
     return 0
+
+
+def _service(args: argparse.Namespace) -> int:
+    from cli._output import write_document, write_error
+
+    from .service import ServiceError, ServiceSpec, interpreter_warnings, manager_for
+
+    try:
+        manager = manager_for()
+        cmd = args.service_command
+        if cmd == "install":
+            if args.enable_linger and hasattr(manager, "enable_linger"):
+                manager.enable_linger = True
+            spec = ServiceSpec(python=args.python or sys.executable, data_dir=args.data_dir, port=args.port, host=args.host)
+            for warning in interpreter_warnings(spec.python):
+                print(f"warning: {warning}", file=sys.stderr)
+            for line in manager.install(spec, start=not args.no_start, dry_run=args.dry_run):
+                print(line)
+            if args.dry_run:
+                print("(dry run: nothing was changed)")
+            return 0
+        if cmd == "remove":
+            for line in manager.uninstall():
+                print(line)
+            return 0
+        if cmd in {"start", "stop"}:
+            getattr(manager, cmd)()
+            print(f"service {cmd} requested")
+            return 0
+        if cmd == "restart":
+            manager.stop()
+            manager.start()
+            print("service restarted")
+            return 0
+        status = manager.status()
+        doc = {
+            "backend": status.backend,
+            "name": status.name,
+            "installed": status.installed,
+            "running": status.running,
+            "enabled": status.enabled,
+            **{f"detail.{k}": v for k, v in status.detail.items()},
+        }
+        write_document(doc, "json" if args.output == "json" else "yaml")
+        return 0 if status.running else 1
+    except ServiceError as exc:
+        write_error(str(exc))
+        return 1

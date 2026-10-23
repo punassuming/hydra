@@ -164,7 +164,7 @@ def _ps_escape(value: str) -> str:
     return value.replace("'", "''")
 
 
-def install_task(
+def build_register_script(
     task_name: str,
     command: str,
     *,
@@ -173,82 +173,57 @@ def install_task(
     interval_minutes: int = 5,
     run_as_system: bool = False,
     description: str = "Hydra worker watchdog/bootstrap",
-) -> None:
-    """Create or update a Windows scheduled task via PowerShell Register-ScheduledTask.
+    run_level: str = "Highest",
+    hidden: bool = False,
+    restart_count: int = 3,
+) -> str:
+    """Return the PowerShell that registers the task (pure; unit-testable on any OS).
 
-    Using Register-ScheduledTask (rather than schtasks /Create /TR) avoids the
-    double-quoting ambiguity in schtasks /TR, where cmd.exe is treated as the
-    program name instead of just an executable, and the working directory can be
-    set directly on the action without embedding a ``cd /d`` wrapper.
-
-    Calling this function multiple times is safe — ``-Force`` overwrites any
-    existing task of the same name.
-
-    Parameters
-    ----------
-    task_name:
-        Name of the scheduled task (may include a folder prefix like
-        ``\\Hydra\\worker-prod``).
-    command:
-        Full command string for the task action (e.g.
-        ``C:\\Python311\\python.exe -m worker bootstrap run``).  The first
-        space-separated token is used as the executable; the remainder as
-        arguments.
-    working_dir:
-        Working directory for the task action.  Passed directly to the
-        ``New-ScheduledTaskAction -WorkingDirectory`` parameter; no shell
-        wrapping required.
-    schedule_type:
-        ``"ONSTART"`` (run at system start-up) or ``"MINUTE"`` (periodic).
-    interval_minutes:
-        Interval for ``"MINUTE"`` schedule type.
-    run_as_system:
-        Run as SYSTEM account.  Requires the installing user to have admin
-        privileges.
-    description:
-        Human-readable description (stored in the task definition).
-
-    Raises
-    ------
-    RuntimeError
-        On non-Windows platforms.
-    subprocess.CalledProcessError
-        When PowerShell exits with a non-zero return code.
+    The defaults reproduce the worker bootstrap's task exactly. ``schedule_type="ONLOGON"`` registers a
+    per-user *at log on* trigger, which together with ``run_level="Limited"`` needs no administrator rights;
+    ``hidden`` and ``restart_count`` tune the settings for a long-lived background daemon.
     """
-    _require_windows()
-
     # Split command into executable + arguments (first token vs the rest).
     parts = command.split(None, 1)
     executable = parts[0]
     arguments = parts[1] if len(parts) > 1 else ""
 
-    # Build the PowerShell trigger expression.
     if schedule_type == "ONSTART":
         trigger_expr = "New-ScheduledTaskTrigger -AtStartup"
+    elif schedule_type == "ONLOGON":
+        trigger_expr = "New-ScheduledTaskTrigger -AtLogOn -User ($env:USERDOMAIN + '\\' + $env:USERNAME)"
     elif schedule_type == "MINUTE":
         trigger_expr = (
             f"New-ScheduledTaskTrigger -RepetitionInterval (New-TimeSpan -Minutes {interval_minutes}) -Once -At '00:00'"
         )
     else:
-        raise ValueError(f"Unsupported schedule_type {schedule_type!r}; expected 'ONSTART' or 'MINUTE'.")
+        raise ValueError(f"Unsupported schedule_type {schedule_type!r}; expected 'ONSTART', 'ONLOGON' or 'MINUTE'.")
 
     wd_line = f"-WorkingDirectory '{_ps_escape(working_dir)}' " if working_dir else ""
-    run_level = "Highest"
     user_id = "SYSTEM" if run_as_system else "$env:USERNAME"
     user_line = (
         f"New-ScheduledTaskPrincipal -UserId 'SYSTEM' -RunLevel {run_level} -LogonType ServiceAccount"
         if run_as_system
         else f"New-ScheduledTaskPrincipal -UserId {user_id} -RunLevel {run_level} -LogonType Interactive"
     )
+    extra_settings = ""
+    if hidden:
+        extra_settings += " -Hidden"
+    if schedule_type == "ONLOGON":
+        extra_settings += " -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew"
 
-    ps_script = f"""
+    settings_expr = (
+        f"New-ScheduledTaskSettingsSet -ExecutionTimeLimit 0 -RestartCount {restart_count} "
+        f"-RestartInterval (New-TimeSpan -Minutes 1){extra_settings}"
+    )
+    return f"""
 $action  = New-ScheduledTaskAction `
     -Execute '{_ps_escape(executable)}' `
     -Argument '{_ps_escape(arguments)}' `
     {wd_line}
 $trigger   = {trigger_expr}
 $principal = {user_line}
-$settings  = New-ScheduledTaskSettingsSet -ExecutionTimeLimit 0 -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
+$settings  = {settings_expr}
 Register-ScheduledTask `
     -TaskName '{_ps_escape(task_name)}' `
     -Action $action `
@@ -260,6 +235,8 @@ Register-ScheduledTask `
 Write-Host "Task '{_ps_escape(task_name)}' registered successfully."
 """
 
+
+def _run_powershell(ps_script: str) -> subprocess.CompletedProcess:
     result = subprocess.run(
         ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_script],
         capture_output=True,
@@ -274,9 +251,116 @@ Write-Host "Task '{_ps_escape(task_name)}' registered successfully."
             output=result.stdout,
             stderr=result.stderr,
         )
+    return result
+
+
+def install_task(
+    task_name: str,
+    command: str,
+    *,
+    working_dir: Optional[str] = None,
+    schedule_type: str = "ONSTART",
+    interval_minutes: int = 5,
+    run_as_system: bool = False,
+    description: str = "Hydra worker watchdog/bootstrap",
+    run_level: str = "Highest",
+    hidden: bool = False,
+    restart_count: int = 3,
+) -> None:
+    """Create or update a Windows scheduled task via PowerShell Register-ScheduledTask.
+
+    Using Register-ScheduledTask (rather than schtasks /Create /TR) avoids the
+    double-quoting ambiguity in schtasks /TR, where cmd.exe is treated as the
+    program name instead of just an executable, and the working directory can be
+    set directly on the action without embedding a ``cd /d`` wrapper.
+
+    Calling this function multiple times is safe -- ``-Force`` overwrites any
+    existing task of the same name.
+
+    Parameters
+    ----------
+    task_name:
+        Name of the scheduled task (may include a folder prefix like
+        ``\\Hydra\\worker-prod``).
+    command:
+        Full command string for the task action (e.g.
+        ``C:\\Python311\\python.exe -m worker bootstrap run``).  The first
+        space-separated token is used as the executable; the remainder as
+        arguments.
+    working_dir:
+        Working directory for the task action.
+    schedule_type:
+        ``"ONSTART"`` (system start-up), ``"ONLOGON"`` (the current user's log on) or ``"MINUTE"`` (periodic).
+    interval_minutes:
+        Interval for ``"MINUTE"`` schedule type.
+    run_as_system:
+        Run as SYSTEM account.  Requires the installing user to have admin privileges.
+    description:
+        Human-readable description (stored in the task definition).
+    run_level, hidden, restart_count:
+        ``Highest`` (default) or ``Limited`` run level, whether the task is hidden, and how many times Task
+        Scheduler restarts it after a failure. The defaults are the worker bootstrap's.
+
+    Raises
+    ------
+    RuntimeError
+        On non-Windows platforms.
+    subprocess.CalledProcessError
+        When PowerShell exits with a non-zero return code.
+    """
+    _require_windows()
+    result = _run_powershell(
+        build_register_script(
+            task_name,
+            command,
+            working_dir=working_dir,
+            schedule_type=schedule_type,
+            interval_minutes=interval_minutes,
+            run_as_system=run_as_system,
+            description=description,
+            run_level=run_level,
+            hidden=hidden,
+            restart_count=restart_count,
+        )
+    )
     logger.info("Task %r installed/updated successfully.", task_name)
     if result.stdout:
         logger.debug("Register-ScheduledTask output: %s", result.stdout.strip())
+
+
+def _split_task_name(task_name: str) -> tuple[str, str]:
+    """``\\Hydra\\Daemon`` -> (``\\Hydra\\``, ``Daemon``); a bare name lives in the root folder."""
+    folder, _, leaf = task_name.rpartition("\\")
+    return (folder + "\\" if folder else "\\"), leaf
+
+
+def start_task(task_name: str) -> None:
+    """Start the task now (raises if it does not exist)."""
+    _require_windows()
+    _run_powershell(f"Start-ScheduledTask -TaskName '{_ps_escape(task_name)}'")
+
+
+def stop_task(task_name: str) -> None:
+    """Stop the task's running instance (no error if it is not running)."""
+    _require_windows()
+    _run_powershell(f"Stop-ScheduledTask -TaskName '{_ps_escape(task_name)}' -ErrorAction SilentlyContinue")
+
+
+def task_info(task_name: str) -> Optional[dict]:
+    """Return ``{state, last_run, last_result, next_run, missed_runs}`` for the task, or ``None`` if absent."""
+    _require_windows()
+    folder, leaf = _split_task_name(task_name)
+    script = (
+        f"$t = Get-ScheduledTask -TaskPath '{_ps_escape(folder)}' -TaskName '{_ps_escape(leaf)}' -ErrorAction SilentlyContinue\n"
+        "if (-not $t) { Write-Output 'null'; exit 0 }\n"
+        "$i = $t | Get-ScheduledTaskInfo\n"
+        "[pscustomobject]@{ state = [string]$t.State; last_run = [string]$i.LastRunTime; last_result = $i.LastTaskResult;"
+        " next_run = [string]$i.NextRunTime; missed_runs = $i.NumberOfMissedRuns } | ConvertTo-Json -Compress"
+    )
+    import json
+
+    out = _run_powershell(script).stdout.strip()
+    return json.loads(out) if out and out != "null" else None
 
 
 def remove_task(task_name: str) -> None:

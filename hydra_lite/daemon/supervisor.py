@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Optional
 
 from ..config import Config
+from ..logging_setup import rotate_if_large
 from ..store import NotFound, Store
 from ..worker.router import WorkerRouter
 
@@ -126,6 +127,7 @@ class Supervisor:
             "WORKER_SHUTDOWN_GRACE_SECONDS": str(int(STOP_GRACE_SECONDS)),
         }
         kwargs: dict = {"stdin": subprocess.DEVNULL, "env": env}
+        rotate_if_large(log_dir / f"{worker.worker_id}.log")
         out = open(log_dir / f"{worker.worker_id}.log", "ab")  # noqa: SIM115 - owned by the child
         kwargs.update(stdout=out, stderr=subprocess.STDOUT)
         if sys.platform == "win32":
