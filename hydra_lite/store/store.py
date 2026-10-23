@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import re
 import sqlite3
 import threading
 import uuid
@@ -19,13 +20,34 @@ from typing import Any, Callable, Iterator, Optional
 
 from scheduler.models.job_run import TERMINAL_STATES
 
-SCHEMA_VERSION = 1
+BASE_VERSION = 1  # schema.sql (frozen); later versions are migrations/NNNN_name.sql
 MIN_SQLITE = (3, 35, 0)
 
 # Run states are the full edition's (scheduler/models/job_run.py); lite adds none. How a run ended
 # (killed, lost...) lives in completion_reason and the run_events type, not in a new status.
 TERMINAL_STATUSES = tuple(sorted(TERMINAL_STATES))
 OPEN_STATUSES = ("pending", "dispatched", "running")
+
+
+def _migrations() -> list[tuple[int, str, str]]:
+    """(version, name, sql) for every ``migrations/NNNN_name.sql``, contiguous from 0002."""
+    folder = resources.files("hydra_lite.store").joinpath("migrations")
+    found = []
+    if folder.is_dir():
+        for entry in folder.iterdir():
+            m = re.fullmatch(r"(\d{4})_([a-z0-9_]+)\.sql", entry.name)
+            if m:
+                found.append((int(m.group(1)), m.group(2), entry.read_text(encoding="utf-8")))
+    found.sort()
+    if [v for v, _, _ in found] != list(range(BASE_VERSION + 1, BASE_VERSION + 1 + len(found))):
+        raise RuntimeError(
+            f"schema migrations must be numbered contiguously from {BASE_VERSION + 1:04d}: {[v for v, _, _ in found]}"
+        )
+    return found
+
+
+def latest_version() -> int:
+    return BASE_VERSION + len(_migrations())
 
 
 class NotFound(LookupError):
@@ -86,13 +108,62 @@ class Store:
 
     # ------------------------------------------------------------------ infra
     def _migrate(self) -> None:
+        """Create the v1 schema on a new database, then apply numbered migrations in order.
+
+        ``schema.sql`` is FROZEN at v1: a service install means real databases exist, so every later change is a
+        ``migrations/NNNN_name.sql`` file. Each runs in one transaction that also bumps ``user_version``; before the
+        first one, the database is copied to ``<db>.pre-v<N>.bak`` so a bad upgrade is recoverable.
+        """
+        latest = latest_version()
         with self._lock:
             current = self._conn.execute("PRAGMA user_version").fetchone()[0]
-            if current > SCHEMA_VERSION:
-                raise RuntimeError(f"database schema v{current} is newer than this Hydra (v{SCHEMA_VERSION})")
+            if current > latest:
+                raise RuntimeError(f"database schema v{current} is newer than this Hydra (v{latest})")
             if current < 1:
                 script = resources.files("hydra_lite.store").joinpath("schema.sql").read_text(encoding="utf-8")
-                self._conn.executescript("BEGIN IMMEDIATE;\n" + script + f"\nPRAGMA user_version={SCHEMA_VERSION};\nCOMMIT;")
+                self._conn.executescript("BEGIN IMMEDIATE;\n" + script + f"\nPRAGMA user_version={BASE_VERSION};\nCOMMIT;")
+                current = BASE_VERSION
+                backed_up = True  # a brand-new database has nothing worth saving
+            else:
+                backed_up = False
+            for version, name, sql in (m for m in _migrations() if m[0] > current):
+                if not backed_up and not self._memory:
+                    backup = Path(self.path).with_name(f"{Path(self.path).name}.pre-v{current}.bak")
+                    self._backup_to(backup)
+                    backed_up = True
+                try:
+                    self._conn.executescript(f"BEGIN IMMEDIATE;\n{sql}\nPRAGMA user_version={version};\nCOMMIT;")
+                except sqlite3.Error as exc:
+                    if self._conn.in_transaction:
+                        self._conn.execute("ROLLBACK")
+                    raise RuntimeError(
+                        f"schema migration {version:04d}_{name} failed ({exc}); the database was left at v{current}"
+                        + ("" if self._memory else f" and a copy is in {Path(self.path).name}.pre-v{current}.bak")
+                    ) from exc
+                current = version
+
+    def _backup_to(self, dest: Path) -> None:
+        dest = Path(dest)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.unlink(missing_ok=True)
+        target = sqlite3.connect(str(dest))
+        try:
+            self._conn.backup(target)
+        finally:
+            target.close()
+
+    def backup_to(self, dest: Path | str) -> Path:
+        """Write a consistent copy (SQLite online backup; safe while the daemon is writing)."""
+        dest = Path(dest)
+        with self._reader() as conn:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            target = sqlite3.connect(str(dest))
+            try:
+                conn.backup(target)
+                target.execute("PRAGMA journal_mode=DELETE")
+            finally:
+                target.close()
+        return dest
 
     @contextlib.contextmanager
     def _reader(self) -> Iterator[sqlite3.Connection]:

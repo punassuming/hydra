@@ -8,11 +8,14 @@ import socket
 import threading
 from typing import Optional
 
+from scheduler.utils.affinity import normalize_affinity, passes_affinity
+
 from ..lifecycle import Lifecycle
 from ..logs import LogStore
 from ..store import NotFound, Store
 from .killevent import KillEvent
 from .meta import build_worker_meta
+from .router import worker_view
 from .runner import LocalSink, execute_run
 
 log = logging.getLogger("hydra_lite.worker")
@@ -20,13 +23,21 @@ log = logging.getLogger("hydra_lite.worker")
 
 class WorkerPool:
     def __init__(
-        self, store: Store, logs: LogStore, lifecycle: Lifecycle, max_concurrency: int = 4, worker_id: Optional[str] = None
+        self,
+        store: Store,
+        logs: LogStore,
+        lifecycle: Lifecycle,
+        max_concurrency: int = 4,
+        worker_id: Optional[str] = None,
+        tags: Optional[list] = None,
     ):
         self.store = store
         self.logs = logs
         self.lifecycle = lifecycle
         self.max_concurrency = max(1, max_concurrency)
         self.worker_id = worker_id or f"local-{socket.gethostname()}"
+        self.tags = list(tags or [])
+        self._view: dict = {}
         self.stop = threading.Event()
         self.wake = lifecycle.wake
         self._kills: dict[str, KillEvent] = {}
@@ -38,10 +49,16 @@ class WorkerPool:
         self._count_lock = threading.Lock()
 
     def start(self) -> None:
-        meta = build_worker_meta([])
+        meta = build_worker_meta(self.tags)
         self.store.register_worker(
-            self.worker_id, os.getpid(), self.max_concurrency, tags=[], capabilities=meta["capabilities"].split(","), meta=meta
+            self.worker_id,
+            os.getpid(),
+            self.max_concurrency,
+            tags=self.tags,
+            capabilities=meta["capabilities"].split(","),
+            meta=meta,
         )
+        self._view = worker_view(self.store.get_worker(self.worker_id))
         for i in range(self.max_concurrency):
             t = threading.Thread(target=self._loop, name=f"hydra-worker-{i}", daemon=True)
             t.start()
@@ -74,6 +91,10 @@ class WorkerPool:
         event.set()
         return True
 
+    def _accepts(self, run: dict, job: Optional[dict]) -> bool:
+        """Same eligibility rule as a subprocess worker (tags, os, executor capabilities, allowed users...)."""
+        return job is None or passes_affinity(normalize_affinity(job), self._view)
+
     def _heartbeat(self) -> None:
         while not self.stop.wait(2.0):
             try:
@@ -87,7 +108,7 @@ class WorkerPool:
                 self.stop.wait(0.5)
                 continue
             try:
-                run = self.store.claim_run(self.worker_id)
+                run = self.store.claim_run(self.worker_id, accept=self._accepts)
             except Exception:
                 log.exception("claim failed")
                 self.stop.wait(1.0)

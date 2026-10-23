@@ -30,7 +30,7 @@ hydra-ctl = "cli.__main__:entrypoint"
 include = ["cli*", "scheduler*", "worker*", "hydra_lite*"]
 
 [tool.setuptools.package-data]
-"hydra_lite.store" = ["schema.sql"]
+"hydra_lite.store" = ["schema.sql", "migrations/*.sql"]
 
 [dependency-groups]
 dev = [

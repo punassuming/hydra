@@ -63,6 +63,15 @@ def register(commands: Any, output_parent: argparse.ArgumentParser) -> None:
         svc_actions.add_parser(name, help=f"{name.capitalize()} the registered service")
     svc_actions.add_parser("status", parents=[output_parent], help="Show whether the service is installed and running")
 
+    doctor = groups.add_parser("doctor", parents=[output_parent], help="Check the install, data directory, daemon and service")
+    doctor.add_argument("--no-api", action="store_true", help="skip checks that talk to the daemon")
+    backup = groups.add_parser("backup", help="Write a consistent copy of the database (safe while the daemon runs)")
+    backup.add_argument(
+        "dest", nargs="?", help="destination file (default: hydra-backup-<timestamp>.db in the current directory)"
+    )
+    backup.add_argument("--force", action="store_true", help="overwrite an existing destination")
+    backup.add_argument("--data-dir")
+
     cfg = groups.add_parser("config", help="Inspect configuration")
     cfg_actions = cfg.add_subparsers(dest="config_command", required=True)
     cfg_actions.add_parser("path", help="Print the config file and data locations")
@@ -79,6 +88,10 @@ def dispatch(args: argparse.Namespace, client_factory: Any) -> int:
         return _daemon(args, client_factory)
     if args.lite_command == "service":
         return _service(args)
+    if args.lite_command == "doctor":
+        return _doctor(args, client_factory)
+    if args.lite_command == "backup":
+        return _backup(args)
     return _config(args)
 
 
@@ -210,3 +223,60 @@ def _service(args: argparse.Namespace) -> int:
     except ServiceError as exc:
         write_error(str(exc))
         return 1
+
+
+def _doctor(args: argparse.Namespace, client_factory: Any) -> int:
+    from cli._output import write_document
+
+    from . import doctor
+
+    cfg = config_module.load()
+    client = (
+        None
+        if args.no_api
+        else client_factory(args.api_url, token=args.token or local_token(args.api_url), timeout=min(args.timeout, 5))
+    )
+    checks = doctor.run_checks(cfg, client)
+    if args.output == "json":
+        write_document(doctor.as_documents(checks), "json")
+    else:
+        print(doctor.render(checks))
+    return 1 if any(c.status == doctor.FAIL for c in checks) else 0
+
+
+def _backup(args: argparse.Namespace) -> int:
+    import sqlite3
+    from datetime import datetime
+
+    from cli._output import write_error
+
+    from .store.store import latest_version
+
+    cfg = config_module.load({"data_dir": args.data_dir} if args.data_dir else None)
+    if not cfg.db_path.exists():
+        write_error(f"no database at {cfg.db_path}")
+        return 4
+    dest = Path(args.dest or f"hydra-backup-{datetime.now():%Y%m%d-%H%M%S}.db")
+    if dest.exists() and not args.force:
+        write_error(f"{dest} already exists (use --force to overwrite)")
+        return 1
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.unlink(missing_ok=True)
+    src = sqlite3.connect(f"file:{cfg.db_path}?mode=ro", uri=True, timeout=30)
+    try:
+        out = sqlite3.connect(str(dest))
+        try:
+            src.backup(out)
+            out.execute("PRAGMA journal_mode=DELETE")
+            check = out.execute("PRAGMA integrity_check").fetchone()[0]
+            version = out.execute("PRAGMA user_version").fetchone()[0]
+        finally:
+            out.close()
+    finally:
+        src.close()
+    if check != "ok":
+        write_error(f"the copy failed its integrity check: {check}")
+        return 1
+    print(f"wrote {dest} ({dest.stat().st_size / 1e6:.1f} MB, schema v{version}, this Hydra writes v{latest_version()})")
+    print("to restore: stop the daemon, replace hydra.db in the data directory with this file, start the daemon")
+    return 0

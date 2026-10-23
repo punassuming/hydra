@@ -44,7 +44,7 @@ class Daemon:
         self.stop = threading.Event()
         self.lifecycle = Lifecycle(self.store, self.logs)
         self.pool = (
-            WorkerPool(self.store, self.logs, self.lifecycle, max_concurrency=config.max_concurrency)
+            WorkerPool(self.store, self.logs, self.lifecycle, max_concurrency=config.max_concurrency, tags=config.worker_tags)
             if config.worker_mode == "inproc"
             else None
         )

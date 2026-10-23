@@ -120,3 +120,18 @@ def test_log_offsets(client):
     assert first["done"] is True and "line1" in first["stdout"]
     again = client.get(f"/runs/{run['_id']}/logs", params={"out_offset": first["out_offset"]}).json()
     assert again["stdout"] == ""
+
+
+def test_in_process_worker_honours_affinity_like_a_subprocess_worker(client):
+    """It used to claim everything, ignoring tags and executor capabilities."""
+    job = client.post(
+        "/jobs/", json=py_job("gpu", "print('x')", affinity={"tags": ["gpu"]}, schedule={"mode": "cron", "cron": "0 0 1 1 *"})
+    ).json()
+    run_id = client.post(f"/jobs/{job['_id']}/run", json={}).json()["run_id"]
+    import time
+
+    time.sleep(2)
+    assert client.get(f"/runs/{run_id}").json()["status"] == "pending"
+    other = client.post("/jobs/", json=py_job("any", "print('y')", schedule={"mode": "cron", "cron": "0 0 1 1 *"})).json()
+    run2 = client.post(f"/jobs/{other['_id']}/run", json={}).json()["run_id"]
+    wait_for(lambda: client.get(f"/runs/{run2}").json()["status"] == "success")
