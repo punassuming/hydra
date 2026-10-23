@@ -6,6 +6,7 @@ performs it against the SQLite store. ``finalize_run`` runs the follow-ups exact
 
 from __future__ import annotations
 
+import json
 import logging
 import threading
 from datetime import timedelta
@@ -44,6 +45,32 @@ class Lifecycle:
             except Exception:  # a follow-up bug must never wedge the worker
                 log.exception("post-run actions failed for run %s", run_id)
         return run
+
+    def publish_artifact(self, run: dict, name: str, metadata: dict) -> list[str]:
+        """Record an artifact a run published and start every job subscribed to it.
+
+        Same contract as the full edition's ``_handle_artifact_emitted``: subscribers get the metadata as the raw-key
+        env var ``HYDRA_UPSTREAM_ARTIFACT_METADATA``. One protection the full edition lacks: the publishing job is not
+        re-triggered by its own artifact (that is an unbounded loop).
+        """
+        self.store.upsert_artifact(name, run["id"], run["job_id"], metadata)
+        started = []
+        for job in self.store.find_artifact_subscribers(name):
+            if job["_id"] == run["job_id"]:
+                continue
+            queued = self.store.enqueue_run(
+                job["_id"],
+                trigger="artifact",
+                params={"HYDRA_UPSTREAM_ARTIFACT_METADATA": json.dumps(metadata or {})},
+                priority=int(job.get("priority", 5)),
+            )
+            self.store.add_event(
+                queued["id"], "triggered_by", {"artifact": name, "upstream_run": run["id"], "upstream_job": run["job_id"]}
+            )
+            started.append(queued["id"])
+        if started:
+            self.wake.set()
+        return started
 
     def recover_orphans(self) -> int:
         """Fail runs orphaned by a crash/restart and route them through the normal follow-ups."""

@@ -133,6 +133,9 @@ class HttpSink:
     def log(self, stream: str, text: str) -> None:
         self.worker.shipper.add(self.run_id, stream, text)
 
+    def artifact(self, name: str, metadata: dict) -> None:
+        self.worker.post_event({**self._base("artifact_emitted"), "artifact_name": name, "metadata": metadata}, required=False)
+
     def retrying(self, attempt: int, reason: str) -> None:
         self.worker.post_event({**self._base("run_retry"), "attempt": attempt, "reason": reason}, required=False)
 

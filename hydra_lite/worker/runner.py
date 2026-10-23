@@ -12,6 +12,7 @@ import time
 from typing import Optional, Protocol
 
 from worker.executor import execute_job
+from worker.utils.artifacts import parse_artifact_marker
 from worker.utils.completion import evaluate_completion, evaluate_file_criteria
 from worker.utils.params import inject_params
 
@@ -27,6 +28,8 @@ class RunSink(Protocol):
     def start(self, run: dict, job: dict) -> None: ...
 
     def log(self, stream: str, text: str) -> None: ...
+
+    def artifact(self, name: str, metadata: dict) -> None: ...
 
     def retrying(self, attempt: int, reason: str) -> None: ...
 
@@ -60,6 +63,10 @@ class LocalSink:
         if self._log:
             self._log.write("out" if stream == "stdout" else "err", text)
 
+    def artifact(self, name: str, metadata: dict) -> None:
+        run = self.store.get_run(self._run_id)
+        self.lifecycle.publish_artifact(run, name, metadata)
+
     def retrying(self, attempt: int, reason: str) -> None:
         self.store.add_event(self._run_id, "retry", {"attempt": attempt, "reason": reason})
 
@@ -74,22 +81,33 @@ class LocalSink:
 
 
 class _Tails:
-    """Forwards streamed output to the sink while remembering the last bytes, to spot text that was never streamed."""
+    """Forwards streamed output to the sink and remembers whether an executor streamed anything at all.
 
-    KEEP = 8192
+    Some executors (sensor, http, source/env failures) report a message only in their return value and never stream
+    it; the full edition carries that text in run_end, lite keeps logs as files, so such text is written afterwards.
+    A stream that produced any callback (even one that was consumed, like an artifact marker) is never back-filled.
+    """
 
     def __init__(self, sink: "RunSink"):
         self.sink = sink
-        self.tail = {"stdout": "", "stderr": ""}
+        self.seen = {"stdout": False, "stderr": False}
 
     def write(self, stream: str, text: str) -> None:
+        self.seen[stream] = True
+        if stream == "stdout":
+            marker = parse_artifact_marker(text)
+            if marker is not None:  # consumed like the full worker: published, never logged (a malformed one is logged raw)
+                if not marker.valid:
+                    self.sink.log(stream, text)
+                elif marker.name:
+                    self.sink.artifact(marker.name, marker.metadata or {})
+                return
         self.sink.log(stream, text)
-        self.tail[stream] = (self.tail[stream] + text)[-self.KEEP :]
 
     def flush_unstreamed(self, stdout: str, stderr: str) -> None:
         for stream, text in (("stdout", stdout), ("stderr", stderr)):
             text = (text or "").strip()
-            if text and text[-200:] not in self.tail[stream]:
+            if text and not self.seen[stream]:
                 self.sink.log(stream, text + "\n")
 
 

@@ -26,6 +26,7 @@ from .config import (
 from .executor import execute_job
 from .protocol import WORKER_PROTOCOL_VERSION  # noqa: E402
 from .redis_client import get_redis
+from .utils.artifacts import parse_artifact_marker
 from .utils.completion import evaluate_completion, evaluate_file_criteria
 from .utils.concurrency import add_active_job, incr_running, remove_active_job
 from .utils.heartbeat import start_heartbeat
@@ -286,29 +287,22 @@ def worker_main():
                 r.expire(history_key, 3600)
                 r.expire(channel, 3600)
 
-            _ARTIFACT_PREFIX = "__HYDRA_ARTIFACT__:"
-
             def handle_stdout(text: str):
-                stripped = text.strip()
-                if stripped.startswith(_ARTIFACT_PREFIX):
-                    raw_json = stripped[len(_ARTIFACT_PREFIX) :].strip()
-                    try:
-                        artifact_payload = json.loads(raw_json)
-                        artifact_name = str(artifact_payload.get("name") or "").strip()
-                        metadata = artifact_payload.get("metadata") or {}
-                        if artifact_name:
-                            publish_run_event(
-                                {
-                                    "type": "artifact_emitted",
-                                    "run_id": run_id,
-                                    "job_id": job_id,
-                                    "domain": domain,
-                                    "artifact_name": artifact_name,
-                                    "metadata": metadata,
-                                }
-                            )
-                    except Exception:
+                marker = parse_artifact_marker(text)
+                if marker is not None:
+                    if not marker.valid:
                         stream_log("stdout", text)
+                    elif marker.name:
+                        publish_run_event(
+                            {
+                                "type": "artifact_emitted",
+                                "run_id": run_id,
+                                "job_id": job_id,
+                                "domain": domain,
+                                "artifact_name": marker.name,
+                                "metadata": marker.metadata,
+                            }
+                        )
                     return
                 stream_log("stdout", text)
 

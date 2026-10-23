@@ -661,6 +661,43 @@ class Store:
         with self._tx() as c:
             return c.execute("UPDATE runs SET sla_miss_alerted=1 WHERE id=? AND sla_miss_alerted=0", (run_id,)).rowcount == 1
 
+    def upsert_artifact(self, name: str, run_id: str, job_id: str, metadata: dict) -> None:
+        with self._tx() as c:
+            c.execute(
+                "INSERT INTO artifacts (name, last_updated, last_run_id, last_job_id, metadata) VALUES (?,?,?,?,?)"
+                " ON CONFLICT(name) DO UPDATE SET last_updated=excluded.last_updated, last_run_id=excluded.last_run_id,"
+                " last_job_id=excluded.last_job_id, metadata=excluded.metadata",
+                (name, iso(now_utc()), run_id, job_id, _dumps(metadata or {})),
+            )
+
+    @staticmethod
+    def _artifact_row(row: sqlite3.Row) -> dict:
+        a = dict(row)
+        a["metadata"] = json.loads(a["metadata"] or "{}")
+        return a
+
+    def get_artifact(self, name: str) -> dict:
+        with self._reader() as conn:
+            row = conn.execute("SELECT * FROM artifacts WHERE name=?", (name,)).fetchone()
+        if not row:
+            raise NotFound(name)
+        return self._artifact_row(row)
+
+    def list_artifacts(self, limit: int = 200) -> list[dict]:
+        with self._reader() as conn:
+            rows = conn.execute("SELECT * FROM artifacts ORDER BY last_updated DESC LIMIT ?", (limit,)).fetchall()
+        return [self._artifact_row(r) for r in rows]
+
+    def find_artifact_subscribers(self, name: str) -> list[dict]:
+        """Enabled jobs whose ``triggers_on_artifacts`` contains ``name``."""
+        with self._reader() as conn:
+            rows = conn.execute(
+                "SELECT j.* FROM jobs j WHERE j.enabled=1 AND EXISTS ("
+                " SELECT 1 FROM json_each(j.definition, '$.triggers_on_artifacts') t WHERE t.value=?)",
+                (name,),
+            ).fetchall()
+        return [self._job_row(r) for r in rows]
+
     def find_dependents(self, job_id: str) -> list[dict]:
         """Enabled jobs whose ``depends_on`` contains ``job_id``."""
         with self._reader() as conn:

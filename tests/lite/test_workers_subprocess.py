@@ -203,3 +203,21 @@ def test_sigterm_drains_in_flight_runs_before_the_worker_exits(sub_live):
     os.kill(w["pid"], signal.SIGTERM)
     run = _wait_status(api, run_id, "success", "failed", timeout=30)
     assert run["status"] == "success" and "finished" in run["stdout"]
+
+
+def test_artifact_published_by_a_subprocess_worker_triggers_a_subscriber(sub_live):
+    api, _ = sub_live
+    consumer = _submit(
+        api,
+        "art-consumer",
+        "import os; print('meta=' + os.environ['HYDRA_UPSTREAM_ARTIFACT_METADATA'])",
+        triggers_on_artifacts=["nightly"],
+    )
+    marker = '__HYDRA_ARTIFACT__: {"name": "nightly", "metadata": {"rows": 7}}'
+    producer = _submit(api, "art-producer", f"print('start'); print({marker!r}); print('end')")
+    produced = _wait_status(api, _run(api, producer), "success", "failed")
+    assert produced["status"] == "success" and "__HYDRA_ARTIFACT__" not in produced["stdout"] and "end" in produced["stdout"]
+    runs = wait_for(lambda: api.request("GET", f"/jobs/{consumer['_id']}/runs"), timeout=30)
+    done = _wait_status(api, runs[0]["_id"], "success", "failed", timeout=45)
+    assert done["status"] == "success" and '"rows": 7' in done["stdout"]
+    assert api.request("GET", "/artifacts/nightly")["metadata"] == {"rows": 7}

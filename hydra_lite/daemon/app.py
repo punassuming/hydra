@@ -270,6 +270,27 @@ def create_app(daemon: Daemon, manage_lifecycle: bool = True) -> FastAPI:
             raise HTTPException(404, "run not found or not currently running")
         return {"run_id": run_id, "signal": "kill_sent"}
 
+    @app.get("/runs/{run_id}/events")
+    def run_events(run_id: str):
+        run_or_404(run_id)
+        return store.list_events(run_id)
+
+    @app.get("/jobs/{job_id}/schedule_events")
+    def job_schedule_events(job_id: str):
+        job_or_404(job_id)
+        return store.list_schedule_events(job_id)
+
+    @app.get("/artifacts/")
+    def list_artifacts(limit: int = 200):
+        return store.list_artifacts(limit)
+
+    @app.get("/artifacts/{name}")
+    def get_artifact(name: str):
+        try:
+            return store.get_artifact(name)
+        except NotFound:
+            raise HTTPException(404, "artifact not found") from None
+
     @app.get("/history/")
     def history(limit: int = 1000, search: Optional[str] = None, paged: bool = False, cursor: Optional[str] = None):
         runs = store.list_runs(limit=min(limit, 5000) if not paged else min(max(limit, 1), 200) + 1, before=cursor)

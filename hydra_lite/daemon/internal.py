@@ -178,6 +178,11 @@ def register_internal(app: FastAPI, daemon: Daemon) -> None:
                 store.start_run(run_id, log_path=payload.get("log_path"))
             except NotFound:
                 return {"ok": False, "reason": f"run is {run['status']}, not dispatched"}
+        elif kind == "artifact_emitted":
+            name = str(payload.get("artifact_name") or "").strip()
+            if not name:
+                raise HTTPException(422, "artifact_name is required")
+            lifecycle.publish_artifact(run, name, payload.get("metadata") or {})
         elif kind == "run_retry":
             store.add_event(run_id, "retry", {"attempt": payload.get("attempt"), "reason": payload.get("reason")})
         elif kind == "run_end":

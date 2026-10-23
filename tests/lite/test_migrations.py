@@ -9,6 +9,7 @@ import pytest
 
 from hydra_lite.store import Store
 from hydra_lite.store import store as store_module
+from hydra_lite.store.store import latest_version
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "lite_v1.db"
 
@@ -40,7 +41,10 @@ def test_the_frozen_v1_database_opens_and_keeps_its_data(v1_db):
     assert run["status"] == "success" and run["params"] == {"A": "1"}
     assert store.list_workers()[0]["id"] == "fixture-worker" and store.list_schedule_events(job["_id"])
     store.close()
-    assert not list(v1_db.parent.glob("*.bak"))  # nothing to migrate, nothing to back up
+    # every real migration since v1 was applied, after a copy of the original v1 database
+    assert _content(v1_db)["version"] == latest_version()
+    if latest_version() > 1:
+        assert _content(v1_db.with_name("hydra.db.pre-v1.bak")) == {"version": 1, "jobs": ["fixture-job"], "runs": 1}
 
 
 def test_pending_migration_runs_once_after_a_backup(v1_db, monkeypatch):
@@ -75,9 +79,10 @@ def test_fresh_database_goes_straight_to_latest_without_a_backup(tmp_path, monke
     assert _content(tmp_path / "hydra.db")["version"] == 2 and not list(tmp_path.glob("*.bak"))
 
 
-def test_migration_numbering_must_be_contiguous(monkeypatch, tmp_path):
-    monkeypatch.setattr(store_module, "_migrations", store_module._migrations)  # real loader first: no migrations yet
-    assert store_module.latest_version() == store_module.BASE_VERSION
+def test_shipped_migrations_are_numbered_contiguously():
+    versions = [v for v, _, _ in store_module._migrations()]
+    assert versions == list(range(2, 2 + len(versions)))
+    assert store_module.latest_version() == store_module.BASE_VERSION + len(versions)
 
 
 def test_a_newer_database_is_left_alone(tmp_path):
