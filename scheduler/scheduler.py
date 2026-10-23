@@ -16,7 +16,7 @@ from .utils.auth import get_domain_token_hash
 from .utils.encryption import decrypt_payload
 from .utils.failover import failover_once
 from .utils.logging import setup_logging
-from .utils.schedule import advance_schedule
+from .utils.schedule import plan_ticks, select_ticks
 from .utils.selectors import select_best_worker
 from .utils.worker_ops import append_worker_op
 
@@ -262,6 +262,24 @@ def scheduling_loop(stop_event: threading.Event):
             params_raw = meta.get("params")
             r.delete(meta_key)
 
+            # overlap_policy=queue: wait while the previous run of this job is still executing (not a starvation
+            # condition, so no_worker_count is untouched); the entry goes back to the queue and is retried.
+            if (job.get("schedule") or {}).get("overlap_policy") == "queue" and r.exists(f"job_running:{domain}:{job_id}"):
+                r.zadd(f"job_queue:{domain}:pending", {job_id: float(job.get("priority", 5))})
+                held_meta: dict = {
+                    "enqueued_ts": enqueued_ts,
+                    "reason": enqueue_reason or "overlap_queue",
+                    "no_worker_count": no_worker_count,
+                }
+                if retry_attempt:
+                    held_meta["retry_attempt"] = str(retry_attempt)
+                if params_raw:
+                    held_meta["params"] = params_raw
+                r.hset(meta_key, mapping=held_meta)
+                r.expire(meta_key, 24 * 3600)
+                time.sleep(1)
+                continue
+
             # Sensor jobs are dispatched through the normal worker path.
             # Workers execute the sensor polling loop directly, keeping the
             # scheduler free from external workload polling.
@@ -397,6 +415,63 @@ def failover_loop(stop_event: threading.Event):
         time.sleep(2)
 
 
+def _trigger_job(r, db, domain: str, job: dict, now: datetime) -> int:
+    """Fire one due cron/interval job according to its misfire and overlap policies. Returns entries queued (0 or 1).
+
+    The planner is shared with the lite edition (``plan_ticks``/``select_ticks``). The pending queue holds one entry
+    per job id, so a ``catch_up`` backlog is replayed one tick per loop pass: the first selected tick is queued now and
+    the schedule is left pointing at the next one.
+    """
+    schedule_doc = job.get("schedule") or {}
+    next_run_at = schedule_doc.get("next_run_at")
+    if not next_run_at:
+        return 0
+    schedule = ScheduleConfig.model_validate(schedule_doc)
+    ticks, next_schedule = plan_ticks(schedule, now)
+    run_ticks, dropped = select_ticks(schedule, ticks, now)
+    if schedule.misfire_policy == "catch_up" and len(run_ticks) > 1:
+        next_schedule = next_schedule.model_copy(update={"next_run_at": run_ticks[1]})
+        run_ticks = run_ticks[:1]
+    updated = db.job_definitions.find_one_and_update(
+        {"_id": job["_id"], "schedule.next_run_at": next_run_at},
+        {"$set": {"schedule": next_schedule.model_dump(by_alias=True)}},
+        return_document=ReturnDocument.AFTER,
+    )
+    if not updated:  # another instance (or an edit) got there first
+        return 0
+    if dropped:
+        log.info(
+            "Job %s: %d missed tick(s) dropped by misfire_policy=%s (%s .. %s)",
+            job["_id"],
+            len(dropped),
+            schedule.misfire_policy,
+            dropped[0].isoformat(),
+            dropped[-1].isoformat(),
+        )
+    queued = 0
+    priority = int(job.get("priority", 5))
+    pending_key = f"job_queue:{domain}:pending"
+    for _tick in run_ticks:
+        if schedule.overlap_policy == "skip" and (
+            r.zscore(pending_key, job["_id"]) is not None or r.exists(f"job_running:{domain}:{job['_id']}")
+        ):
+            log.info("Job %s: tick skipped by overlap_policy=skip (previous run still pending or running)", job["_id"])
+            event_bus.publish("job_tick_skipped", {"job_id": job["_id"], "domain": domain, "reason": "overlap"})
+            continue
+        r.zadd(pending_key, {job["_id"]: priority})
+        queued += 1
+        event_bus.publish(
+            "job_scheduled",
+            {
+                "job_id": job["_id"],
+                "mode": schedule.mode,
+                "next_run_at": next_schedule.next_run_at.isoformat() if next_schedule.next_run_at else None,
+                "domain": domain,
+            },
+        )
+    return queued
+
+
 def schedule_trigger_loop(stop_event: threading.Event):
     r = get_redis()
     db = get_db()
@@ -415,33 +490,7 @@ def schedule_trigger_loop(stop_event: threading.Event):
                     }
                 ).limit(100)
                 for job in due_jobs:
-                    schedule_doc = job.get("schedule") or {}
-                    next_run_at = schedule_doc.get("next_run_at")
-                    if not next_run_at:
-                        continue
-                    schedule = ScheduleConfig.model_validate(schedule_doc)
-                    advanced = advance_schedule(schedule)
-                    updated = db.job_definitions.find_one_and_update(
-                        {
-                            "_id": job["_id"],
-                            "schedule.next_run_at": next_run_at,
-                        },
-                        {"$set": {"schedule": advanced.model_dump(by_alias=True)}},
-                        return_document=ReturnDocument.AFTER,
-                    )
-                    if not updated:
-                        continue
-                    priority = int(job.get("priority", 5))
-                    r.zadd(f"job_queue:{domain}:pending", {job["_id"]: priority})
-                    event_bus.publish(
-                        "job_scheduled",
-                        {
-                            "job_id": job["_id"],
-                            "mode": schedule.mode,
-                            "next_run_at": advanced.next_run_at.isoformat() if advanced.next_run_at else None,
-                            "domain": domain,
-                        },
-                    )
+                    _trigger_job(r, db, domain, job, now)
         except Exception as exc:
             log.exception("Error in schedule trigger loop: %s", exc)
             time.sleep(1)

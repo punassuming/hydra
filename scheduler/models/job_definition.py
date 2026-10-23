@@ -28,12 +28,15 @@ class ScheduleConfig(BaseModel):
     next_run_at: Optional[datetime] = None
     timezone: str = "UTC"  # IANA name; cron expressions are evaluated in this zone (interval schedules ignore it)
     enabled: bool = True
-    # Behaviour when the scheduler was down/asleep across one or more due ticks. Honoured by the lite edition;
-    # the full edition's trigger loop does not apply these yet (it fires a missed tick once, i.e. run_once).
+    # Behaviour when the scheduler was down/asleep across one or more due ticks. Enforced by both editions through
+    # scheduler.utils.schedule.plan_ticks/select_ticks. `run_once` (default) fires a single run after the outage;
+    # before these fields existed the full edition replayed every missed tick, one per loop pass: use `catch_up`
+    # (bounded by catch_up_limit) for that.
     misfire_policy: Literal["skip", "run_once", "catch_up"] = "run_once"
-    catch_up_limit: int = 10  # max missed ticks enqueued when misfire_policy == "catch_up"
-    # What to do when a tick is due while the previous run of the same job is still pending/active.
-    # Honoured by the lite edition; the full edition does not enforce it yet.
+    catch_up_limit: int = 10  # max missed ticks replayed when misfire_policy == "catch_up"
+    # What to do when a tick is due while the previous run of the same job is still pending/active: `allow` (default),
+    # `skip` (drop the tick) or `queue` (wait for the previous run). The full edition can only see a run once it has
+    # started or is pending in the queue, so a job in the instant between dispatch and start can still overlap.
     overlap_policy: Literal["allow", "skip", "queue"] = "allow"
 
     @model_validator(mode="after")

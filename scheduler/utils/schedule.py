@@ -72,3 +72,47 @@ def advance_schedule(schedule: ScheduleConfig) -> ScheduleConfig:
     if next_run is None:
         return schedule.model_copy(update={"next_run_at": None, "enabled": False})
     return schedule.model_copy(update={"next_run_at": next_run})
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# Misfire planning, shared by the full scheduler's trigger loop and the lite edition's.
+# ---------------------------------------------------------------------------------------------------------------
+
+# A due tick older than this was missed (scheduler down/asleep), not merely processed on the next loop pass.
+MISFIRE_GRACE_SECONDS = 30
+# Safety valve when walking a long outage tick by tick.
+MAX_TICKS_WALKED = 10_000
+
+
+def plan_ticks(schedule: ScheduleConfig, now: datetime) -> tuple[list[datetime], ScheduleConfig]:
+    """All ticks due at or before ``now`` (oldest first) and the schedule advanced past them."""
+    ticks: list[datetime] = []
+    current = schedule
+    while current.next_run_at is not None and current.next_run_at <= now and len(ticks) < MAX_TICKS_WALKED:
+        ticks.append(current.next_run_at)
+        current = advance_schedule(current)
+    if current.next_run_at is not None and current.next_run_at <= now:  # outage longer than the walk cap: rebase on now
+        if current.mode == "cron" and current.cron:
+            current = current.model_copy(update={"next_run_at": cron_next(current, now)})
+        else:
+            current = current.model_copy(update={"next_run_at": now + timedelta(seconds=current.interval_seconds or 1)})
+    return ticks, current
+
+
+def select_ticks(schedule: ScheduleConfig, ticks: list[datetime], now: datetime) -> tuple[list[datetime], list[datetime]]:
+    """Apply ``misfire_policy`` to the due ticks: returns (ticks to run, ticks dropped).
+
+    ``run_once`` (default) collapses everything due into a single run labelled with the latest tick; ``skip`` drops
+    ticks older than ``MISFIRE_GRACE_SECONDS``; ``catch_up`` keeps the newest ``catch_up_limit`` ticks.
+    """
+    if not ticks:
+        return [], []
+    late = [t for t in ticks if (now - t).total_seconds() > MISFIRE_GRACE_SECONDS]
+    on_time = [t for t in ticks if t not in late]
+    policy = schedule.misfire_policy
+    if policy == "skip":
+        return on_time, late
+    if policy == "catch_up":
+        limit = max(schedule.catch_up_limit, 1)
+        return ticks[-limit:], ticks[:-limit]
+    return ticks[-1:], ticks[:-1]

@@ -4,51 +4,17 @@ from __future__ import annotations
 
 import logging
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from scheduler.models.job_definition import ScheduleConfig
-from scheduler.utils.schedule import advance_schedule, cron_next
+from scheduler.utils.schedule import MAX_TICKS_WALKED, MISFIRE_GRACE_SECONDS, plan_ticks, select_ticks  # shared planner
 
 from .store import Store
 from .store.store import norm_ts, now_utc
 
 log = logging.getLogger("hydra_lite.scheduling")
 
-# A due tick that is older than this was missed (daemon down/asleep), not merely processed on the next loop pass.
-MISFIRE_GRACE_SECONDS = 30
-# Safety valve when walking a long outage tick by tick.
-MAX_TICKS_WALKED = 10_000
-
-
-def plan_ticks(schedule: ScheduleConfig, now: datetime) -> tuple[list[datetime], ScheduleConfig]:
-    """All ticks due at or before ``now`` (oldest first) and the schedule advanced past them."""
-    ticks: list[datetime] = []
-    current = schedule
-    while current.next_run_at is not None and current.next_run_at <= now and len(ticks) < MAX_TICKS_WALKED:
-        ticks.append(current.next_run_at)
-        current = advance_schedule(current)
-    if current.next_run_at is not None and current.next_run_at <= now:  # outage longer than the walk cap: rebase on now
-        if current.mode == "cron" and current.cron:
-            current = current.model_copy(update={"next_run_at": cron_next(current, now)})
-        else:
-            current = current.model_copy(update={"next_run_at": now + timedelta(seconds=current.interval_seconds or 1)})
-    return ticks, current
-
-
-def select_ticks(schedule: ScheduleConfig, ticks: list[datetime], now: datetime) -> tuple[list[datetime], list[datetime]]:
-    """Apply ``misfire_policy``: returns (ticks to run, ticks dropped)."""
-    if not ticks:
-        return [], []
-    late = [t for t in ticks if (now - t).total_seconds() > MISFIRE_GRACE_SECONDS]
-    on_time = [t for t in ticks if t not in late]
-    policy = schedule.misfire_policy
-    if policy == "skip":
-        return on_time, late
-    if policy == "catch_up":
-        limit = max(schedule.catch_up_limit, 1)
-        return ticks[-limit:], ticks[:-limit]
-    # run_once (default): collapse everything due into a single run, labelled with the latest tick
-    return ticks[-1:], ticks[:-1]
+__all__ = ["MAX_TICKS_WALKED", "MISFIRE_GRACE_SECONDS", "plan_ticks", "select_ticks", "tick", "trigger_loop"]
 
 
 def tick(store: Store, wake: threading.Event | None = None, now: datetime | None = None) -> int:
