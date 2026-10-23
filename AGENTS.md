@@ -228,7 +228,7 @@ The Compose files themselves (`docker-compose.worker.go.yml`, `docker-compose.wo
 ### Backend (Python)
 
 *   Uses `pytest` for testing.
-*   Install dependencies: `uv sync --dev`
+*   Install dependencies: `uv sync --dev --all-extras` (a plain `uv sync` installs only the lean set the lite edition and `hydra-ctl` need; the scheduler/worker imports Redis, MongoDB and the AI SDKs from the `full` extra, and the Dockerfiles install `--extra full`)
 *   Run tests: `./scripts/test.sh` or `uv run pytest tests/`
 *   Specific tests: `uv run pytest tests/test_scheduler.py tests/test_worker.py`
 *   Test files located in `tests/`

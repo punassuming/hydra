@@ -7,20 +7,32 @@ name = "hydra-jobs"
 version = "0.2.0"
 requires-python = ">=3.11"
 dependencies = [
+    # The lean set: everything the lite edition (and hydra-ctl) needs. `uv tool install .` / `pipx install .` gets
+    # only these. The full scheduler/worker images install the `full` extra on top.
     "croniter==6.2.4",
-    "cryptography>=50.0.2",
     "fastapi==0.142.2",
+    "pydantic==2.13.5",
+    "PyYAML==6.0.3",
+    "uvicorn==0.54.0",
+    "tzdata>=2026.5 ; sys_platform == 'win32'",
+]
+
+[project.optional-dependencies]
+# SQL executor/sensor support (the worker advertises `sql` only when SQLAlchemy imports).
+sql = [
+    "SQLAlchemy==2.0.36",
+]
+# Everything the full (Redis + MongoDB) edition imports: the scheduler API, orchestrator and Python worker.
+full = [
+    "cryptography>=50.0.2",
     "google-genai>=2.28.0",
     "openai==3.24.0",
-    "pydantic==2.13.5",
     "pymongo==4.18.2",
     "python-dotenv==1.2.4",
     "redis==8.1.0",
-    "PyYAML==6.0.3",
     "SQLAlchemy==2.0.36",
     "sse-starlette==3.5.0",
     "uvicorn[standard]==0.54.0",
-    "tzdata>=2026.5 ; sys_platform == 'win32'",
 ]
 
 [project.scripts]

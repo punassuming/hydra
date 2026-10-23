@@ -15,7 +15,7 @@ RUN groupadd --gid "${HYDRA_WORKER_GID}" hydra \
 
 RUN pip install --no-cache-dir uv==0.5.13
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev --no-install-project
+RUN uv sync --frozen --no-dev --no-install-project --extra full
 
 COPY worker /app/worker
 

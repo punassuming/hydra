@@ -65,7 +65,7 @@ JOB_META: dict[str, JobMeta] = {
 
 # Environment bootstrap that CI needs on a blank runner but that would mutate
 # (or slow down) a developer machine. Dropped unless --install is given; run
-# `uv sync --dev` / `npm ci` yourself when dependencies change.
+# `uv sync --dev --all-extras` / `npm ci` yourself when dependencies change.
 _BOOTSTRAP_LINE = re.compile(r"^\s*(?:python3?\s+-m\s+)?pip3?\s+install\b|^\s*npm\s+ci\b|^\s*uv\s+sync\b")
 _EXPR = re.compile(r"\$\{\{\s*(.+?)\s*\}\}")
 

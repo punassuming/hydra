@@ -1,6 +1,6 @@
 # Testing guardrails
 
-Install the locked Python environment with `uv sync --dev`. `pyproject.toml`
+Install the locked Python environment with `uv sync --dev --all-extras` (the lean default omits the `full` extra the scheduler tests import). `pyproject.toml`
 and `uv.lock` are the dependency source of truth for local development, CI,
 and the Python container images.
 
@@ -19,7 +19,7 @@ python scripts/ci_local.py --only helm --dry-run  # print the commands without r
 - It needs Python 3.11+ and PyYAML (`uv run python scripts/ci_local.py ...` has both).
 - A job whose tools are missing (no `helm`, no reachable Docker daemon, ...) is reported as `SKIP` with the reason; add `--strict` to treat that as a failure. Exit code is non-zero if any job fails. The advisory `security-audit` job only warns.
 - Output of each job is saved under `.ci-local/` (git-ignored); `-q` hides command output on the terminal (job and step headers and the summary table still print).
-- It does **not** reproduce `uses:` steps (checkout, `setup-*`, caches, buildx), the other-OS legs of the Python matrix, or the publish/release workflows. It assumes your toolchains are installed, so install lines (`pip install`, `npm ci`, `uv sync`) are skipped unless you pass `--install`; run `uv sync --dev` and `cd ui && npm ci` yourself when dependencies change. `/tmp` paths used by CI scripts are mapped to a private temp directory.
+- It does **not** reproduce `uses:` steps (checkout, `setup-*`, caches, buildx), the other-OS legs of the Python matrix, or the publish/release workflows. It assumes your toolchains are installed, so install lines (`pip install`, `npm ci`, `uv sync`) are skipped unless you pass `--install`; run `uv sync --dev --all-extras` and `cd ui && npm ci` yourself when dependencies change. `/tmp` paths used by CI scripts are mapped to a private temp directory.
 - Jobs are classified in `JOB_META` at the top of the script. `tests/test_workflows.py` fails if a CI job is added without being classified there.
 
 ### Workflow checks without running anything

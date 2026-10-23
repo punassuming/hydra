@@ -77,7 +77,7 @@ cd C:\hydra-worker
 uv venv .venv
 
 # Install the Hydra worker package from the source tree
-uv pip install -e C:\path\to\hydra
+uv pip install -e "C:\path\to\hydra[full]"
 ```
 
 Create a `.env` file in `C:\hydra-worker\` with the worker credentials:
@@ -322,7 +322,7 @@ New-Item -ItemType Directory -Force C:\hydra-worker
 New-Item -ItemType Directory -Force C:\hydra-worker\logs
 cd C:\hydra-worker
 uv venv .venv
-uv pip install -e C:\path\to\hydra
+uv pip install -e "C:\path\to\hydra[full]"
 
 # 2. Write credentials to .env (replace placeholder values).
 @"
@@ -366,7 +366,7 @@ New-Item -ItemType Directory -Force C:\hydra-worker
 New-Item -ItemType Directory -Force C:\hydra-worker\logs
 cd C:\hydra-worker
 uv venv .venv
-uv pip install -e C:\path\to\hydra
+uv pip install -e "C:\path\to\hydra[full]"
 
 # 2. Write credentials to .env (replace placeholder values).
 @"
