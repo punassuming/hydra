@@ -6,10 +6,11 @@ import hmac
 import json
 import time
 from contextlib import asynccontextmanager
+from importlib import resources
 from typing import Any, Dict, Optional
 
 from fastapi import Body, FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, ValidationError
 
 from scheduler.models.run_params import RunJobRequest
@@ -24,7 +25,7 @@ from .internal import register_internal
 from .runtime import Daemon
 
 UNSUPPORTED_PREFIXES = ("/admin", "/domain", "/credentials", "/ai", "/investigations", "/events")
-OPEN_PATHS = {"/health"}
+OPEN_PATHS = {"/health", "/"}  # "/" is the static status page: no data, the page then calls the authenticated API
 
 
 class SpawnBody(BaseModel):
@@ -111,6 +112,13 @@ def create_app(daemon: Daemon, manage_lifecycle: bool = True) -> FastAPI:
     def orchestration():
         alive = not daemon.stop.is_set()
         return {"status": "ok" if alive else "stopping", "mode": "embedded", "alive": alive}
+
+    @app.get("/", include_in_schema=False)
+    def status_page():
+        page = resources.files("hydra_lite.daemon").joinpath("static/index.html").read_text(encoding="utf-8")
+        return HTMLResponse(
+            page, headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer"}
+        )
 
     # ------------------------------------------------------------------- jobs
     @app.get("/jobs/")

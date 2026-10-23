@@ -63,6 +63,9 @@ def register(commands: Any, output_parent: argparse.ArgumentParser) -> None:
         svc_actions.add_parser(name, help=f"{name.capitalize()} the registered service")
     svc_actions.add_parser("status", parents=[output_parent], help="Show whether the service is installed and running")
 
+    ui = groups.add_parser("ui", help="Open the read-only status page in your browser (already signed in)")
+    ui.add_argument("--no-open", action="store_true", help="print the address instead of opening a browser")
+
     doctor = groups.add_parser("doctor", parents=[output_parent], help="Check the install, data directory, daemon and service")
     doctor.add_argument("--no-api", action="store_true", help="skip checks that talk to the daemon")
     backup = groups.add_parser("backup", help="Write a consistent copy of the database (safe while the daemon runs)")
@@ -88,6 +91,8 @@ def dispatch(args: argparse.Namespace, client_factory: Any) -> int:
         return _daemon(args, client_factory)
     if args.lite_command == "service":
         return _service(args)
+    if args.lite_command == "ui":
+        return _ui(args)
     if args.lite_command == "doctor":
         return _doctor(args, client_factory)
     if args.lite_command == "backup":
@@ -279,4 +284,24 @@ def _backup(args: argparse.Namespace) -> int:
         return 1
     print(f"wrote {dest} ({dest.stat().st_size / 1e6:.1f} MB, schema v{version}, this Hydra writes v{latest_version()})")
     print("to restore: stop the daemon, replace hydra.db in the data directory with this file, start the daemon")
+    return 0
+
+
+def _ui(args: argparse.Namespace) -> int:
+    """Open the status page. The token travels in the URL *fragment*, which browsers never send to the server and the
+    page removes from the address bar immediately; it is printed only with --no-open."""
+    import webbrowser
+
+    url = args.api_url.rstrip("/")
+    token = args.token or local_token(args.api_url)
+    target = f"{url}/" + (f"#token={token}" if token else "")
+    if args.no_open:
+        print(target)
+        return 0
+    if not webbrowser.open(target):
+        print(
+            f"could not open a browser; visit {url}/ and paste the token from {config_module.load().token_file}", file=sys.stderr
+        )
+        return 1
+    print(f"opened {url}/")
     return 0

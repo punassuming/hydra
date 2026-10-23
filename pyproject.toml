@@ -43,6 +43,7 @@ include = ["cli*", "scheduler*", "worker*", "hydra_lite*"]
 
 [tool.setuptools.package-data]
 "hydra_lite.store" = ["schema.sql", "migrations/*.sql"]
+"hydra_lite.daemon" = ["static/*.html"]
 
 [dependency-groups]
 dev = [

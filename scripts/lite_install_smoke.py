@@ -87,7 +87,13 @@ def main() -> int:
         if result["status"] != "success" or "lean install works" not in result["stdout"]:
             print(f"FAIL: unexpected run result: {result}", file=sys.stderr)
             return 1
-        print("OK: lean install ran a job through the lite edition; no heavy packages installed")
+        import urllib.request
+
+        page = urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=10).read().decode()  # packaged static file
+        if "lite edition" not in page:
+            print("FAIL: the status page is missing from the installed package", file=sys.stderr)
+            return 1
+        print("OK: lean install ran a job through the lite edition and serves the status page; no heavy packages installed")
         return 0
     finally:
         daemon.terminate()

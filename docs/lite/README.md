@@ -22,6 +22,26 @@ uv run hydra-ctl lite daemon stop
 `HYDRA_API_URL` and `HYDRA_TOKEN`. Exit codes: 0 ok, 1 error, 3 server unreachable, 4 not found, 5 `run --wait`
 finished non-success.
 
+## Status page and artifacts
+
+`hydra-ctl lite ui` opens a **read-only** page served by the daemon at `http://127.0.0.1:8000/`: runs (with each run's
+state timeline, params and output), jobs (schedule, next run, last result, skipped ticks), workers, the queue and
+artifacts. It makes no changes. The token is passed in the URL *fragment* (never sent to the server, and removed from
+the address bar at once) or typed into the page, and lives only in that browser tab; the page loads nothing from the
+internet. `#run=<id>` deep-links to one run.
+
+A job can publish an artifact by printing `__HYDRA_ARTIFACT__: {"name": "daily_export", "metadata": {...}}` (the line is
+consumed, not logged). Jobs listing that name in `triggers_on_artifacts` start with the metadata in
+`HYDRA_UPSTREAM_ARTIFACT_METADATA`; `GET /artifacts/` lists them. A job is not re-triggered by its own artifact.
+
+## SQL, sensors and extra slots
+
+`sql` and `sensor` jobs are supported when a worker advertises the capability (install `hydra-jobs[sql]`; until then
+their runs wait as `pending`, and `hydra-ctl lite doctor` says why). Put the connection string in the job
+(`connection_uri`; it is masked in API output but stored unencrypted in the database): `credential_ref` is rejected
+because lite has no credential store. `bypass_concurrency: true` lets a job start even when every worker slot is busy,
+up to `SCHEDULER_BYPASS_MAX_EXTRA` extra at a time per worker (`0` = unlimited).
+
 ## Where things live
 
 | What | Windows | Linux |
@@ -69,5 +89,5 @@ you front it with TLS. Jobs run as the user that runs the daemon; impersonation 
 
 ## Not in the lite edition
 
-Domains and per-domain tokens, Redis ACLs, the web UI, AI features and investigations, credentials, backfill,
-`sql`/`sensor` executors (for now), and `HYDRA_MODE=api`. These answer `501 not supported by this Hydra edition`.
+Domains and per-domain tokens, Redis ACLs, the interactive web UI (the status page is read-only), AI features and
+investigations, credentials, backfill, and `HYDRA_MODE=api`. These answer `501 not supported by this Hydra edition`.
