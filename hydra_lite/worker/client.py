@@ -27,6 +27,7 @@ HEARTBEAT_SECONDS = 2.0
 CLAIM_WAIT_SECONDS = 15.0
 BACKOFF_FLOOR, BACKOFF_CAP = 2.0, 60.0  # same shape as worker/worker.py's kill-listener reconnect
 FLUSH_SECONDS = 0.5
+BYPASS_BATCH = 8  # most bypass runs claimed per poll when SCHEDULER_BYPASS_MAX_EXTRA is unlimited
 FLUSH_BYTES = 64 * 1024
 MAX_BUFFER_BYTES = 8 * 1024 * 1024  # backpressure: producers block rather than grow without bound
 
@@ -172,6 +173,7 @@ class HttpWorker:
         self._lock = threading.Lock()
         self._registered = threading.Event()
         self._last_contact = time.monotonic()
+        self._warned_bypass = False
         self.orphan_exit_seconds = float(os.getenv("WORKER_ORPHAN_EXIT_SECONDS", "120"))
 
     # ---------------------------------------------------------------- transport
@@ -275,13 +277,19 @@ class HttpWorker:
         threads: list[threading.Thread] = []
         while not self.stop.is_set():
             with self._lock:
-                free = self.max_concurrency - len(self._active)
-            if free <= 0 or self.state != "online":
+                active = len(self._active)
+            free = self.max_concurrency - active
+            extra_room = self._bypass_room(active)
+            if (free <= 0 and extra_room <= 0) or self.state != "online":
                 self.stop.wait(0.2)
                 continue
+            # While full only bypass jobs can be taken, so poll briefly: a normal slot may free up at any moment.
+            wait = CLAIM_WAIT_SECONDS if free > 0 else 1.0
             try:
                 reply = self.client.request(
-                    "POST", "/internal/claim", body={"worker_id": self.worker_id, "capacity": free, "wait": CLAIM_WAIT_SECONDS}
+                    "POST",
+                    "/internal/claim",
+                    body={"worker_id": self.worker_id, "capacity": max(free, 0), "bypass": extra_room, "wait": wait},
                 )
             except APIError as exc:
                 if exc.status == 404:
@@ -300,6 +308,16 @@ class HttpWorker:
                 threads.append(t)
             threads = [t for t in threads if t.is_alive()]
         self._drain(threads)
+
+    def _bypass_room(self, active: int) -> int:
+        """How many bypass_concurrency runs may start now (SCHEDULER_BYPASS_MAX_EXTRA caps the extras; 0 = unlimited)."""
+        cap = int(os.getenv("SCHEDULER_BYPASS_MAX_EXTRA", "0") or 0)
+        extra_in_use = max(0, active - self.max_concurrency)
+        room = BYPASS_BATCH if cap <= 0 else max(0, cap - extra_in_use)
+        if room > 0 and active >= self.max_concurrency and not self._warned_bypass:
+            self._warned_bypass = True
+            log.warning("worker is at max_concurrency; bypass_concurrency jobs may still run (cap: %s)", cap or "unlimited")
+        return room
 
     def _start_reserved(self, envelope: dict) -> None:
         self._run_envelope(envelope)  # replaces the placeholder reservation with the run's real kill event

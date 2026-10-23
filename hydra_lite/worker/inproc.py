@@ -63,6 +63,9 @@ class WorkerPool:
             t = threading.Thread(target=self._loop, name=f"hydra-worker-{i}", daemon=True)
             t.start()
             self._threads.append(t)
+        bp = threading.Thread(target=self._bypass_loop, name="hydra-worker-bypass", daemon=True)
+        bp.start()
+        self._threads.append(bp)
         hb = threading.Thread(target=self._heartbeat, name="hydra-worker-hb", daemon=True)
         hb.start()
         self._threads.append(hb)
@@ -95,6 +98,33 @@ class WorkerPool:
         """Same eligibility rule as a subprocess worker (tags, os, executor capabilities, allowed users...)."""
         return job is None or passes_affinity(normalize_affinity(job), self._view)
 
+    def _accepts_bypass(self, run: dict, job: Optional[dict]) -> bool:
+        return job is None or (bool(job.get("bypass_concurrency")) and passes_affinity(normalize_affinity(job), self._view))
+
+    def _bypass_loop(self) -> None:
+        """Run bypass_concurrency jobs on extra threads while every normal slot is busy (cap: SCHEDULER_BYPASS_MAX_EXTRA)."""
+        extras: list[threading.Thread] = []
+        while not self.stop.is_set():
+            extras = [t for t in extras if t.is_alive()]
+            cap = int(os.getenv("SCHEDULER_BYPASS_MAX_EXTRA", "0") or 0)
+            with self._count_lock:
+                saturated = self.running >= self.max_concurrency
+            if self.state != "online" or not saturated or (cap > 0 and len(extras) >= cap):
+                self.stop.wait(0.3)
+                continue
+            try:
+                run = self.store.claim_run(self.worker_id, accept=self._accepts_bypass)
+            except Exception:
+                log.exception("bypass claim failed")
+                self.stop.wait(1.0)
+                continue
+            if run is None:
+                self.stop.wait(0.3)
+                continue
+            t = threading.Thread(target=self._execute, args=(run,), name=f"hydra-bypass-{run['id'][:8]}", daemon=True)
+            t.start()
+            extras.append(t)
+
     def _heartbeat(self) -> None:
         while not self.stop.wait(2.0):
             try:
@@ -117,23 +147,27 @@ class WorkerPool:
                 self.wake.wait(0.5)
                 self.wake.clear()
                 continue
-            kill_event = KillEvent()
+            self._execute(run)
+
+    def _execute(self, run: dict) -> None:
+        """Run one claimed run to completion on the calling thread (used for normal and bypass runs alike)."""
+        kill_event = KillEvent()
+        with self._kill_lock:
+            self._kills[run["id"]] = kill_event
+        with self._count_lock:
+            self.running += 1
+        try:
+            job = self.store.get_job(run["job_id"])
             with self._kill_lock:
-                self._kills[run["id"]] = kill_event
+                self._active[run["id"]] = (job["_id"], job.get("user", "default"))
+            execute_run(LocalSink(self.store, self.logs, self.lifecycle, self.worker_id), run, job, kill_event)
+        except NotFound:
+            self.lifecycle.finalize(run["id"], "failed", returncode=1, reason="job was deleted before the run started")
+        except Exception:
+            log.exception("worker loop error")
+        finally:
             with self._count_lock:
-                self.running += 1
-            try:
-                job = self.store.get_job(run["job_id"])
-                with self._kill_lock:
-                    self._active[run["id"]] = (job["_id"], job.get("user", "default"))
-                execute_run(LocalSink(self.store, self.logs, self.lifecycle, self.worker_id), run, job, kill_event)
-            except NotFound:
-                self.lifecycle.finalize(run["id"], "failed", returncode=1, reason="job was deleted before the run started")
-            except Exception:
-                log.exception("worker loop error")
-            finally:
-                with self._count_lock:
-                    self.running -= 1
-                with self._kill_lock:
-                    self._kills.pop(run["id"], None)
-                    self._active.pop(run["id"], None)
+                self.running -= 1
+            with self._kill_lock:
+                self._kills.pop(run["id"], None)
+                self._active.pop(run["id"], None)

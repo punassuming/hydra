@@ -38,7 +38,8 @@ class RegisterBody(BaseModel):
 
 class ClaimBody(BaseModel):
     worker_id: str
-    capacity: int = 1
+    capacity: int = 1  # free normal slots
+    bypass: int = 0  # extra slots the worker will give bypass_concurrency jobs while it is at capacity
     wait: float = 15.0
 
 
@@ -89,32 +90,42 @@ def register_internal(app: FastAPI, daemon: Daemon) -> None:
             return []
         view = worker_view(worker)
 
-        def accept(run: dict, job: Optional[dict]) -> bool:
+        def eligible(job: Optional[dict]) -> bool:
             return job is None or passes_affinity(normalize_affinity(job), view)
 
+        def accept_any(run: dict, job: Optional[dict]) -> bool:
+            return eligible(job)
+
+        def accept_bypass(run: dict, job: Optional[dict]) -> bool:
+            # a deleted job is claimed so it can be failed promptly; otherwise only bypass_concurrency jobs may exceed capacity
+            return job is None or (bool(job.get("bypass_concurrency")) and eligible(job))
+
         envelopes: List[dict] = []
-        for _ in range(max(1, min(body.capacity, 32))):
-            run = store.claim_run(body.worker_id, accept=accept)
-            if run is None:
-                break
-            try:
-                job = store.get_job(run["job_id"])
-            except NotFound:
-                lifecycle.finalize(run["id"], "failed", returncode=1, reason="job was deleted before the run started")
-                continue
-            envelopes.append(
-                {
-                    "run_id": run["id"],
-                    "job_id": run["job_id"],
-                    "job": job,
-                    "params": run["params"],
-                    "retry_attempt": run["retry_attempt"],
-                    "trigger": run["trigger"],
-                    "enqueued_ts": run["queued_at"],
-                    "dispatch_ts": iso(now_utc()),
-                    "queue_latency_ms": run["queue_latency_ms"],
-                }
-            )
+        # Normal slots first, then bypass_concurrency jobs into the worker's extra room (same semantics as the full
+        # edition: a bypass job may run even when the worker is at max_concurrency, up to its soft cap).
+        for limit, accept in ((max(0, min(body.capacity, 32)), accept_any), (max(0, min(body.bypass, 32)), accept_bypass)):
+            for _ in range(limit):
+                run = store.claim_run(body.worker_id, accept=accept)
+                if run is None:
+                    break
+                try:
+                    job = store.get_job(run["job_id"])
+                except NotFound:
+                    lifecycle.finalize(run["id"], "failed", returncode=1, reason="job was deleted before the run started")
+                    continue
+                envelopes.append(
+                    {
+                        "run_id": run["id"],
+                        "job_id": run["job_id"],
+                        "job": job,
+                        "params": run["params"],
+                        "retry_attempt": run["retry_attempt"],
+                        "trigger": run["trigger"],
+                        "enqueued_ts": run["queued_at"],
+                        "dispatch_ts": iso(now_utc()),
+                        "queue_latency_ms": run["queue_latency_ms"],
+                    }
+                )
         return envelopes
 
     @app.post("/internal/claim")

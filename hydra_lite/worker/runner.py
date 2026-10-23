@@ -73,6 +73,26 @@ class LocalSink:
             self._log.close()
 
 
+class _Tails:
+    """Forwards streamed output to the sink while remembering the last bytes, to spot text that was never streamed."""
+
+    KEEP = 8192
+
+    def __init__(self, sink: "RunSink"):
+        self.sink = sink
+        self.tail = {"stdout": "", "stderr": ""}
+
+    def write(self, stream: str, text: str) -> None:
+        self.sink.log(stream, text)
+        self.tail[stream] = (self.tail[stream] + text)[-self.KEEP :]
+
+    def flush_unstreamed(self, stdout: str, stderr: str) -> None:
+        for stream, text in (("stdout", stdout), ("stderr", stderr)):
+            text = (text or "").strip()
+            if text and text[-200:] not in self.tail[stream]:
+                self.sink.log(stream, text + "\n")
+
+
 def execute_run(sink: RunSink, run: dict, job: dict, kill_event: threading.Event) -> str:
     """Run ``run`` to completion through ``sink``. Returns the final status."""
     run_id = run["id"]
@@ -88,14 +108,18 @@ def execute_run(sink: RunSink, run: dict, job: dict, kill_event: threading.Event
             attempts_used += 1
             started = time.time()
             attempt_timings: dict = {}
+            tails = _Tails(sink)
             rc, stdout, stderr = execute_job(
                 job,
-                log_callback_out=lambda text: sink.log("stdout", text),
-                log_callback_err=lambda text: sink.log("stderr", text),
+                log_callback_out=lambda text: tails.write("stdout", text),
+                log_callback_err=lambda text: tails.write("stderr", text),
                 kill_event=kill_event,
                 timings=attempt_timings,
                 timed_out_holder=timed_out,
             )
+            # Some executors (sensor, http, source/env failures) report a message only in their return value and never
+            # stream it; the full edition carries that text in run_end, lite keeps logs as files, so emit what is missing.
+            tails.flush_unstreamed(stdout, stderr)
             if attempt == 0:
                 timings = attempt_timings
             success, reason = evaluate_completion(job, rc, stdout, stderr)

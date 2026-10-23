@@ -26,10 +26,24 @@ def apply_retry_count(payload: dict) -> dict:
     return payload
 
 
+CREDENTIAL_MESSAGE = (
+    "credential_ref is not supported by the lite edition (it has no credential store); put the value in the job "
+    "itself (e.g. connection_uri, headers)"
+)
+
+
 def validate_definition(job: JobDefinition) -> list[str]:
     errors = list(validate_job_definition(job).errors)
-    if getattr(job.executor, "type", None) in {"sql", "sensor"}:
-        errors.append(f"{job.executor.type} executor is not supported by the lite edition yet")
+    executor = job.executor
+    ref = (getattr(executor, "credential_ref", None) or "").strip()
+    uri = (getattr(executor, "connection_uri", None) or "").strip()
+    if ref and not uri:
+        # sql/sensor can still run when the URI is inline; everything else (http, git) has nothing to resolve the ref with
+        errors = [e for e in errors if "connection_uri or credential_ref" not in e]
+        errors.append(CREDENTIAL_MESSAGE)
+    source = job.source
+    if source is not None and (getattr(source, "credential_ref", None) or "").strip():
+        errors.append("source.credential_ref is not supported by the lite edition; use a public repository or a path/copy source")
     return errors
 
 
