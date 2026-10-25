@@ -2,7 +2,7 @@ name: Python CI
 
 on:
   push:
-    branches: ["main", "master"]
+    branches: ["main", "master", "feat/hydra-lite"]  # TEMPORARY: feat/hydra-lite is removed before merging
   pull_request:
     branches: ["main", "master"]
 
