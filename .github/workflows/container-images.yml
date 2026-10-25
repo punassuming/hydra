@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - feat/hydra-lite # TEMPORARY: removed before merging
     paths:
       - scheduler/**
       - worker/**
