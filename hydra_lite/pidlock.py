@@ -45,6 +45,7 @@ class DaemonLock:
             pid = self._read_pid(fd)
             os.close(fd)
             raise AlreadyRunning(self.path, pid) from None
+        os.lseek(fd, 0, os.SEEK_SET)  # on Windows the lock call left the pointer at the lock offset
         os.ftruncate(fd, 0)
         os.write(fd, f"{os.getpid()}\n".encode())
         self._fd = fd
