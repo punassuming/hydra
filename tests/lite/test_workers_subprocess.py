@@ -5,6 +5,7 @@ import signal
 import sys
 from datetime import timedelta
 
+import pytest
 from conftest import py_job, wait_for
 
 from hydra_lite.jobs import build_job
@@ -50,7 +51,7 @@ def test_in_worker_retries_are_recorded(sub_live):
     api, d = sub_live
     job = _submit(api, "flaky", "import sys; sys.exit(1)", retries=2)
     run_id = _run(api, job)
-    run = _wait_status(api, run_id, "failed")
+    run = _wait_status(api, run_id, "failed", timeout=120)  # three interpreter start-ups: slow on a Windows runner
     assert run["attempt"] == 3
     assert [e["type"] for e in d.store.list_events(run_id)].count("retry") == 2
 
@@ -65,6 +66,7 @@ def test_kill_reaches_a_running_process_via_heartbeat(sub_live):
     assert run["completion_reason"] == "killed by request"
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="needs SIGKILL")
 def test_worker_crash_marks_the_run_lost_retries_it_and_the_supervisor_restarts_the_worker(sub_live, tmp_path):
     api, d = sub_live
     marker = tmp_path / "first.txt"
@@ -194,6 +196,7 @@ def test_restarted_worker_under_the_same_id_does_not_hide_lost_runs(tmp_path):
     store.close()
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="SIGTERM is an immediate TerminateProcess on Windows: no drain")
 def test_sigterm_drains_in_flight_runs_before_the_worker_exits(sub_live):
     api, _ = sub_live
     job = _submit(api, "drain", "import time; print('start', flush=True); time.sleep(4); print('finished')")

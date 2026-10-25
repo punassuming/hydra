@@ -31,6 +31,7 @@ def test_synced_and_network_locations_are_flagged(path, needle):
     assert needle in doctor.synced_or_network_reason(Path(path)).lower()
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="the mount table (/proc/mounts) is a Linux file")
 def test_network_filesystems_are_detected_from_the_mount_table(tmp_path):
     mounts = tmp_path / "mounts"
     mounts.write_text(f"/dev/sda1 / ext4 rw 0 0\nserver:/export {tmp_path} nfs4 rw 0 0\n")

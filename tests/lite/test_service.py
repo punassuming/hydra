@@ -28,7 +28,8 @@ def test_spec_args_carry_only_overrides():
     ]
 
 
-def test_interpreter_warnings_flag_ephemeral_locations(tmp_path):
+def test_interpreter_warnings_flag_ephemeral_locations(tmp_path, monkeypatch):
+    monkeypatch.setattr("tempfile.gettempdir", lambda: str(tmp_path))  # pytest's tmp_path need not live under the OS temp dir
     fake = tmp_path / "venv" / "bin" / "python"
     fake.parent.mkdir(parents=True)
     fake.write_text("")

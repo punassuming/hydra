@@ -79,7 +79,9 @@ def test_sql_job_runs_a_query(client, tmp_path):
     con.close()
     job = client.post(
         "/jobs/",
-        json=job_body("count", {"type": "sql", "query": "select count(*) as n from t", "connection_uri": f"sqlite:///{db}"}),
+        json=job_body(
+            "count", {"type": "sql", "query": "select count(*) as n from t", "connection_uri": f"sqlite:///{db.as_posix()}"}
+        ),
     ).json()
     run = terminal(client, client.post(f"/jobs/{job['_id']}/run", json={}).json()["run_id"])
     assert run["status"] == "success" and '"n": 3' in run["stdout"]

@@ -12,6 +12,9 @@ import sys
 from pathlib import Path
 from typing import Optional
 
+# Windows byte-range locks also block *reads* of the locked range, so lock a byte far beyond the PID text.
+_WIN_LOCK_OFFSET = 1 << 20
+
 
 class AlreadyRunning(RuntimeError):
     def __init__(self, path: Path, pid: Optional[int]):
@@ -32,7 +35,7 @@ class DaemonLock:
             if sys.platform == "win32":
                 import msvcrt
 
-                os.lseek(fd, 0, os.SEEK_SET)
+                os.lseek(fd, _WIN_LOCK_OFFSET, os.SEEK_SET)
                 msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
             else:
                 import fcntl
@@ -62,7 +65,7 @@ class DaemonLock:
             if sys.platform == "win32":
                 import msvcrt
 
-                os.lseek(self._fd, 0, os.SEEK_SET)
+                os.lseek(self._fd, _WIN_LOCK_OFFSET, os.SEEK_SET)
                 msvcrt.locking(self._fd, msvcrt.LK_UNLCK, 1)
             os.close(self._fd)
         except OSError:

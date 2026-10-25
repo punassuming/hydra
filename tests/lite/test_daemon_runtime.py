@@ -134,7 +134,6 @@ def test_port_in_use_fails_loudly(tmp_path):
         proc = _daemon(tmp_path, busy.getsockname()[1])
         _, err = proc.communicate(timeout=40)
     assert proc.returncode != 0
-    assert (
-        "address already in use" in (tmp_path / "data" / "daemon.log").read_text().lower()
-        or "address already in use" in err.lower()
-    )
+    log = (tmp_path / "data" / "daemon.log").read_text().lower()
+    # the OS wording differs (Linux "address already in use", Windows "only one usage of each socket address")
+    assert "could not start" in log or "address already in use" in err.lower()

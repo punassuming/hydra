@@ -3,6 +3,7 @@
 Runs in a subprocess so earlier tests (which import the full scheduler) cannot pollute ``sys.modules``.
 """
 
+import os
 import pathlib
 import subprocess
 import sys
@@ -67,6 +68,6 @@ def test_lite_cli_and_shared_modules_import_without_the_full_extra():
         capture_output=True,
         text=True,
         cwd=ROOT,
-        env={"PYTHONPATH": str(ROOT), "PATH": "/usr/bin:/bin"},
+        env=dict(os.environ),
     )
     assert "FAILURES []" in out.stdout and "LEAKED []" in out.stdout, out.stdout + out.stderr

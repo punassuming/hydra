@@ -21,7 +21,7 @@ def unit_path() -> Path:
 def _quote(arg: str) -> str:
     """Quote one ExecStart word per systemd.syntax: double quotes, backslash escapes, and ``%``/``$`` doubled."""
     arg = arg.replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%").replace("$", "$$")
-    return f'"{arg}"' if any(c in arg for c in " \t'\"\;") or arg == "" else arg
+    return f'"{arg}"' if any(c in arg for c in " \t'\"\\;") or arg == "" else arg
 
 
 def render_unit(spec: ServiceSpec, working_dir: str) -> str:
