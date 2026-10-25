@@ -43,8 +43,7 @@ def _validated_domain_name(domain: str) -> str:
         raise HTTPException(
             status_code=400,
             detail=(
-                "invalid domain; use 2-63 chars of lowercase letters, numbers, '_' or '-', "
-                "and start/end with letter or number"
+                "invalid domain; use 2-63 chars of lowercase letters, numbers, '_' or '-', and start/end with letter or number"
             ),
         )
     return value
@@ -226,14 +225,16 @@ def list_credentials(request: Request) -> Dict:
     docs = list(db.credentials.find(query))
     refs = []
     for doc in docs:
-        refs.append(CredentialReference(
-            name=doc.get("name", ""),
-            domain=doc.get("domain", "prod"),
-            credential_type=doc.get("credential_type", "database"),
-            dialect=doc.get("dialect"),
-            created_at=doc.get("created_at"),
-            updated_at=doc.get("updated_at"),
-        ).model_dump())
+        refs.append(
+            CredentialReference(
+                name=doc.get("name", ""),
+                domain=doc.get("domain", "prod"),
+                credential_type=doc.get("credential_type", "database"),
+                dialect=doc.get("dialect"),
+                created_at=doc.get("created_at"),
+                updated_at=doc.get("updated_at"),
+            ).model_dump()
+        )
     return {"credentials": refs}
 
 
@@ -275,12 +276,14 @@ def update_credential(name: str, payload: CredentialCreate, request: Request):
     now = datetime.now(timezone.utc).isoformat()
     db.credentials.update_one(
         {"name": name, "domain": cred_domain},
-        {"$set": {
-            "credential_type": payload.credential_type,
-            "dialect": payload.dialect,
-            "encrypted_payload": encrypted,
-            "updated_at": now,
-        }},
+        {
+            "$set": {
+                "credential_type": payload.credential_type,
+                "dialect": payload.dialect,
+                "encrypted_payload": encrypted,
+                "updated_at": now,
+            }
+        },
     )
     return {"ok": True, "name": name, "domain": cred_domain}
 

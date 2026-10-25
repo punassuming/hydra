@@ -1,6 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 from typing import List, Literal, Optional
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from croniter import croniter
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -25,8 +26,18 @@ class ScheduleConfig(BaseModel):
     start_at: Optional[datetime] = None
     end_at: Optional[datetime] = None
     next_run_at: Optional[datetime] = None
-    timezone: str = "UTC"
+    timezone: str = "UTC"  # IANA name; cron expressions are evaluated in this zone (interval schedules ignore it)
     enabled: bool = True
+    # Behaviour when the scheduler was down/asleep across one or more due ticks. Enforced by both editions through
+    # scheduler.utils.schedule.plan_ticks/select_ticks. `run_once` (default) fires a single run after the outage;
+    # before these fields existed the full edition replayed every missed tick, one per loop pass: use `catch_up`
+    # (bounded by catch_up_limit) for that.
+    misfire_policy: Literal["skip", "run_once", "catch_up"] = "run_once"
+    catch_up_limit: int = 10  # max missed ticks replayed when misfire_policy == "catch_up"
+    # What to do when a tick is due while the previous run of the same job is still pending/active: `allow` (default),
+    # `skip` (drop the tick) or `queue` (wait for the previous run). The full edition can only see a run once it has
+    # started or is pending in the queue, so a job in the instant between dispatch and start can still overlap.
+    overlap_policy: Literal["allow", "skip", "queue"] = "allow"
 
     @model_validator(mode="after")
     def validate_schedule_config(self):
@@ -40,6 +51,10 @@ class ScheduleConfig(BaseModel):
                 croniter(self.cron, datetime.now(timezone.utc)).get_next(datetime)
             except Exception as exc:
                 raise ValueError(f"Invalid cron expression '{self.cron}': {exc}") from exc
+            try:
+                ZoneInfo(self.timezone or "UTC")
+            except (ZoneInfoNotFoundError, ValueError) as exc:
+                raise ValueError(f"Unknown timezone '{self.timezone}': use an IANA name such as 'America/New_York'") from exc
         return self
 
 

@@ -86,7 +86,8 @@ def _sparse_clone(clone_url: str, ref: str, dest: str, sparse_path: str, clean_u
     # Enable cone-mode sparse-checkout (fast, directory-level filtering)
     subprocess.run(
         [git, "sparse-checkout", "set", "--cone", sparse_path],
-        cwd=dest, check=True,
+        cwd=dest,
+        check=True,
     )
     # Attempt shallow fetch first; fall back to full fetch
     fetch_cmd = [git, "fetch", "-q", "--depth", "1", "origin", ref or "HEAD"]

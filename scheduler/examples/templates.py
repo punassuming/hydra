@@ -44,8 +44,7 @@ TEMPLATES = [
             "type": "python",
             "interpreter": "python3",
             "code": (
-                "import sys; import platform; print('pyversion:', sys.version.split()[0]); "
-                "print('platform:', platform.system())"
+                "import sys; import platform; print('pyversion:', sys.version.split()[0]); print('platform:', platform.system())"
             ),
             "environment": {"type": "system", "python_version": "python3", "requirements": []},
         },

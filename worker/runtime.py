@@ -5,6 +5,7 @@ import os
 import platform
 import shutil
 import subprocess
+import sys
 from typing import Optional
 
 
@@ -67,6 +68,23 @@ def _find_python() -> str:
         except (OSError, subprocess.SubprocessError):
             continue
     return ""
+
+
+def _sql_python() -> str:
+    """Interpreter for SQL driver scripts: the one the capability check actually tested.
+
+    A worker advertises ``sql`` when SQLAlchemy imports in *its own* interpreter, but the driver script used to run
+    under whatever ``python`` is first on PATH, which on Windows runners and in tool environments is a different
+    interpreter without SQLAlchemy ("sqlalchemy is not installed on this worker"). An explicit HYDRA_PYTHON_PATH
+    still wins.
+    """
+    if _get_python_path():
+        return _find_python()
+    try:
+        import sqlalchemy  # noqa: F401
+    except ImportError:
+        return _find_python()
+    return sys.executable or _find_python()
 
 
 def _detect_shells() -> list[str]:

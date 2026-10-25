@@ -16,7 +16,7 @@ from .utils.auth import get_domain_token_hash
 from .utils.encryption import decrypt_payload
 from .utils.failover import failover_once
 from .utils.logging import setup_logging
-from .utils.schedule import advance_schedule
+from .utils.schedule import plan_ticks, select_ticks
 from .utils.selectors import select_best_worker
 from .utils.worker_ops import append_worker_op
 
@@ -114,6 +114,7 @@ def _resolve_credential_refs(job: dict, db) -> dict:
                         headers["X-API-Key"] = decrypted["api_key"]
                     elif decrypted.get("username") and decrypted.get("password"):
                         import base64
+
                         creds = base64.b64encode(f"{decrypted['username']}:{decrypted['password']}".encode()).decode()
                         headers["Authorization"] = f"Basic {creds}"
                     job = {**job, "executor": {**executor, "headers": headers}}
@@ -177,9 +178,8 @@ def _resolve_credential_refs(job: dict, db) -> dict:
                             headers["X-API-Key"] = decrypted["api_key"]
                         elif decrypted.get("username") and decrypted.get("password"):
                             import base64
-                            creds = base64.b64encode(
-                                f"{decrypted['username']}:{decrypted['password']}".encode()
-                            ).decode()
+
+                            creds = base64.b64encode(f"{decrypted['username']}:{decrypted['password']}".encode()).decode()
                             headers["Authorization"] = f"Basic {creds}"
                         job = {**job, "executor": {**executor, "headers": headers}}
                 except Exception:
@@ -262,14 +262,30 @@ def scheduling_loop(stop_event: threading.Event):
             params_raw = meta.get("params")
             r.delete(meta_key)
 
+            # overlap_policy=queue: wait while the previous run of this job is still executing (not a starvation
+            # condition, so no_worker_count is untouched); the entry goes back to the queue and is retried.
+            if (job.get("schedule") or {}).get("overlap_policy") == "queue" and r.exists(f"job_running:{domain}:{job_id}"):
+                r.zadd(f"job_queue:{domain}:pending", {job_id: float(job.get("priority", 5))})
+                held_meta: dict = {
+                    "enqueued_ts": enqueued_ts,
+                    "reason": enqueue_reason or "overlap_queue",
+                    "no_worker_count": no_worker_count,
+                }
+                if retry_attempt:
+                    held_meta["retry_attempt"] = str(retry_attempt)
+                if params_raw:
+                    held_meta["params"] = params_raw
+                r.hset(meta_key, mapping=held_meta)
+                r.expire(meta_key, 24 * 3600)
+                time.sleep(1)
+                continue
+
             # Sensor jobs are dispatched through the normal worker path.
             # Workers execute the sensor polling loop directly, keeping the
             # scheduler free from external workload polling.
             job = normalize_affinity(job)
             candidates = [
-                w
-                for w in list_online_workers(ttl, domain, respect_capacity=not bypass_concurrency)
-                if passes_affinity(job, w)
+                w for w in list_online_workers(ttl, domain, respect_capacity=not bypass_concurrency) if passes_affinity(job, w)
             ]
 
             # bypass_concurrency guardrail: if a per-worker extra-bypass cap is
@@ -284,7 +300,10 @@ def scheduling_loop(stop_event: threading.Event):
                     else:
                         log.warning(
                             "Worker %s has %d bypass job(s) running (cap=%d); skipping for bypass job %s",
-                            w["worker_id"], extra, bypass_max_extra, job_id,
+                            w["worker_id"],
+                            extra,
+                            bypass_max_extra,
+                            job_id,
                         )
                 candidates = filtered
 
@@ -294,14 +313,16 @@ def scheduling_loop(stop_event: threading.Event):
                 no_worker_count += 1
                 if no_worker_count == starvation_warn_threshold:
                     log.warning(
-                        "Job %s has been waiting for an eligible worker %d time(s) "
-                        "(starvation risk; bypass_concurrency=%s)",
-                        job_id, no_worker_count, bypass_concurrency,
+                        "Job %s has been waiting for an eligible worker %d time(s) (starvation risk; bypass_concurrency=%s)",
+                        job_id,
+                        no_worker_count,
+                        bypass_concurrency,
                     )
                 elif no_worker_count > starvation_warn_threshold and no_worker_count % starvation_warn_threshold == 0:
                     log.warning(
                         "Job %s still waiting for eligible worker after %d attempt(s)",
-                        job_id, no_worker_count,
+                        job_id,
+                        no_worker_count,
                     )
                 else:
                     log.warning("No eligible worker for job %s; requeuing (no_worker_count=%d)", job_id, no_worker_count)
@@ -338,7 +359,10 @@ def scheduling_loop(stop_event: threading.Event):
                     log.warning(
                         "Dispatching bypass_concurrency job %s to worker %s which is already at capacity "
                         "(%d/%d); this may overload the worker",
-                        job_id, wid, current, cap,
+                        job_id,
+                        wid,
+                        current,
+                        cap,
                     )
 
             envelope = {
@@ -391,6 +415,63 @@ def failover_loop(stop_event: threading.Event):
         time.sleep(2)
 
 
+def _trigger_job(r, db, domain: str, job: dict, now: datetime) -> int:
+    """Fire one due cron/interval job according to its misfire and overlap policies. Returns entries queued (0 or 1).
+
+    The planner is shared with the lite edition (``plan_ticks``/``select_ticks``). The pending queue holds one entry
+    per job id, so a ``catch_up`` backlog is replayed one tick per loop pass: the first selected tick is queued now and
+    the schedule is left pointing at the next one.
+    """
+    schedule_doc = job.get("schedule") or {}
+    next_run_at = schedule_doc.get("next_run_at")
+    if not next_run_at:
+        return 0
+    schedule = ScheduleConfig.model_validate(schedule_doc)
+    ticks, next_schedule = plan_ticks(schedule, now)
+    run_ticks, dropped = select_ticks(schedule, ticks, now)
+    if schedule.misfire_policy == "catch_up" and len(run_ticks) > 1:
+        next_schedule = next_schedule.model_copy(update={"next_run_at": run_ticks[1]})
+        run_ticks = run_ticks[:1]
+    updated = db.job_definitions.find_one_and_update(
+        {"_id": job["_id"], "schedule.next_run_at": next_run_at},
+        {"$set": {"schedule": next_schedule.model_dump(by_alias=True)}},
+        return_document=ReturnDocument.AFTER,
+    )
+    if not updated:  # another instance (or an edit) got there first
+        return 0
+    if dropped:
+        log.info(
+            "Job %s: %d missed tick(s) dropped by misfire_policy=%s (%s .. %s)",
+            job["_id"],
+            len(dropped),
+            schedule.misfire_policy,
+            dropped[0].isoformat(),
+            dropped[-1].isoformat(),
+        )
+    queued = 0
+    priority = int(job.get("priority", 5))
+    pending_key = f"job_queue:{domain}:pending"
+    for _tick in run_ticks:
+        if schedule.overlap_policy == "skip" and (
+            r.zscore(pending_key, job["_id"]) is not None or r.exists(f"job_running:{domain}:{job['_id']}")
+        ):
+            log.info("Job %s: tick skipped by overlap_policy=skip (previous run still pending or running)", job["_id"])
+            event_bus.publish("job_tick_skipped", {"job_id": job["_id"], "domain": domain, "reason": "overlap"})
+            continue
+        r.zadd(pending_key, {job["_id"]: priority})
+        queued += 1
+        event_bus.publish(
+            "job_scheduled",
+            {
+                "job_id": job["_id"],
+                "mode": schedule.mode,
+                "next_run_at": next_schedule.next_run_at.isoformat() if next_schedule.next_run_at else None,
+                "domain": domain,
+            },
+        )
+    return queued
+
+
 def schedule_trigger_loop(stop_event: threading.Event):
     r = get_redis()
     db = get_db()
@@ -409,33 +490,7 @@ def schedule_trigger_loop(stop_event: threading.Event):
                     }
                 ).limit(100)
                 for job in due_jobs:
-                    schedule_doc = job.get("schedule") or {}
-                    next_run_at = schedule_doc.get("next_run_at")
-                    if not next_run_at:
-                        continue
-                    schedule = ScheduleConfig.model_validate(schedule_doc)
-                    advanced = advance_schedule(schedule)
-                    updated = db.job_definitions.find_one_and_update(
-                        {
-                            "_id": job["_id"],
-                            "schedule.next_run_at": next_run_at,
-                        },
-                        {"$set": {"schedule": advanced.model_dump(by_alias=True)}},
-                        return_document=ReturnDocument.AFTER,
-                    )
-                    if not updated:
-                        continue
-                    priority = int(job.get("priority", 5))
-                    r.zadd(f"job_queue:{domain}:pending", {job["_id"]: priority})
-                    event_bus.publish(
-                        "job_scheduled",
-                        {
-                            "job_id": job["_id"],
-                            "mode": schedule.mode,
-                            "next_run_at": advanced.next_run_at.isoformat() if advanced.next_run_at else None,
-                            "domain": domain,
-                        },
-                    )
+                    _trigger_job(r, db, domain, job, now)
         except Exception as exc:
             log.exception("Error in schedule trigger loop: %s", exc)
             time.sleep(1)
@@ -444,6 +499,7 @@ def schedule_trigger_loop(stop_event: threading.Event):
 
 def sla_monitoring_loop(stop_event: threading.Event):
     from .run_events import _fire_email_alert_async, _fire_webhooks_async
+
     db = get_db()
     log.info("SLA monitoring loop started")
     while not stop_event.is_set():
@@ -493,11 +549,13 @@ def sla_monitoring_loop(stop_event: threading.Event):
                         continue
                     log.warning(
                         "SLA missed for job %s run %s (%.1fs > %ss); firing alerts",
-                        job_id, run_id, elapsed, sla_seconds,
+                        job_id,
+                        run_id,
+                        elapsed,
+                        sla_seconds,
                     )
                     alert_message = (
-                        f"SLA Warning: Job exceeded expected duration of {sla_seconds} seconds "
-                        f"(running for {elapsed:.1f}s)"
+                        f"SLA Warning: Job exceeded expected duration of {sla_seconds} seconds (running for {elapsed:.1f}s)"
                     )
                     webhooks = job_doc.get("on_failure_webhooks") or []
                     _fire_webhooks_async(webhooks, job_id, run_id, alert_message)
@@ -616,7 +674,8 @@ def run_retention_loop(stop_event: threading.Event):
     if RUN_RETENTION_DAYS > 0:
         log.info(
             "Run retention loop started (retention=%sd, interval=%ss)",
-            RUN_RETENTION_DAYS, RUN_RETENTION_CHECK_INTERVAL_SECONDS,
+            RUN_RETENTION_DAYS,
+            RUN_RETENTION_CHECK_INTERVAL_SECONDS,
         )
     while not stop_event.is_set():
         try:
@@ -655,7 +714,10 @@ def timeout_enforcement_loop(stop_event: threading.Event):
                     if job_timeout > 0 and elapsed > job_timeout:
                         log.warning(
                             "Timeout exceeded for job %s run %s (%.1fs > %ss); sending kill signal",
-                            job_id, run_id, elapsed, job_timeout,
+                            job_id,
+                            run_id,
+                            elapsed,
+                            job_timeout,
                         )
                         r.publish(f"job_kill:{domain}", run_id)
         except Exception as exc:
@@ -709,16 +771,15 @@ def backfill_dispatch_loop(stop_event: threading.Event):
 
             job = normalize_affinity(job)
             candidates = [
-                w
-                for w in list_online_workers(ttl, domain, respect_capacity=not bypass_concurrency)
-                if passes_affinity(job, w)
+                w for w in list_online_workers(ttl, domain, respect_capacity=not bypass_concurrency) if passes_affinity(job, w)
             ]
             worker = select_best_worker(candidates)
             if not worker:
                 # No worker available; put the item back at the front of the queue and back off.
                 log.warning(
                     "Backfill: no eligible worker for job %s date %s; requeuing",
-                    job_id, execution_date,
+                    job_id,
+                    execution_date,
                 )
                 r.lpush(f"backfill_queue:{domain}", raw)
                 time.sleep(2)
@@ -766,7 +827,9 @@ def backfill_dispatch_loop(stop_event: threading.Event):
             )
             log.info(
                 "Dispatched backfill job %s (date=%s) to worker %s",
-                job_id, execution_date, wid,
+                job_id,
+                execution_date,
+                wid,
             )
         except Exception as e:
             log.exception("Error in backfill dispatch loop: %s", e)

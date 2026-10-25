@@ -18,6 +18,7 @@ Supports two runtime modes:
        python -m worker bootstrap validate
 
 """
+
 from __future__ import annotations
 
 import os
@@ -65,6 +66,7 @@ def _preflight_check() -> None:
     # Attempt a Redis ping to catch connection/auth issues with a clear message.
     try:
         from .redis_client import get_redis
+
         r = get_redis()
         r.ping()
     except Exception as exc:
@@ -81,11 +83,13 @@ def main() -> None:
     # flags) is the word "bootstrap".
     if len(sys.argv) > 1 and sys.argv[1] == "bootstrap":
         from .bootstrap import main as bootstrap_main
+
         sys.exit(bootstrap_main(sys.argv[2:]))
     else:
         # Run pre-flight checks before entering the worker loop.
         _preflight_check()
         from .worker import worker_main
+
         worker_main()
 
 

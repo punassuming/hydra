@@ -1,0 +1,52 @@
+name: Release wheel
+
+# Builds the source distribution and wheel and attaches them to the GitHub Release, so a user can install Hydra
+# (including the lite edition) without cloning: `uv tool install hydra-jobs --from <wheel URL>`. Called by
+# release-please.yml after it creates a release; can also be run by hand for an existing tag.
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: Release tag to build and attach to (e.g. v0.3.0)
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to build and attach to (e.g. v0.3.0)
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  wheel:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Build
+        run: |
+          python -m pip install uv==0.5.13
+          uv build
+      - name: Check the wheel carries the lite status page, schema and migrations
+        run: |
+          python - <<'PY'
+          import glob, zipfile
+          wheel = glob.glob("dist/*.whl")[0]
+          names = zipfile.ZipFile(wheel).namelist()
+          for needed in ("hydra_lite/daemon/static/index.html", "hydra_lite/store/schema.sql", "hydra_lite/store/migrations/0002_artifacts.sql"):
+              assert needed in names, f"{needed} is missing from {wheel}"
+          print("ok:", wheel)
+          PY
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag }}
+        run: gh release upload "$TAG" dist/* --clobber

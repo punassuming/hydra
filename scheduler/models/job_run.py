@@ -34,6 +34,12 @@ RunStatus = Literal["pending", "dispatched", "running", "success", "failed", "ti
 
 TERMINAL_STATES: frozenset[str] = frozenset({"success", "failed", "timed_out"})
 
+# Non-terminal states in which a run is owned by (or about to be owned by) a worker.
+ACTIVE_STATES: frozenset[str] = frozenset({"dispatched", "running"})
+
+# Every state a run document may hold. Both editions (full and lite) store only these.
+RUN_STATES: frozenset[str] = frozenset({"pending", "dispatched", "running", "success", "failed", "timed_out"})
+
 
 class JobRun(BaseModel):
     model_config = ConfigDict(populate_by_name=True)

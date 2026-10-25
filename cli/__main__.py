@@ -30,6 +30,22 @@ TABLES = {
 }
 
 
+# Stable exit codes for scripts and integrating applications. 2 is argparse's own usage-error code.
+EXIT_OK = 0
+EXIT_ERROR = 1
+EXIT_UNREACHABLE = 3
+EXIT_NOT_FOUND = 4
+EXIT_RUN_FAILED = 5  # `run --wait` finished with a non-success status
+
+
+def exit_code_for(exc: APIError) -> int:
+    if exc.status is None and "could not reach" in str(exc):
+        return EXIT_UNREACHABLE
+    if exc.status == 404:
+        return EXIT_NOT_FOUND
+    return EXIT_ERROR
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="hydra-ctl", description="Operate a Hydra Jobs deployment")
     parser.add_argument("--api-url", default=os.getenv("HYDRA_API_URL", "http://localhost:8000"))
@@ -90,6 +106,12 @@ def build_parser() -> argparse.ArgumentParser:
     state = worker_commands.add_parser("state", parents=[output_parent], help="Set dispatch state")
     state.add_argument("worker_id")
     state.add_argument("state", choices=("online", "draining", "offline"))
+    spawn = worker_commands.add_parser("spawn", parents=[output_parent], help="Start worker processes (lite edition)")
+    spawn.add_argument("--count", type=int, default=1)
+    spawn.add_argument("--tag", action="append", default=[], help="Worker tag (repeatable)")
+    spawn.add_argument("--max-concurrency", type=int)
+    stop = worker_commands.add_parser("stop", parents=[output_parent], help="Drain and stop a supervised worker (lite edition)")
+    stop.add_argument("worker_id")
     detach = worker_commands.add_parser("detach", parents=[output_parent], help="Detach a worker")
     detach.add_argument("worker_id")
     drain = worker_commands.add_parser(
@@ -107,6 +129,10 @@ def build_parser() -> argparse.ArgumentParser:
     token_commands.add_parser("rotate", parents=[output_parent], help="Rotate the current domain token")
 
     commands.add_parser("doctor", parents=[output_parent], help="Read-only API, queue, and worker diagnostic report")
+
+    from hydra_lite import cli_lite
+
+    cli_lite.register(commands, output_parent)
 
     watch = commands.add_parser("watch", parents=[output_parent], help="Show repeated read-only job, run, worker, or queue state")
     watch.add_argument("resource", choices=("run", "worker", "queue", "health"))
@@ -130,6 +156,15 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None, client_factory: type[HydraClient] = HydraClient) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.command == "lite":
+        from hydra_lite import cli_lite
+
+        return cli_lite.dispatch(args, client_factory)
+    if not args.token:
+        # A loopback API URL with no explicit token: use the local lite daemon's token file, if any.
+        from hydra_lite import cli_lite
+
+        args.token = cli_lite.local_token(args.api_url)
     client = client_factory(args.api_url, token=args.token, domain=args.domain, timeout=args.timeout)
     try:
         if args.command == "get":
@@ -145,6 +180,8 @@ def main(argv: list[str] | None = None, client_factory: type[HydraClient] = Hydr
             if args.wait:
                 result["run"] = _wait_for_new_run(client, job_id, known_runs, args.wait_timeout)
             _show(result, args.output)
+            if args.wait and result["run"].get("status") != "success":
+                return EXIT_RUN_FAILED
         elif args.command == "apply":
             document = _load_document(args.filename)
             _show(client.submit(document), args.output)
@@ -176,6 +213,15 @@ def main(argv: list[str] | None = None, client_factory: type[HydraClient] = Hydr
                 if args.worker_command == "drain" and args.wait:
                     result["worker"] = _wait_for_worker_drain(client, args.worker_id, args.wait_timeout)
                 _show(result, args.output)
+            elif args.worker_command == "spawn":
+                body: dict[str, Any] = {"count": args.count}
+                if args.tag:
+                    body["tags"] = args.tag
+                if args.max_concurrency:
+                    body["max_concurrency"] = args.max_concurrency
+                _show(client.request("POST", "/workers/spawn", body=body), args.output)
+            elif args.worker_command == "stop":
+                _show(client.request("POST", f"/workers/{_quote(args.worker_id)}/stop"), args.output)
             else:
                 _show(client.request("POST", f"/workers/{_quote(args.worker_id)}/detach"), args.output)
         elif args.command == "overview":
@@ -190,9 +236,12 @@ def main(argv: list[str] | None = None, client_factory: type[HydraClient] = Hydr
             domain = args.audit_domain if args.audit_domain is not None else args.domain
             _show(client.request("GET", "/history/", query={"domain": domain}), args.output)
         return 0
-    except (APIError, OSError, ValueError, yaml.YAMLError) as exc:
+    except APIError as exc:
         write_error(str(exc))
-        return 1
+        return exit_code_for(exc)
+    except (OSError, ValueError, yaml.YAMLError) as exc:
+        write_error(str(exc))
+        return EXIT_ERROR
 
 
 def _get(client: HydraClient, args: argparse.Namespace) -> int:

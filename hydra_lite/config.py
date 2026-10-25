@@ -1,0 +1,119 @@
+"""Configuration for the Hydra lite edition.
+
+Precedence (highest first): explicit overrides (CLI flags) > ``HYDRA_*``
+environment variables > ``config.toml`` > defaults.
+"""
+
+from __future__ import annotations
+
+import os
+import tomllib
+from dataclasses import dataclass, field, fields
+from pathlib import Path
+from typing import Any, Mapping, Optional
+
+from scheduler.utils.modes import MODE_API, MODE_COMBINED, VALID_MODES
+
+from . import paths
+
+
+@dataclass
+class Config:
+    host: str = "127.0.0.1"
+    port: int = 8000
+    data_dir: Path = field(default_factory=paths.data_dir)
+    log_dir: Optional[Path] = None
+    token_file: Optional[Path] = None
+    default_workers: int = 1
+    max_concurrency: int = 4
+    worker_tags: list[str] = field(default_factory=list)
+    idle_stop_seconds: int = 0
+    retention_days: int = 90  # lite default (full edition: off); 0 disables. Same env var as the full edition.
+    retention_check_seconds: int = 3600
+    mode: str = MODE_COMBINED
+    worker_mode: str = "subprocess"  # "subprocess" (supervised worker processes) | "inproc" (threads inside the daemon)
+    max_workers: int = 4  # supervisor upper bound when scaling on demand
+    heartbeat_ttl: float = 10.0  # seconds without a heartbeat before a worker is considered gone (SCHEDULER_HEARTBEAT_TTL)
+    worker_prune_seconds: int = 1800  # forget workers that have been gone this long (SCHEDULER_WORKER_OFFLINE_PRUNE_SECONDS)
+
+    def __post_init__(self) -> None:
+        self.data_dir = Path(self.data_dir)
+        self.log_dir = Path(self.log_dir) if self.log_dir else self.data_dir / "logs"
+        self.token_file = Path(self.token_file) if self.token_file else self.data_dir / "token"
+
+    @property
+    def db_path(self) -> Path:
+        return self.data_dir / "hydra.db"
+
+
+# (config key, toml table, toml key, env var, caster)
+def _int(value: Any) -> int:
+    return int(value)
+
+
+def _tags(value: Any) -> list[str]:
+    if isinstance(value, str):
+        return [t.strip() for t in value.split(",") if t.strip()]
+    return [str(t) for t in value]
+
+
+_SPEC: tuple[tuple[str, str, str, str, Any], ...] = (
+    ("host", "daemon", "host", "HYDRA_HOST", str),
+    ("port", "daemon", "port", "HYDRA_PORT", _int),
+    ("data_dir", "paths", "data_dir", "HYDRA_DATA_DIR", Path),
+    ("log_dir", "paths", "log_dir", "HYDRA_LOG_DIR", Path),
+    ("token_file", "auth", "token_file", "HYDRA_TOKEN_FILE", Path),
+    ("default_workers", "workers", "default_count", "HYDRA_DEFAULT_WORKERS", _int),
+    ("max_concurrency", "workers", "max_concurrency", "HYDRA_MAX_CONCURRENCY", _int),
+    ("worker_tags", "workers", "tags", "HYDRA_WORKER_TAGS", _tags),
+    ("idle_stop_seconds", "workers", "idle_stop_seconds", "HYDRA_IDLE_STOP_SECONDS", _int),
+    ("retention_days", "retention", "days", "HYDRA_RUN_RETENTION_DAYS", _int),
+    ("retention_check_seconds", "retention", "check_seconds", "SCHEDULER_RUN_RETENTION_CHECK_INTERVAL", _int),
+    ("mode", "daemon", "mode", "HYDRA_MODE", str),
+    ("worker_mode", "workers", "mode", "HYDRA_WORKER_MODE", str),
+    ("max_workers", "workers", "max_count", "HYDRA_MAX_WORKERS", _int),
+    ("heartbeat_ttl", "workers", "heartbeat_ttl", "SCHEDULER_HEARTBEAT_TTL", float),
+    ("worker_prune_seconds", "workers", "prune_seconds", "SCHEDULER_WORKER_OFFLINE_PRUNE_SECONDS", _int),
+)
+
+
+def load(
+    overrides: Optional[Mapping[str, Any]] = None,
+    env: Optional[Mapping[str, str]] = None,
+    config_path: Optional[Path] = None,
+) -> Config:
+    env = os.environ if env is None else env
+    path = config_path or paths.config_file()
+    file_data: dict[str, Any] = {}
+    if path.is_file():
+        with path.open("rb") as handle:
+            file_data = tomllib.load(handle)
+
+    values: dict[str, Any] = {}
+    for key, table, toml_key, env_var, cast in _SPEC:
+        table_data = file_data.get(table) or {}
+        if toml_key in table_data:
+            values[key] = cast(table_data[toml_key])
+        if env_var in env and env[env_var] != "":
+            values[key] = cast(env[env_var])
+    for key, value in (overrides or {}).items():
+        if value is None:
+            continue
+        if key not in {f.name for f in fields(Config)}:
+            raise KeyError(f"unknown config key: {key}")
+        spec = next(s for s in _SPEC if s[0] == key)
+        values[key] = spec[4](value)
+
+    if values.get("port") is not None and not 0 < values["port"] < 65536:
+        raise ValueError(f"port out of range: {values['port']}")
+    if values.get("worker_mode", "subprocess") not in {"subprocess", "inproc"}:
+        raise ValueError(f"unknown worker mode {values['worker_mode']!r}; expected 'subprocess' or 'inproc'")
+    mode = values.get("mode", MODE_COMBINED)
+    if mode == MODE_API:
+        raise ValueError(
+            "HYDRA_MODE=api is not supported by the lite edition: it always runs the API together with its "
+            "orchestration loops (use 'combined')"
+        )
+    if mode not in VALID_MODES:
+        raise ValueError(f"unknown HYDRA_MODE {mode!r}; expected one of {', '.join(VALID_MODES)}")
+    return Config(**values)

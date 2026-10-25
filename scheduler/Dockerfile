@@ -4,7 +4,7 @@ WORKDIR /app
 
 RUN pip install --no-cache-dir uv==0.5.13
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev --no-install-project
+RUN uv sync --frozen --no-dev --no-install-project --extra full
 
 COPY scheduler /app/scheduler
 

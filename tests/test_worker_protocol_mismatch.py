@@ -50,3 +50,9 @@ def test_worker_info_defaults_to_no_mismatch():
         worker_id="w1", os="linux", tags=[], allowed_users=[], max_concurrency=1, current_running=0
     )
     assert info.protocol_mismatch is False
+
+
+def test_python_worker_and_scheduler_agree_on_the_protocol_version():
+    from worker.protocol import WORKER_PROTOCOL_VERSION
+
+    assert WORKER_PROTOCOL_VERSION == workers_api.EXPECTED_WORKER_PROTOCOL_VERSION

@@ -48,6 +48,7 @@ def health(request: Request):
         pending = sum(r.zcard(key) for key in r.scan_iter("job_queue:*:pending"))
     return {
         "status": "ok",
+        "edition": "full",
         "workers": workers_count,
         "pending_jobs": pending,
         "demo_mode": demo_mode_enabled(),

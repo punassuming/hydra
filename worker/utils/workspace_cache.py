@@ -87,9 +87,7 @@ class WorkspaceCache:
                 elif source_config.get("protocol", "git") == "git":
                     self._git_update(cache_path, source_config)
             elif cache_mode == "always":
-                raise FileNotFoundError(
-                    f"cache mode is 'always' but no cached workspace exists at {cache_path}"
-                )
+                raise FileNotFoundError(f"cache mode is 'always' but no cached workspace exists at {cache_path}")
             else:
                 os.makedirs(cache_path, exist_ok=True)
                 fetch_fn(cache_path, source_config)
@@ -140,6 +138,7 @@ class WorkspaceCache:
     def _git_update(self, cache_path: str, source_config: dict) -> None:
         """Fast-update a cached git workspace."""
         import subprocess
+
         git = os.environ.get("HYDRA_GIT_PATH", "").strip() or "git"
         ref = source_config.get("ref", "main")
         try:
@@ -199,7 +198,6 @@ def get_workspace_cache() -> WorkspaceCache:
                     cache_root=os.environ.get("WORKER_WORKSPACE_CACHE_DIR") or None,
                     max_mb=int(os.environ.get("WORKER_WORKSPACE_CACHE_MAX_MB", "1024")),
                     ttl_seconds=int(os.environ.get("WORKER_WORKSPACE_CACHE_TTL", "3600")),
-                    persist=os.environ.get("WORKER_WORKSPACE_CACHE_PERSIST", "true").lower()
-                    in ("true", "1", "yes"),
+                    persist=os.environ.get("WORKER_WORKSPACE_CACHE_PERSIST", "true").lower() in ("true", "1", "yes"),
                 )
     return _cache_instance

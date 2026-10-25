@@ -148,7 +148,7 @@ worker-boundary checks beyond what compose itself provides, see
 Install the project and its `hydra-ctl` executable with [uv](https://docs.astral.sh/uv/):
 
 ```bash
-uv sync
+uv sync --all-extras   # the full scheduler/worker stack; plain `uv sync` installs only the lean lite/CLI set
 ```
 
 Point the CLI at a Hydra deployment. `HYDRA_TOKEN` may also be supplied as the
@@ -502,8 +502,8 @@ helm install hydra deploy/helm/hydra -n hydra --create-namespace \
 ## Development
 
 ```bash
-# Install the locked Python environment
-uv sync --dev
+# Install the locked Python environment (all extras = the full scheduler and worker)
+uv sync --dev --all-extras
 
 # Scheduler (hot-reload)
 uv run uvicorn scheduler.main:app --reload --host 0.0.0.0 --port 8000

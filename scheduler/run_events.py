@@ -1,10 +1,7 @@
 import json
-import os
-import random
 import smtplib
 import threading
 import time
-import urllib.request
 from datetime import datetime, timezone
 from email.message import EmailMessage
 from typing import Any, Dict
@@ -16,47 +13,22 @@ from .mongo_client import get_db
 from .redis_client import get_redis
 from .utils.encryption import decrypt_payload
 from .utils.logging import setup_logging
+from .utils.notifications import WEBHOOK_MAX_ERROR_LEN, fire_webhooks, fire_webhooks_async
+from .utils.post_run import FINAL_FAILURE, RETRY, TRIGGER_DEPENDENTS, decide_post_run
+from .utils.retry import (  # noqa: F401 - RETRY_* re-exported for tests
+    RETRY_BACKOFF_CAP_SECONDS,
+    RETRY_JITTER_FRACTION,
+    apply_retry_jitter,
+    compute_retry_backoff_delay,
+)
 from .utils.worker_ops import append_worker_op
 
 log = setup_logging("scheduler.run_events")
-# Maximum length of error_message sent in webhook payloads
-_WEBHOOK_MAX_ERROR_LEN = 2000
-# Ceiling for the exponential retry backoff below, mirroring the 2s-doubling
-# shape already used for connection-retry backoff elsewhere (worker/worker.py's
-# kill-listener reconnect loop uses 2s -> 60s; job retries default to a longer
-# cap since they represent actual work being redone, not a reconnect probe).
-RETRY_BACKOFF_CAP_SECONDS = int(os.getenv("SCHEDULER_RETRY_BACKOFF_CAP_SECONDS", "300"))
-# +/- fraction of the backoff delay randomised per retry, so a burst of jobs that
-# failed together (e.g. a downstream outage) doesn't retry in lockstep and hit
-# the recovering dependency all at once. 0 disables jitter.
-RETRY_JITTER_FRACTION = max(0.0, min(1.0, float(os.getenv("SCHEDULER_RETRY_JITTER_FRACTION", "0.2"))))
-
-
-def _compute_retry_backoff_delay(base_delay_seconds: int, retry_attempt: int) -> int:
-    """Exponential backoff for scheduler-level job retries.
-
-    base_delay_seconds doubles per retry attempt, capped at
-    RETRY_BACKOFF_CAP_SECONDS. retry_attempt is 1-indexed (the attempt about to
-    run), so a job's first retry keeps its configured base delay unchanged --
-    only a second or later retry actually backs off. A base_delay_seconds of 0
-    (the default -- immediate retry) stays 0 regardless of attempt.
-    """
-    if base_delay_seconds <= 0:
-        return 0
-    multiplier = 2 ** max(retry_attempt - 1, 0)
-    return min(base_delay_seconds * multiplier, RETRY_BACKOFF_CAP_SECONDS)
-
-
-def _apply_retry_jitter(delay_seconds: int, rng=random.random) -> int:
-    """Spread a backoff delay by +/- RETRY_JITTER_FRACTION (never past the cap).
-
-    A zero delay (immediate retry) stays zero. `rng` returns a float in [0, 1)
-    and is injectable so tests are deterministic.
-    """
-    if delay_seconds <= 0 or RETRY_JITTER_FRACTION <= 0:
-        return max(delay_seconds, 0)
-    factor = 1 + (rng() * 2 - 1) * RETRY_JITTER_FRACTION
-    return min(max(int(round(delay_seconds * factor)), 0), RETRY_BACKOFF_CAP_SECONDS)
+# Retry backoff, webhooks and the post-run decision are shared with the lite edition; the private
+# names below are kept so existing callers and tests keep working.
+_WEBHOOK_MAX_ERROR_LEN = WEBHOOK_MAX_ERROR_LEN
+_compute_retry_backoff_delay = compute_retry_backoff_delay
+_apply_retry_jitter = apply_retry_jitter
 
 
 def _to_datetime(value: Any) -> datetime | None:
@@ -81,6 +53,7 @@ def _to_datetime(value: Any) -> datetime | None:
 
 def _enqueue_job_for_retry(job_id: str, domain: str, priority: int, retry_attempt: int, delay_seconds: int = 0):
     """Re-enqueue a failed job for a scheduler-level retry, with optional delay."""
+
     def _do():
         if delay_seconds > 0:
             time.sleep(delay_seconds)
@@ -103,9 +76,7 @@ def _enqueue_job_for_retry(job_id: str, domain: str, priority: int, retry_attemp
 
 def _trigger_dependents(job_id: str, domain: str, db):
     """Enqueue any jobs whose depends_on includes the just-completed job_id."""
-    dependents = list(db.job_definitions.find(
-        {"domain": domain, "depends_on": job_id, "schedule.enabled": True}
-    ))
+    dependents = list(db.job_definitions.find({"domain": domain, "depends_on": job_id, "schedule.enabled": True}))
     if not dependents:
         return
     r = get_redis()
@@ -121,31 +92,8 @@ def _trigger_dependents(job_id: str, domain: str, db):
         log.info("Triggered dependent job %s because %s succeeded", dep_id, job_id)
 
 
-def _fire_webhooks(webhooks: list, job_id: str, run_id: str, error_message: str):
-    """Fire HTTP POST to each webhook URL with failure details."""
-    payload = json.dumps({
-        "job_id": job_id,
-        "run_id": run_id,
-        "error_message": error_message,
-    }).encode()
-    for url in webhooks:
-        try:
-            req = urllib.request.Request(
-                url,
-                data=payload,
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
-            urllib.request.urlopen(req, timeout=5)
-        except Exception as exc:
-            log.warning("Webhook POST failed for %s: %s", url, exc)
-
-
-def _fire_webhooks_async(webhooks: list, job_id: str, run_id: str, error_message: str):
-    if not webhooks:
-        return
-    t = threading.Thread(target=_fire_webhooks, args=(webhooks, job_id, run_id, error_message), daemon=True)
-    t.start()
+_fire_webhooks = fire_webhooks
+_fire_webhooks_async = fire_webhooks_async
 
 
 def _as_bool(value: Any, default: bool = False) -> bool:
@@ -289,12 +237,16 @@ def _handle_run_start(payload: Dict[str, Any]):
         if existing_status in TERMINAL_STATES:
             log.warning(
                 "Duplicate run_start for already-terminal run %s (status=%s, job=%s); ignoring",
-                run_id, existing_status, job_id,
+                run_id,
+                existing_status,
+                job_id,
             )
         else:
             log.warning(
                 "Duplicate run_start for run %s (current status=%s, job=%s); ignoring",
-                run_id, existing_status, job_id,
+                run_id,
+                existing_status,
+                job_id,
             )
         return
 
@@ -354,7 +306,10 @@ def _handle_run_end(payload: Dict[str, Any]):
             # Do not re-apply the update or re-trigger post-run actions.
             log.warning(
                 "Duplicate run_end for already-terminal run %s (status=%s → %s, job=%s); ignoring",
-                run_id, existing_status, status, job_id,
+                run_id,
+                existing_status,
+                status,
+                job_id,
             )
             return
 
@@ -367,7 +322,9 @@ def _handle_run_end(payload: Dict[str, Any]):
             # Race: another thread beat us to a terminal transition.
             log.warning(
                 "run_end for run %s lost race to terminal transition (job=%s, status=%s); ignoring",
-                run_id, job_id, status,
+                run_id,
+                job_id,
+                status,
             )
             return
     else:
@@ -375,7 +332,9 @@ def _handle_run_end(payload: Dict[str, Any]):
         # Create a minimal fallback document so the run is visible in history.
         log.warning(
             "run_end received before run_start for run %s (job=%s, status=%s); creating fallback doc",
-            run_id, job_id, status,
+            run_id,
+            job_id,
+            status,
         )
         fallback_doc = {
             "_id": run_id,
@@ -404,7 +363,8 @@ def _handle_run_end(payload: Dict[str, Any]):
             if (concurrent or {}).get("status") in TERMINAL_STATES:
                 log.warning(
                     "run_end fallback insert lost race for run %s (job=%s); skipping post-run actions",
-                    run_id, job_id,
+                    run_id,
+                    job_id,
                 )
                 return
             db.job_runs.update_one(
@@ -429,12 +389,9 @@ def _handle_run_end(payload: Dict[str, Any]):
             ts=end_ts.timestamp(),
         )
 
-    # --- Post-run actions ---
-    if status == "success":
-        # Trigger any dependent jobs
-        _trigger_dependents(job_id, domain, db)
-    elif status in {"failed", "timed_out"}:
-        # Check for scheduler-level retries
+    # --- Post-run actions (policy shared with the lite edition) ---
+    job_doc = None
+    if status in {"failed", "timed_out"}:
         job_doc = db.job_definitions.find_one(
             {"_id": job_id},
             {
@@ -446,35 +403,32 @@ def _handle_run_end(payload: Dict[str, Any]):
                 "on_failure_email_credential_ref": 1,
             },
         )
-        if job_doc:
-            max_retries = int(job_doc.get("max_retries", 0))
-            retry_delay = int(job_doc.get("retry_delay_seconds", 0))
-            retry_attempt = int(payload.get("retry_attempt", 0))
-            if max_retries > 0 and retry_attempt < max_retries:
-                next_attempt = retry_attempt + 1
-                _enqueue_job_for_retry(
-                    job_id=job_id,
-                    domain=domain,
-                    priority=int(job_doc.get("priority", 5)),
-                    retry_attempt=next_attempt,
-                    delay_seconds=_apply_retry_jitter(_compute_retry_backoff_delay(retry_delay, next_attempt)),
-                )
-            else:
-                # Terminal failure — fire webhooks
-                webhooks = job_doc.get("on_failure_webhooks") or []
-                stderr_text = payload.get("stderr", "") or payload.get("completion_reason", "")
-                _fire_webhooks_async(webhooks, job_id, run_id, stderr_text[:_WEBHOOK_MAX_ERROR_LEN])
-                email_to = job_doc.get("on_failure_email_to") or []
-                email_cred_ref = str(job_doc.get("on_failure_email_credential_ref") or "").strip()
-                _fire_email_alert_async(
-                    db,
-                    domain,
-                    email_cred_ref,
-                    email_to,
-                    job_id,
-                    run_id,
-                    stderr_text[:_WEBHOOK_MAX_ERROR_LEN],
-                )
+    decision = decide_post_run(status, job_doc, int(payload.get("retry_attempt", 0)))
+    if decision.action == TRIGGER_DEPENDENTS:
+        _trigger_dependents(job_id, domain, db)
+    elif decision.action == RETRY:
+        _enqueue_job_for_retry(
+            job_id=job_id,
+            domain=domain,
+            priority=int((job_doc or {}).get("priority", 5)),
+            retry_attempt=decision.retry_attempt,
+            delay_seconds=decision.delay_seconds,
+        )
+    elif decision.action == FINAL_FAILURE:
+        webhooks = job_doc.get("on_failure_webhooks") or []
+        stderr_text = payload.get("stderr", "") or payload.get("completion_reason", "")
+        _fire_webhooks_async(webhooks, job_id, run_id, stderr_text[:_WEBHOOK_MAX_ERROR_LEN])
+        email_to = job_doc.get("on_failure_email_to") or []
+        email_cred_ref = str(job_doc.get("on_failure_email_credential_ref") or "").strip()
+        _fire_email_alert_async(
+            db,
+            domain,
+            email_cred_ref,
+            email_to,
+            job_id,
+            run_id,
+            stderr_text[:_WEBHOOK_MAX_ERROR_LEN],
+        )
 
 
 def _handle_artifact_emitted(payload: Dict[str, Any]):
@@ -509,9 +463,9 @@ def _handle_artifact_emitted(payload: Dict[str, Any]):
     log.info("Upserted artifact '%s' in domain '%s' from run %s", artifact_name, domain, run_id)
 
     # Find jobs that should be triggered when this artifact is updated.
-    triggered_jobs = list(db.job_definitions.find(
-        {"domain": domain, "triggers_on_artifacts": artifact_name, "schedule.enabled": True}
-    ))
+    triggered_jobs = list(
+        db.job_definitions.find({"domain": domain, "triggers_on_artifacts": artifact_name, "schedule.enabled": True})
+    )
     if not triggered_jobs:
         return
 
@@ -535,7 +489,9 @@ def _handle_artifact_emitted(payload: Dict[str, Any]):
         r.expire(f"job_enqueue_meta:{domain}:{dep_id}", 24 * 3600)
         log.info(
             "Triggered job %s due to artifact '%s' update (upstream run %s)",
-            dep_id, artifact_name, run_id,
+            dep_id,
+            artifact_name,
+            run_id,
         )
 
 
@@ -569,7 +525,8 @@ def _recover_staging_events(r) -> int:
                 break
             log.info(
                 "Recovered staged run event for domain '%s' back to %s",
-                domain, src_key,
+                domain,
+                src_key,
             )
             recovered += 1
     if recovered:
@@ -601,9 +558,7 @@ def run_event_loop(stop_event: threading.Event):
                 try:
                     payload = json.loads(raw)
                 except Exception:
-                    log.warning(
-                        "Skipping malformed run event payload from %s", src_key
-                    )
+                    log.warning("Skipping malformed run event payload from %s", src_key)
                     r.lrem(staging_key, 1, raw)
                     dispatched = True
                     continue

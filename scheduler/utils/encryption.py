@@ -30,12 +30,9 @@ def _derive_key() -> bytes:
         raise ValueError("CREDENTIAL_ENCRYPTION_KEY must be 32 bytes (base64-url encoded)")
     admin_token = os.getenv("ADMIN_TOKEN", "")
     if not admin_token:
-        raise ValueError(
-            "Credential encryption requires CREDENTIAL_ENCRYPTION_KEY or ADMIN_TOKEN to be set"
-        )
+        raise ValueError("Credential encryption requires CREDENTIAL_ENCRYPTION_KEY or ADMIN_TOKEN to be set")
     logger.warning(
-        "CREDENTIAL_ENCRYPTION_KEY not set; deriving key from ADMIN_TOKEN. "
-        "Set CREDENTIAL_ENCRYPTION_KEY for production use."
+        "CREDENTIAL_ENCRYPTION_KEY not set; deriving key from ADMIN_TOKEN. Set CREDENTIAL_ENCRYPTION_KEY for production use."
     )
     derived = hashlib.pbkdf2_hmac("sha256", admin_token.encode(), b"hydra-credential-salt", 100_000)
     return base64.urlsafe_b64encode(derived)
@@ -44,6 +41,7 @@ def _derive_key() -> bytes:
 def encrypt_payload(data: dict[str, Any]) -> str:
     """Encrypt a dict to a Fernet token string."""
     from cryptography.fernet import Fernet
+
     f = Fernet(_derive_key())
     return f.encrypt(json.dumps(data).encode()).decode()
 
@@ -51,5 +49,6 @@ def encrypt_payload(data: dict[str, Any]) -> str:
 def decrypt_payload(token: str) -> dict[str, Any]:
     """Decrypt a Fernet token string back to a dict."""
     from cryptography.fernet import Fernet
+
     f = Fernet(_derive_key())
     return json.loads(f.decrypt(token.encode()).decode())

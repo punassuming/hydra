@@ -8,7 +8,7 @@ from typing import List
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from ..models.worker_info import WorkerInfo
+from ..models.worker_info import WORKER_STATES, WorkerInfo
 from ..mongo_client import get_db
 from ..redis_client import get_redis
 from ..utils.auth import get_domain_token_hash
@@ -87,7 +87,7 @@ def _normalize_state(value: str | None) -> str:
     normalized = (value or "online").strip().lower()
     if normalized == "disabled":
         return "offline"
-    if normalized not in {"online", "draining", "offline"}:
+    if normalized not in WORKER_STATES:
         return "online"
     return normalized
 
@@ -123,21 +123,9 @@ def _metrics_summary(r, domain: str, worker_id: str, data: dict) -> dict:
         }
 
     latest = samples[-1]
-    mem_values = [
-        float(s.get("memory_rss_mb"))
-        for s in samples
-        if s.get("memory_rss_mb") is not None
-    ]
-    proc_values = [
-        int(s.get("process_count"))
-        for s in samples
-        if s.get("process_count") is not None
-    ]
-    load_values = [
-        float(s.get("load_1m"))
-        for s in samples
-        if s.get("load_1m") is not None
-    ]
+    mem_values = [float(s.get("memory_rss_mb")) for s in samples if s.get("memory_rss_mb") is not None]
+    proc_values = [int(s.get("process_count")) for s in samples if s.get("process_count") is not None]
+    load_values = [float(s.get("load_1m")) for s in samples if s.get("load_1m") is not None]
     return {
         "memory_rss_mb": float(latest.get("memory_rss_mb")) if latest.get("memory_rss_mb") is not None else None,
         "process_count": int(latest.get("process_count")) if latest.get("process_count") is not None else None,
@@ -389,7 +377,7 @@ def set_worker_state(worker_id: str, payload: WorkerStatePayload, request: Reque
     Draining/offline will prevent new dispatches; running jobs continue.
     """
     raw_state = payload.state.lower()
-    if raw_state not in {"online", "draining", "offline", "disabled"}:
+    if raw_state not in WORKER_STATES | {"disabled"}:
         return {"ok": False, "error": "invalid state"}
     state = _normalize_state(raw_state)
     r = get_redis()

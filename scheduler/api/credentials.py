@@ -25,14 +25,16 @@ def list_domain_credentials(request: Request) -> Dict:
     docs = list(db.credentials.find({"domain": domain}))
     refs = []
     for doc in docs:
-        refs.append(CredentialReference(
-            name=doc.get("name", ""),
-            domain=doc.get("domain", domain),
-            credential_type=doc.get("credential_type", "database"),
-            dialect=doc.get("dialect"),
-            created_at=doc.get("created_at"),
-            updated_at=doc.get("updated_at"),
-        ).model_dump())
+        refs.append(
+            CredentialReference(
+                name=doc.get("name", ""),
+                domain=doc.get("domain", domain),
+                credential_type=doc.get("credential_type", "database"),
+                dialect=doc.get("dialect"),
+                created_at=doc.get("created_at"),
+                updated_at=doc.get("updated_at"),
+            ).model_dump()
+        )
     return {"credentials": refs}
 
 
@@ -74,12 +76,14 @@ def update_domain_credential(name: str, payload: CredentialCreate, request: Requ
     now = datetime.now(timezone.utc).isoformat()
     db.credentials.update_one(
         {"name": name, "domain": domain},
-        {"$set": {
-            "credential_type": payload.credential_type,
-            "dialect": payload.dialect,
-            "encrypted_payload": encrypted,
-            "updated_at": now,
-        }},
+        {
+            "$set": {
+                "credential_type": payload.credential_type,
+                "dialect": payload.dialect,
+                "encrypted_payload": encrypted,
+                "updated_at": now,
+            }
+        },
     )
     return {"ok": True, "name": name, "domain": domain}
 

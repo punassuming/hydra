@@ -71,7 +71,7 @@ def test_actions_are_pinned_to_a_version(path):
 @pytest.mark.parametrize("path", WORKFLOWS, ids=ids)
 def test_every_job_declares_permissions_and_only_known_writers_write(path):
     data = load(path)
-    write_allowed = {"push-images.yml", "release-please.yml"}
+    write_allowed = {"push-images.yml", "release-please.yml", "release-wheel.yml"}
     for key, job in data["jobs"].items():
         perms = job.get("permissions") if "permissions" in job else data.get("permissions")
         assert perms is not None, f"{path.name}:{key}: no explicit permissions (defaults to broad token access)"
@@ -98,8 +98,7 @@ def test_repo_paths_referenced_by_run_steps_exist(path):
 def test_every_ci_job_is_classified_for_the_local_runner():
     jobs = set(load(CI_WORKFLOW)["jobs"])
     assert jobs == set(ci_local.JOB_META), (
-        f"update JOB_META in scripts/ci_local.py: missing={jobs - set(ci_local.JOB_META)}, "
-        f"stale={set(ci_local.JOB_META) - jobs}"
+        f"update JOB_META in scripts/ci_local.py: missing={jobs - set(ci_local.JOB_META)}, stale={set(ci_local.JOB_META) - jobs}"
     )
 
 
@@ -134,7 +133,7 @@ def test_e2e_overlay_defines_the_worker_and_compose_services_exist():
     for _key, step, _cwd in run_steps(load(CI_WORKFLOW)):
         for line in re.findall(r"docker compose[^\n]*?\bup\b[^\n]*", step["run"]):
             services = [t for t in line.split() if re.fullmatch(r"[a-z][a-z0-9-]*", t)]
-            names = services[services.index("up") + 1:] if "up" in services else []
+            names = services[services.index("up") + 1 :] if "up" in services else []
             for name in (n for n in names if n not in ("d", "build")):
                 assert name in known, f"compose service '{name}' not defined: {line}"
 
@@ -200,3 +199,41 @@ def test_commitlint_does_not_cap_body_or_footer_line_length():
     text = (ROOT / "commitlint.config.cjs").read_text(encoding="utf-8")
     assert re.search(r'"body-max-line-length"\s*:\s*\[\s*0\s*\]', text)
     assert re.search(r'"footer-max-line-length"\s*:\s*\[\s*0\s*\]', text)
+
+
+# ------------------------------------------------------------------------------------- release plumbing
+
+
+def test_release_tags_have_no_component_prefix_so_the_image_workflow_can_match_them():
+    """With a component prefix release-please tags `hydra-v1.2.3`, which `push-images.yml`'s `v*` filter never matches."""
+    config = json.loads((ROOT / "release-please-config.json").read_text(encoding="utf-8"))
+    assert config["include-component-in-tag"] is False
+    assert all(pkg.get("include-component-in-tag") is False for pkg in config["packages"].values())
+    tags = load(WORKFLOW_DIR / "push-images.yml")[True]["push"]["tags"]  # `on:` parses as the key True in YAML 1.1
+    assert tags == ["v*"]
+
+
+def test_release_artifacts_are_chained_from_release_please_not_only_from_tag_events():
+    """Tags/releases created with the default GITHUB_TOKEN do not trigger workflows, so release-please.yml must call them."""
+    data = load(WORKFLOW_DIR / "release-please.yml")
+    assert (
+        "release_created" in data["jobs"]["release-please"]["outputs"] and "tag_name" in data["jobs"]["release-please"]["outputs"]
+    )
+    for job, workflow in (("publish-images", "push-images.yml"), ("release-wheel", "release-wheel.yml")):
+        spec = data["jobs"][job]
+        assert spec["uses"] == f"./.github/workflows/{workflow}" and spec["needs"] == "release-please"
+        assert "release_created == 'true'" in spec["if"]
+    for workflow in ("push-images.yml", "release-wheel.yml"):
+        assert "workflow_call" in load(WORKFLOW_DIR / workflow)[True]
+
+
+def test_image_workflow_strips_the_leading_v_from_a_called_version():
+    text = (WORKFLOW_DIR / "push-images.yml").read_text(encoding="utf-8")
+    assert 'VALUE="${INPUT_VERSION#v}"' in text and "workflow_call" in text
+
+
+def test_wheel_workflow_only_writes_to_the_release_and_checks_the_package_data():
+    data = load(WORKFLOW_DIR / "release-wheel.yml")
+    assert data["permissions"] == {"contents": "read"}  # write is granted to the single job that uploads
+    text = (WORKFLOW_DIR / "release-wheel.yml").read_text(encoding="utf-8")
+    assert "gh release upload" in text and "hydra_lite/daemon/static/index.html" in text and "uv==0.5.13" in text

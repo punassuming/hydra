@@ -14,6 +14,19 @@ on:
       version:
         description: Immutable image tag (defaults to the pushed tag, or pyproject.toml's version for a manual run)
         required: false
+  # Called by release-please.yml right after it creates a release. Tags created with the default GITHUB_TOKEN do not
+  # trigger the `push: tags` event above (GitHub suppresses workflow runs caused by that token), so the release
+  # workflow invokes this one directly; the tag trigger still covers a PAT/App token (RELEASE_PLEASE_TOKEN).
+  workflow_call:
+    inputs:
+      version:
+        description: Release version, with or without a leading v
+        required: true
+        type: string
+
+concurrency:
+  group: push-images-${{ inputs.version || github.ref_name }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -54,7 +67,7 @@ jobs:
         # workflow_dispatch run not triggered by a tag push.
         run: |
           if [ -n "$INPUT_VERSION" ]; then
-            VALUE="$INPUT_VERSION"
+            VALUE="${INPUT_VERSION#v}"
           elif [[ "$REF_NAME" == v* ]]; then
             VALUE="${REF_NAME#v}"
           else

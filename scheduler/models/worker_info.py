@@ -1,6 +1,9 @@
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field
+
+WorkerState = Literal["online", "draining", "offline"]
+WORKER_STATES: frozenset[str] = frozenset({"online", "draining", "offline"})
 
 
 class WorkerInfo(BaseModel):
