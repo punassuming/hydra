@@ -161,7 +161,7 @@ exit 0
     return log
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX shell shim")
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="systemd backend and POSIX shell shim: Linux only")
 def test_systemd_install_status_restart_and_remove(fake_systemd, capsys):
     assert main(["lite", "service", "install", "--python", "/usr/bin/python3"]) == 0
     unit = systemd_user.unit_path()
@@ -179,7 +179,7 @@ def test_systemd_install_status_restart_and_remove(fake_systemd, capsys):
     assert not unit.exists() and main(["lite", "service", "status"]) == 1
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX shell shim")
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="systemd backend and POSIX shell shim: Linux only")
 def test_systemd_dry_run_and_no_start_and_linger(fake_systemd, capsys):
     assert main(["lite", "service", "install", "--dry-run", "--python", "/usr/bin/python3"]) == 0
     out = capsys.readouterr().out
