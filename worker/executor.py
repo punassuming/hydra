@@ -6,9 +6,9 @@ import time
 from typing import Callable, Dict, Optional, Tuple
 
 from .runtime import (
-    _find_python,
     _get_temp_dir,
     _resolve_shell,
+    _sql_python,
 )
 from .utils.copy import fetch_copy_source
 from .utils.git import fetch_git_source
@@ -110,7 +110,7 @@ def _execute_sql(executor: dict, timeout, merged_env, workdir, _run_cmd, log_cal
     try:
         with os.fdopen(fd, "w") as tmp:
             tmp.write(driver_code)
-        interp = _find_python()
+        interp = _sql_python()
         if not interp:
             return 1, "", "No Python interpreter found to run SQL driver script"
         cmd = [interp, tmp_path]

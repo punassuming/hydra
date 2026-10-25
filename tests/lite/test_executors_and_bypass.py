@@ -84,7 +84,7 @@ def test_sql_job_runs_a_query(client, tmp_path):
         ),
     ).json()
     run = terminal(client, client.post(f"/jobs/{job['_id']}/run", json={}).json()["run_id"])
-    detail = f"{run['status']} rc={run['returncode']} reason={run['completion_reason']!r} stdout={run['stdout']!r} stderr={run['stderr']!r}"
+    detail = f"{run['status']} reason={run['completion_reason']!r} stdout={run['stdout']!r} stderr={run['stderr']!r}"
     assert run["status"] == "success" and '"n": 3' in run["stdout"], detail
 
 
