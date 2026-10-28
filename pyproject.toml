@@ -10,8 +10,8 @@ dependencies = [
     # The lean set: everything the lite edition (and hydra-ctl) needs. `uv tool install .` / `pipx install .` gets
     # only these. The full scheduler/worker images install the `full` extra on top.
     "croniter==6.2.4",
-    "fastapi==0.142.2",
-    "pydantic==2.13.5",
+    "fastapi==0.162.0",
+    "pydantic==2.14.1",
     "PyYAML==6.0.3",
     "uvicorn==0.54.0",
     "tzdata>=2026.5 ; sys_platform == 'win32'",
@@ -25,13 +25,13 @@ sql = [
 # Everything the full (Redis + MongoDB) edition imports: the scheduler API, orchestrator and Python worker.
 full = [
     "cryptography>=50.0.2",
-    "google-genai>=2.28.0",
-    "openai==3.24.0",
-    "pymongo==4.18.2",
+    "google-genai>=2.33.0",
+    "openai==3.37.0",
+    "pymongo==4.19.0",
     "python-dotenv==1.2.4",
     "redis==8.1.0",
     "SQLAlchemy==2.0.36",
-    "sse-starlette==3.5.0",
+    "sse-starlette==3.5.1",
     "uvicorn[standard]==0.54.0",
 ]
 
@@ -49,7 +49,7 @@ include = ["cli*", "scheduler*", "worker*", "hydra_lite*"]
 dev = [
     "httpx",
     "pytest==8.3.5",
-    "ruff==0.16.10",
+    "ruff==0.17.2",
 ]
 
 [tool.ruff]
